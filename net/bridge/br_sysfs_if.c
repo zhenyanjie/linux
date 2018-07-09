@@ -61,6 +61,7 @@ static int store_flag(struct net_bridge_port *p, unsigned long v,
 	if (flags != p->flags) {
 		p->flags = flags;
 		br_port_flags_change(p, mask);
+		br_ifinfo_notify(RTM_NEWLINK, p);
 	}
 	return 0;
 }
@@ -252,10 +253,8 @@ static ssize_t brport_store(struct kobject *kobj,
 			spin_lock_bh(&p->br->lock);
 			ret = brport_attr->store(p, val);
 			spin_unlock_bh(&p->br->lock);
-			if (!ret) {
-				br_ifinfo_notify(RTM_NEWLINK, p);
+			if (ret == 0)
 				ret = count;
-			}
 		}
 		rtnl_unlock();
 	}

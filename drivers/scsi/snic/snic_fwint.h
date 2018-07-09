@@ -414,7 +414,7 @@ enum snic_ev_type {
 /* Payload 88 bytes = 128 - 24 - 16 */
 #define SNIC_HOST_REQ_PAYLOAD	((int)(SNIC_HOST_REQ_LEN -		\
 					sizeof(struct snic_io_hdr) -	\
-					(2 * sizeof(u64)) - sizeof(ulong)))
+					(2 * sizeof(u64))))
 
 /*
  * snic_host_req: host -> firmware request
@@ -448,8 +448,6 @@ struct snic_host_req {
 		/* hba reset */
 		struct snic_hba_reset		reset;
 	} u;
-
-	ulong req_pa;
 }; /* end of snic_host_req structure */
 
 

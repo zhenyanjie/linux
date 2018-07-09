@@ -8,7 +8,7 @@
 /*
  * The xstateregs_active() routine is the same as the regset_fpregs_active() routine,
  * as the "regset->n" for the xstate regset will be updated based on the feature
- * capabilities supported by the xsave.
+ * capabilites supported by the xsave.
  */
 int regset_fpregs_active(struct task_struct *target, const struct user_regset *regset)
 {
@@ -21,10 +21,7 @@ int regset_xregset_fpregs_active(struct task_struct *target, const struct user_r
 {
 	struct fpu *target_fpu = &target->thread.fpu;
 
-	if (boot_cpu_has(X86_FEATURE_FXSR) && target_fpu->fpstate_active)
-		return regset->n;
-	else
-		return 0;
+	return (cpu_has_fxsr && target_fpu->fpstate_active) ? regset->n : 0;
 }
 
 int xfpregs_get(struct task_struct *target, const struct user_regset *regset,
@@ -33,7 +30,7 @@ int xfpregs_get(struct task_struct *target, const struct user_regset *regset,
 {
 	struct fpu *fpu = &target->thread.fpu;
 
-	if (!boot_cpu_has(X86_FEATURE_FXSR))
+	if (!cpu_has_fxsr)
 		return -ENODEV;
 
 	fpu__activate_fpstate_read(fpu);
@@ -50,7 +47,7 @@ int xfpregs_set(struct task_struct *target, const struct user_regset *regset,
 	struct fpu *fpu = &target->thread.fpu;
 	int ret;
 
-	if (!boot_cpu_has(X86_FEATURE_FXSR))
+	if (!cpu_has_fxsr)
 		return -ENODEV;
 
 	fpu__activate_fpstate_write(fpu);
@@ -68,7 +65,7 @@ int xfpregs_set(struct task_struct *target, const struct user_regset *regset,
 	 * update the header bits in the xsave header, indicating the
 	 * presence of FP and SSE state.
 	 */
-	if (boot_cpu_has(X86_FEATURE_XSAVE))
+	if (cpu_has_xsave)
 		fpu->state.xsave.header.xfeatures |= XFEATURE_MASK_FPSSE;
 
 	return ret;
@@ -82,7 +79,7 @@ int xstateregs_get(struct task_struct *target, const struct user_regset *regset,
 	struct xregs_state *xsave;
 	int ret;
 
-	if (!boot_cpu_has(X86_FEATURE_XSAVE))
+	if (!cpu_has_xsave)
 		return -ENODEV;
 
 	fpu__activate_fpstate_read(fpu);
@@ -111,7 +108,7 @@ int xstateregs_set(struct task_struct *target, const struct user_regset *regset,
 	struct xregs_state *xsave;
 	int ret;
 
-	if (!boot_cpu_has(X86_FEATURE_XSAVE))
+	if (!cpu_has_xsave)
 		return -ENODEV;
 
 	fpu__activate_fpstate_write(fpu);
@@ -278,10 +275,10 @@ int fpregs_get(struct task_struct *target, const struct user_regset *regset,
 
 	fpu__activate_fpstate_read(fpu);
 
-	if (!boot_cpu_has(X86_FEATURE_FPU))
+	if (!static_cpu_has(X86_FEATURE_FPU))
 		return fpregs_soft_get(target, regset, pos, count, kbuf, ubuf);
 
-	if (!boot_cpu_has(X86_FEATURE_FXSR))
+	if (!cpu_has_fxsr)
 		return user_regset_copyout(&pos, &count, &kbuf, &ubuf,
 					   &fpu->state.fsave, 0,
 					   -1);
@@ -309,10 +306,10 @@ int fpregs_set(struct task_struct *target, const struct user_regset *regset,
 	fpu__activate_fpstate_write(fpu);
 	fpstate_sanitize_xstate(fpu);
 
-	if (!boot_cpu_has(X86_FEATURE_FPU))
+	if (!static_cpu_has(X86_FEATURE_FPU))
 		return fpregs_soft_set(target, regset, pos, count, kbuf, ubuf);
 
-	if (!boot_cpu_has(X86_FEATURE_FXSR))
+	if (!cpu_has_fxsr)
 		return user_regset_copyin(&pos, &count, &kbuf, &ubuf,
 					  &fpu->state.fsave, 0,
 					  -1);
@@ -328,7 +325,7 @@ int fpregs_set(struct task_struct *target, const struct user_regset *regset,
 	 * update the header bit in the xsave header, indicating the
 	 * presence of FP.
 	 */
-	if (boot_cpu_has(X86_FEATURE_XSAVE))
+	if (cpu_has_xsave)
 		fpu->state.xsave.header.xfeatures |= XFEATURE_MASK_FP;
 	return ret;
 }

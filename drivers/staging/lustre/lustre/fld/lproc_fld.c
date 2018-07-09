@@ -60,8 +60,11 @@ fld_debugfs_targets_seq_show(struct seq_file *m, void *unused)
 	struct lu_client_fld *fld = (struct lu_client_fld *)m->private;
 	struct lu_fld_target *target;
 
+	LASSERT(fld != NULL);
+
 	spin_lock(&fld->lcf_lock);
-	list_for_each_entry(target, &fld->lcf_targets, ft_chain)
+	list_for_each_entry(target,
+				&fld->lcf_targets, ft_chain)
 		seq_printf(m, "%s\n", fld_target_name(target));
 	spin_unlock(&fld->lcf_lock);
 
@@ -72,6 +75,8 @@ static int
 fld_debugfs_hash_seq_show(struct seq_file *m, void *unused)
 {
 	struct lu_client_fld *fld = (struct lu_client_fld *)m->private;
+
+	LASSERT(fld != NULL);
 
 	spin_lock(&fld->lcf_lock);
 	seq_printf(m, "%s\n", fld->lcf_hash->fh_name);
@@ -97,8 +102,9 @@ fld_debugfs_hash_seq_write(struct file *file,
 		return -EFAULT;
 
 	fld = ((struct seq_file *)file->private_data)->private;
+	LASSERT(fld != NULL);
 
-	for (i = 0; fld_hash[i].fh_name; i++) {
+	for (i = 0; fld_hash[i].fh_name != NULL; i++) {
 		if (count != strlen(fld_hash[i].fh_name))
 			continue;
 
@@ -108,7 +114,7 @@ fld_debugfs_hash_seq_write(struct file *file,
 		}
 	}
 
-	if (hash) {
+	if (hash != NULL) {
 		spin_lock(&fld->lcf_lock);
 		fld->lcf_hash = hash;
 		spin_unlock(&fld->lcf_lock);
@@ -125,6 +131,8 @@ fld_debugfs_cache_flush_write(struct file *file, const char __user *buffer,
 			      size_t count, loff_t *pos)
 {
 	struct lu_client_fld *fld = file->private_data;
+
+	LASSERT(fld != NULL);
 
 	fld_cache_flush(fld->lcf_cache);
 

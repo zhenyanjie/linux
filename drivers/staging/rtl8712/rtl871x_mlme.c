@@ -64,7 +64,7 @@ static sint _init_mlme_priv(struct _adapter *padapter)
 	memset(&pmlmepriv->assoc_ssid, 0, sizeof(struct ndis_802_11_ssid));
 	pbuf = kmalloc_array(MAX_BSS_CNT, sizeof(struct wlan_network),
 			     GFP_ATOMIC);
-	if (!pbuf)
+	if (pbuf == NULL)
 		return _FAIL;
 	pmlmepriv->free_bss_buf = pbuf;
 	pnetwork = (struct wlan_network *)pbuf;
@@ -87,15 +87,16 @@ struct wlan_network *_r8712_alloc_network(struct mlme_priv *pmlmepriv)
 	unsigned long irqL;
 	struct wlan_network *pnetwork;
 	struct  __queue *free_queue = &pmlmepriv->free_bss_pool;
+	struct list_head *plist = NULL;
 
+	if (list_empty(&free_queue->queue))
+		return NULL;
 	spin_lock_irqsave(&free_queue->lock, irqL);
-	pnetwork = list_first_entry_or_null(&free_queue->queue,
-					    struct wlan_network, list);
-	if (pnetwork) {
-		list_del_init(&pnetwork->list);
-		pnetwork->last_scanned = jiffies;
-		pmlmepriv->num_of_scanned++;
-	}
+	plist = free_queue->queue.next;
+	pnetwork = LIST_CONTAINOR(plist, struct wlan_network, list);
+	list_del_init(&pnetwork->list);
+	pnetwork->last_scanned = jiffies;
+	pmlmepriv->num_of_scanned++;
 	spin_unlock_irqrestore(&free_queue->lock, irqL);
 	return pnetwork;
 }
@@ -155,7 +156,7 @@ static struct wlan_network *_r8712_find_network(struct  __queue *scanned_queue,
 	phead = &scanned_queue->queue;
 	plist = phead->next;
 	while (plist != phead) {
-		pnetwork = container_of(plist, struct wlan_network, list);
+		pnetwork = LIST_CONTAINOR(plist, struct wlan_network, list);
 		plist = plist->next;
 		if (!memcmp(addr, pnetwork->network.MacAddress, ETH_ALEN))
 			break;
@@ -176,7 +177,7 @@ static void _free_network_queue(struct _adapter *padapter)
 	phead = &scanned_queue->queue;
 	plist = phead->next;
 	while (!end_of_queue_search(phead, plist)) {
-		pnetwork = container_of(plist, struct wlan_network, list);
+		pnetwork = LIST_CONTAINOR(plist, struct wlan_network, list);
 		plist = plist->next;
 		_free_network(pmlmepriv, pnetwork);
 	}
@@ -304,7 +305,7 @@ struct	wlan_network *r8712_get_oldest_wlan_network(
 	while (1) {
 		if (end_of_queue_search(phead, plist) ==  true)
 			break;
-		pwlan = container_of(plist, struct wlan_network, list);
+		pwlan = LIST_CONTAINOR(plist, struct wlan_network, list);
 		if (pwlan->fixed != true) {
 			if (oldest == NULL ||
 			    time_after((unsigned long)oldest->last_scanned,
@@ -390,7 +391,7 @@ static void update_scanned_network(struct _adapter *adapter,
 		if (end_of_queue_search(phead, plist))
 			break;
 
-		pnetwork = container_of(plist, struct wlan_network, list);
+		pnetwork = LIST_CONTAINOR(plist, struct wlan_network, list);
 		if (is_same_network(&pnetwork->network, target))
 			break;
 		if ((oldest == ((struct wlan_network *)0)) ||
@@ -468,7 +469,8 @@ static int is_desired_network(struct _adapter *adapter,
 		    pnetwork->network.IELength, wps_ie,
 		    &wps_ielen))
 			return true;
-		return false;
+		else
+			return false;
 	}
 	if ((psecuritypriv->PrivacyAlgrthm != _NO_PRIVACY_) &&
 		    (pnetwork->network.Privacy == 0))
@@ -1135,8 +1137,8 @@ int r8712_select_and_join_from_scan(struct mlme_priv *pmlmepriv)
 			}
 			return _FAIL;
 		}
-		pnetwork = container_of(pmlmepriv->pscanned,
-					struct wlan_network, list);
+		pnetwork = LIST_CONTAINOR(pmlmepriv->pscanned,
+					  struct wlan_network, list);
 		if (pnetwork == NULL)
 			return _FAIL;
 		pmlmepriv->pscanned = pmlmepriv->pscanned->next;
@@ -1201,11 +1203,11 @@ sint r8712_set_auth(struct _adapter *adapter,
 	struct setauth_parm *psetauthparm;
 
 	pcmd = kmalloc(sizeof(*pcmd), GFP_ATOMIC);
-	if (!pcmd)
+	if (pcmd == NULL)
 		return _FAIL;
 
 	psetauthparm = kzalloc(sizeof(*psetauthparm), GFP_ATOMIC);
-	if (!psetauthparm) {
+	if (psetauthparm == NULL) {
 		kfree(pcmd);
 		return _FAIL;
 	}
@@ -1231,10 +1233,10 @@ sint r8712_set_key(struct _adapter *adapter,
 	sint ret = _SUCCESS;
 
 	pcmd = kmalloc(sizeof(*pcmd), GFP_ATOMIC);
-	if (!pcmd)
+	if (pcmd == NULL)
 		return _FAIL;
 	psetkeyparm = kzalloc(sizeof(*psetkeyparm), GFP_ATOMIC);
-	if (!psetkeyparm) {
+	if (psetkeyparm == NULL) {
 		ret = _FAIL;
 		goto err_free_cmd;
 	}

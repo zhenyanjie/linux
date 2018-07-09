@@ -18,12 +18,11 @@
  * This file is included by linux/mman.h, so we can't use cacl_vm_prot_bits()
  * here.  How important is the optimization?
  */
-static inline unsigned long arch_calc_vm_prot_bits(unsigned long prot,
-		unsigned long pkey)
+static inline unsigned long arch_calc_vm_prot_bits(unsigned long prot)
 {
 	return (prot & PROT_SAO) ? VM_SAO : 0;
 }
-#define arch_calc_vm_prot_bits(prot, pkey) arch_calc_vm_prot_bits(prot, pkey)
+#define arch_calc_vm_prot_bits(prot) arch_calc_vm_prot_bits(prot)
 
 static inline pgprot_t arch_vm_get_page_prot(unsigned long vm_flags)
 {

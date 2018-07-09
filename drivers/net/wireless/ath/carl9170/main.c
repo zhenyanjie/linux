@@ -1413,12 +1413,10 @@ static void carl9170_ampdu_work(struct work_struct *work)
 
 static int carl9170_op_ampdu_action(struct ieee80211_hw *hw,
 				    struct ieee80211_vif *vif,
-				    struct ieee80211_ampdu_params *params)
+				    enum ieee80211_ampdu_mlme_action action,
+				    struct ieee80211_sta *sta,
+				    u16 tid, u16 *ssn, u8 buf_size, bool amsdu)
 {
-	struct ieee80211_sta *sta = params->sta;
-	enum ieee80211_ampdu_mlme_action action = params->action;
-	u16 tid = params->tid;
-	u16 *ssn = &params->ssn;
 	struct ar9170 *ar = hw->priv;
 	struct carl9170_sta_info *sta_info = (void *) sta->drv_priv;
 	struct carl9170_sta_tid *tid_info;
@@ -1666,7 +1664,7 @@ static int carl9170_op_get_survey(struct ieee80211_hw *hw, int idx,
 			return err;
 	}
 
-	for (b = 0; b < NUM_NL80211_BANDS; b++) {
+	for (b = 0; b < IEEE80211_NUM_BANDS; b++) {
 		band = ar->hw->wiphy->bands[b];
 
 		if (!band)
@@ -1941,13 +1939,13 @@ static int carl9170_parse_eeprom(struct ar9170 *ar)
 	}
 
 	if (ar->eeprom.operating_flags & AR9170_OPFLAG_2GHZ) {
-		ar->hw->wiphy->bands[NL80211_BAND_2GHZ] =
+		ar->hw->wiphy->bands[IEEE80211_BAND_2GHZ] =
 			&carl9170_band_2GHz;
 		chans += carl9170_band_2GHz.n_channels;
 		bands++;
 	}
 	if (ar->eeprom.operating_flags & AR9170_OPFLAG_5GHZ) {
-		ar->hw->wiphy->bands[NL80211_BAND_5GHZ] =
+		ar->hw->wiphy->bands[IEEE80211_BAND_5GHZ] =
 			&carl9170_band_5GHz;
 		chans += carl9170_band_5GHz.n_channels;
 		bands++;

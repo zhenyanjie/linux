@@ -736,7 +736,6 @@ static int s5pcsis_parse_dt(struct platform_device *pdev,
 {
 	struct device_node *node = pdev->dev.of_node;
 	struct v4l2_of_endpoint endpoint;
-	int ret;
 
 	if (of_property_read_u32(node, "clock-frequency",
 				 &state->clk_frequency))
@@ -752,15 +751,11 @@ static int s5pcsis_parse_dt(struct platform_device *pdev,
 		return -EINVAL;
 	}
 	/* Get port node and validate MIPI-CSI channel id. */
-	ret = v4l2_of_parse_endpoint(node, &endpoint);
-	if (ret)
-		goto err;
+	v4l2_of_parse_endpoint(node, &endpoint);
 
 	state->index = endpoint.base.port - FIMC_INPUT_MIPI_CSI2_0;
-	if (state->index >= CSIS_MAX_ENTITIES) {
-		ret = -ENXIO;
-		goto err;
-	}
+	if (state->index >= CSIS_MAX_ENTITIES)
+		return -ENXIO;
 
 	/* Get MIPI CSI-2 bus configration from the endpoint node. */
 	of_property_read_u32(node, "samsung,csis-hs-settle",
@@ -769,10 +764,9 @@ static int s5pcsis_parse_dt(struct platform_device *pdev,
 					"samsung,csis-wclk");
 
 	state->num_lanes = endpoint.bus.mipi_csi2.num_data_lanes;
-
-err:
 	of_node_put(node);
-	return ret;
+
+	return 0;
 }
 
 static int s5pcsis_pm_resume(struct device *dev, bool runtime);

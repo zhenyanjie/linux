@@ -23,7 +23,6 @@
 #include <linux/slab.h>
 #include <linux/of.h>
 #include <linux/gpio.h>
-#include <linux/idr.h>
 
 #define MII_REGS_NUM 29
 
@@ -256,8 +255,7 @@ int fixed_phy_add(unsigned int irq, int phy_addr,
 
 	memset(fp->regs, 0xFF,  sizeof(fp->regs[0]) * MII_REGS_NUM);
 
-	if (irq != PHY_POLL)
-		fmb->mii_bus->irq[phy_addr] = irq;
+	fmb->mii_bus->irq[phy_addr] = irq;
 
 	fp->addr = phy_addr;
 	fp->status = *status;
@@ -287,9 +285,7 @@ err_regs:
 }
 EXPORT_SYMBOL_GPL(fixed_phy_add);
 
-static DEFINE_IDA(phy_fixed_ida);
-
-static void fixed_phy_del(int phy_addr)
+void fixed_phy_del(int phy_addr)
 {
 	struct fixed_mdio_bus *fmb = &platform_fmb;
 	struct fixed_phy *fp, *tmp;
@@ -300,11 +296,14 @@ static void fixed_phy_del(int phy_addr)
 			if (gpio_is_valid(fp->link_gpio))
 				gpio_free(fp->link_gpio);
 			kfree(fp);
-			ida_simple_remove(&phy_fixed_ida, phy_addr);
 			return;
 		}
 	}
 }
+EXPORT_SYMBOL_GPL(fixed_phy_del);
+
+static int phy_fixed_addr;
+static DEFINE_SPINLOCK(phy_fixed_addr_lock);
 
 struct phy_device *fixed_phy_register(unsigned int irq,
 				      struct fixed_phy_status *status,
@@ -316,22 +315,21 @@ struct phy_device *fixed_phy_register(unsigned int irq,
 	int phy_addr;
 	int ret;
 
-	if (!fmb->mii_bus || fmb->mii_bus->state != MDIOBUS_REGISTERED)
-		return ERR_PTR(-EPROBE_DEFER);
-
 	/* Get the next available PHY address, up to PHY_MAX_ADDR */
-	phy_addr = ida_simple_get(&phy_fixed_ida, 0, PHY_MAX_ADDR, GFP_KERNEL);
-	if (phy_addr < 0)
-		return ERR_PTR(phy_addr);
+	spin_lock(&phy_fixed_addr_lock);
+	if (phy_fixed_addr == PHY_MAX_ADDR) {
+		spin_unlock(&phy_fixed_addr_lock);
+		return ERR_PTR(-ENOSPC);
+	}
+	phy_addr = phy_fixed_addr++;
+	spin_unlock(&phy_fixed_addr_lock);
 
 	ret = fixed_phy_add(irq, phy_addr, status, link_gpio);
-	if (ret < 0) {
-		ida_simple_remove(&phy_fixed_ida, phy_addr);
+	if (ret < 0)
 		return ERR_PTR(ret);
-	}
 
 	phy = get_phy_device(fmb->mii_bus, phy_addr, false);
-	if (IS_ERR(phy)) {
+	if (!phy || IS_ERR(phy)) {
 		fixed_phy_del(phy_addr);
 		return ERR_PTR(-EINVAL);
 	}
@@ -372,14 +370,6 @@ struct phy_device *fixed_phy_register(unsigned int irq,
 	return phy;
 }
 EXPORT_SYMBOL_GPL(fixed_phy_register);
-
-void fixed_phy_unregister(struct phy_device *phy)
-{
-	phy_device_remove(phy);
-
-	fixed_phy_del(phy->mdio.addr);
-}
-EXPORT_SYMBOL_GPL(fixed_phy_unregister);
 
 static int __init fixed_mdio_bus_init(void)
 {
@@ -433,7 +423,6 @@ static void __exit fixed_mdio_bus_exit(void)
 		list_del(&fp->node);
 		kfree(fp);
 	}
-	ida_destroy(&phy_fixed_ida);
 }
 module_exit(fixed_mdio_bus_exit);
 

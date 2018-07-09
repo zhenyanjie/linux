@@ -65,7 +65,7 @@ void class_handle_hash(struct portals_handle *h,
 {
 	struct handle_bucket *bucket;
 
-	LASSERT(h);
+	LASSERT(h != NULL);
 	LASSERT(list_empty(&h->h_link));
 
 	/*
@@ -140,11 +140,10 @@ void *class_handle2object(__u64 cookie)
 	struct portals_handle *h;
 	void *retval = NULL;
 
-	LASSERT(handle_hash);
+	LASSERT(handle_hash != NULL);
 
 	/* Be careful when you want to change this code. See the
-	 * rcu_read_lock() definition on top this file. - jxiong
-	 */
+	 * rcu_read_lock() definition on top this file. - jxiong */
 	bucket = handle_hash + (cookie & HANDLE_HASH_MASK);
 
 	rcu_read_lock();
@@ -171,7 +170,7 @@ void class_handle_free_cb(struct rcu_head *rcu)
 	struct portals_handle *h = RCU2HANDLE(rcu);
 	void *ptr = (void *)(unsigned long)h->h_cookie;
 
-	if (h->h_ops->hop_free)
+	if (h->h_ops->hop_free != NULL)
 		h->h_ops->hop_free(ptr, h->h_size);
 	else
 		kfree(ptr);
@@ -184,11 +183,11 @@ int class_handle_init(void)
 	struct timespec64 ts;
 	int seed[2];
 
-	LASSERT(!handle_hash);
+	LASSERT(handle_hash == NULL);
 
 	handle_hash = libcfs_kvzalloc(sizeof(*bucket) * HANDLE_HASH_SIZE,
 				      GFP_NOFS);
-	if (!handle_hash)
+	if (handle_hash == NULL)
 		return -ENOMEM;
 
 	spin_lock_init(&handle_base_lock);
@@ -235,7 +234,7 @@ void class_handle_cleanup(void)
 {
 	int count;
 
-	LASSERT(handle_hash);
+	LASSERT(handle_hash != NULL);
 
 	count = cleanup_all_handles();
 

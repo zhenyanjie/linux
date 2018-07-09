@@ -226,8 +226,7 @@ int mlx5_free_uuars(struct mlx5_core_dev *dev, struct mlx5_uuar_info *uuari)
 	return 0;
 }
 
-int mlx5_alloc_map_uar(struct mlx5_core_dev *mdev, struct mlx5_uar *uar,
-		       bool map_wc)
+int mlx5_alloc_map_uar(struct mlx5_core_dev *mdev, struct mlx5_uar *uar)
 {
 	phys_addr_t pfn;
 	phys_addr_t uar_bar_start;
@@ -241,26 +240,20 @@ int mlx5_alloc_map_uar(struct mlx5_core_dev *mdev, struct mlx5_uar *uar,
 
 	uar_bar_start = pci_resource_start(mdev->pdev, 0);
 	pfn           = (uar_bar_start >> PAGE_SHIFT) + uar->index;
-
-	if (map_wc) {
-		uar->bf_map = ioremap_wc(pfn << PAGE_SHIFT, PAGE_SIZE);
-		if (!uar->bf_map) {
-			mlx5_core_warn(mdev, "ioremap_wc() failed\n");
-			uar->map = ioremap(pfn << PAGE_SHIFT, PAGE_SIZE);
-			if (!uar->map)
-				goto err_free_uar;
-		}
-	} else {
-		uar->map = ioremap(pfn << PAGE_SHIFT, PAGE_SIZE);
-		if (!uar->map)
-			goto err_free_uar;
+	uar->map      = ioremap(pfn << PAGE_SHIFT, PAGE_SIZE);
+	if (!uar->map) {
+		mlx5_core_warn(mdev, "ioremap() failed, %d\n", err);
+		err = -ENOMEM;
+		goto err_free_uar;
 	}
+
+	if (mdev->priv.bf_mapping)
+		uar->bf_map = io_mapping_map_wc(mdev->priv.bf_mapping,
+						uar->index << PAGE_SHIFT);
 
 	return 0;
 
 err_free_uar:
-	mlx5_core_warn(mdev, "ioremap() failed\n");
-	err = -ENOMEM;
 	mlx5_cmd_free_uar(mdev, uar->index);
 
 	return err;
@@ -269,10 +262,8 @@ EXPORT_SYMBOL(mlx5_alloc_map_uar);
 
 void mlx5_unmap_free_uar(struct mlx5_core_dev *mdev, struct mlx5_uar *uar)
 {
-	if (uar->map)
-		iounmap(uar->map);
-	else
-		iounmap(uar->bf_map);
+	io_mapping_unmap(uar->bf_map);
+	iounmap(uar->map);
 	mlx5_cmd_free_uar(mdev, uar->index);
 }
 EXPORT_SYMBOL(mlx5_unmap_free_uar);

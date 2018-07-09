@@ -41,7 +41,7 @@
 			label = "BP1";
 			gpios = <&gpio3 31 GPIO_ACTIVE_LOW>;
 			linux,code = <256>;
-			wakeup-source;
+			gpio-key,wakeup;
 			linux,input-type = <1>;
 		};
 	};

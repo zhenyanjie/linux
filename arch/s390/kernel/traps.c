@@ -22,6 +22,8 @@
 #include <asm/fpu/api.h>
 #include "entry.h"
 
+int show_unhandled_signals = 1;
+
 static inline void __user *get_trap_ip(struct pt_regs *regs)
 {
 	unsigned long address;
@@ -31,6 +33,21 @@ static inline void __user *get_trap_ip(struct pt_regs *regs)
 	else
 		address = regs->psw.addr;
 	return (void __user *) (address - (regs->int_code >> 16));
+}
+
+static inline void report_user_fault(struct pt_regs *regs, int signr)
+{
+	if ((task_pid_nr(current) > 1) && !show_unhandled_signals)
+		return;
+	if (!unhandled_signal(current, signr))
+		return;
+	if (!printk_ratelimit())
+		return;
+	printk("User process fault: interruption code %04x ilc:%d ",
+	       regs->int_code & 0xffff, regs->int_code >> 17);
+	print_vma_addr("in ", regs->psw.addr);
+	printk("\n");
+	show_regs(regs);
 }
 
 int is_valid_bugaddr(unsigned long addr)
@@ -48,7 +65,7 @@ void do_report_trap(struct pt_regs *regs, int si_signo, int si_code, char *str)
 		info.si_code = si_code;
 		info.si_addr = get_trap_ip(regs);
 		force_sig_info(si_signo, &info, current);
-		report_user_fault(regs, si_signo, 0);
+		report_user_fault(regs, si_signo);
         } else {
                 const struct exception_table_entry *fixup;
 		fixup = search_exception_tables(regs->psw.addr);
@@ -94,7 +111,7 @@ NOKPROBE_SYMBOL(do_per_trap);
 void default_trap_handler(struct pt_regs *regs)
 {
 	if (user_mode(regs)) {
-		report_user_fault(regs, SIGSEGV, 0);
+		report_user_fault(regs, SIGSEGV);
 		do_exit(SIGSEGV);
 	} else
 		die(regs, "Unknown program exception");

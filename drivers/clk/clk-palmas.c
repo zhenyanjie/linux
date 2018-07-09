@@ -44,7 +44,7 @@ struct palmas_clock_info {
 	struct clk *clk;
 	struct clk_hw hw;
 	struct palmas *palmas;
-	const struct palmas_clk32k_desc *clk_desc;
+	struct palmas_clk32k_desc *clk_desc;
 	int ext_control_pin;
 };
 
@@ -125,14 +125,14 @@ static struct clk_ops palmas_clks_ops = {
 
 struct palmas_clks_of_match_data {
 	struct clk_init_data init;
-	const struct palmas_clk32k_desc desc;
+	struct palmas_clk32k_desc desc;
 };
 
-static const struct palmas_clks_of_match_data palmas_of_clk32kg = {
+static struct palmas_clks_of_match_data palmas_of_clk32kg = {
 	.init = {
 		.name = "clk32kg",
 		.ops = &palmas_clks_ops,
-		.flags = CLK_IGNORE_UNUSED,
+		.flags = CLK_IS_ROOT | CLK_IGNORE_UNUSED,
 	},
 	.desc = {
 		.clk_name = "clk32kg",
@@ -144,11 +144,11 @@ static const struct palmas_clks_of_match_data palmas_of_clk32kg = {
 	},
 };
 
-static const struct palmas_clks_of_match_data palmas_of_clk32kgaudio = {
+static struct palmas_clks_of_match_data palmas_of_clk32kgaudio = {
 	.init = {
 		.name = "clk32kgaudio",
 		.ops = &palmas_clks_ops,
-		.flags = CLK_IGNORE_UNUSED,
+		.flags = CLK_IS_ROOT | CLK_IGNORE_UNUSED,
 	},
 	.desc = {
 		.clk_name = "clk32kgaudio",
@@ -240,14 +240,14 @@ static int palmas_clks_probe(struct platform_device *pdev)
 {
 	struct palmas *palmas = dev_get_drvdata(pdev->dev.parent);
 	struct device_node *node = pdev->dev.of_node;
-	const struct palmas_clks_of_match_data *match_data;
+	struct palmas_clks_of_match_data *match_data;
+	const struct of_device_id *match;
 	struct palmas_clock_info *cinfo;
 	struct clk *clk;
 	int ret;
 
-	match_data = of_device_get_match_data(&pdev->dev);
-	if (!match_data)
-		return 1;
+	match = of_match_device(palmas_clks_of_match, &pdev->dev);
+	match_data = (struct palmas_clks_of_match_data *)match->data;
 
 	cinfo = devm_kzalloc(&pdev->dev, sizeof(*cinfo), GFP_KERNEL);
 	if (!cinfo)

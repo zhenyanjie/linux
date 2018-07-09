@@ -184,7 +184,7 @@ struct brcmf_sdio_dev {
 	struct brcmf_sdio *bus;
 	struct device *dev;
 	struct brcmf_bus *bus_if;
-	struct brcmf_mp_device *settings;
+	struct brcmfmac_sdio_platform_data *pdata;
 	bool oob_irq_requested;
 	bool irq_en;			/* irq enable flags */
 	spinlock_t irq_en_lock;

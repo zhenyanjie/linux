@@ -1182,10 +1182,10 @@ const struct inode_operations ubifs_dir_inode_operations = {
 	.rename      = ubifs_rename,
 	.setattr     = ubifs_setattr,
 	.getattr     = ubifs_getattr,
-	.setxattr    = generic_setxattr,
-	.getxattr    = generic_getxattr,
+	.setxattr    = ubifs_setxattr,
+	.getxattr    = ubifs_getxattr,
 	.listxattr   = ubifs_listxattr,
-	.removexattr = generic_removexattr,
+	.removexattr = ubifs_removexattr,
 #ifdef CONFIG_UBIFS_ATIME_SUPPORT
 	.update_time = ubifs_update_time,
 #endif
@@ -1195,7 +1195,7 @@ const struct file_operations ubifs_dir_operations = {
 	.llseek         = generic_file_llseek,
 	.release        = ubifs_dir_release,
 	.read           = generic_read_dir,
-	.iterate_shared = ubifs_readdir,
+	.iterate        = ubifs_readdir,
 	.fsync          = ubifs_fsync,
 	.unlocked_ioctl = ubifs_ioctl,
 #ifdef CONFIG_COMPAT

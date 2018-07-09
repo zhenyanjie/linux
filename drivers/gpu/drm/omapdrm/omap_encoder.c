@@ -139,16 +139,11 @@ static void omap_encoder_enable(struct drm_encoder *encoder)
 	struct omap_encoder *omap_encoder = to_omap_encoder(encoder);
 	struct omap_dss_device *dssdev = omap_encoder->dssdev;
 	struct omap_dss_driver *dssdrv = dssdev->driver;
-	int r;
 
 	omap_encoder_update(encoder, omap_crtc_channel(encoder->crtc),
 			    omap_crtc_timings(encoder->crtc));
 
-	r = dssdrv->enable(dssdev);
-	if (r)
-		dev_err(encoder->dev->dev,
-			"Failed to enable display '%s': %d\n",
-			dssdev->name, r);
+	dssdrv->enable(dssdev);
 }
 
 static int omap_encoder_atomic_check(struct drm_encoder *encoder,

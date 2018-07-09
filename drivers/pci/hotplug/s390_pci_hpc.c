@@ -93,17 +93,13 @@ out_deconfigure:
 static int disable_slot(struct hotplug_slot *hotplug_slot)
 {
 	struct slot *slot = hotplug_slot->private;
-	struct pci_dev *pdev;
 	int rc;
 
 	if (!zpci_fn_configured(slot->zdev->state))
 		return -EIO;
 
-	pdev = pci_get_slot(slot->zdev->bus, ZPCI_DEVFN);
-	if (pdev) {
-		pci_stop_and_remove_bus_device_locked(pdev);
-		pci_dev_put(pdev);
-	}
+	if (slot->zdev->pdev)
+		pci_stop_and_remove_bus_device_locked(slot->zdev->pdev);
 
 	rc = zpci_disable_device(slot->zdev);
 	if (rc)

@@ -37,7 +37,6 @@
 #define G82_CHANNEL_GPFIFO                            /* cl826f.h */ 0x0000826f
 #define FERMI_CHANNEL_GPFIFO                          /* cl906f.h */ 0x0000906f
 #define KEPLER_CHANNEL_GPFIFO_A                       /* cla06f.h */ 0x0000a06f
-#define KEPLER_CHANNEL_GPFIFO_B                       /* cla06f.h */ 0x0000a16f
 #define MAXWELL_CHANNEL_GPFIFO_A                      /* cla06f.h */ 0x0000b06f
 
 #define NV50_DISP                                     /* cl5070.h */ 0x00005070
@@ -49,7 +48,7 @@
 #define GK104_DISP                                    /* cl5070.h */ 0x00009170
 #define GK110_DISP                                    /* cl5070.h */ 0x00009270
 #define GM107_DISP                                    /* cl5070.h */ 0x00009470
-#define GM200_DISP                                    /* cl5070.h */ 0x00009570
+#define GM204_DISP                                    /* cl5070.h */ 0x00009570
 
 #define NV31_MPEG                                                    0x00003174
 #define G82_MPEG                                                     0x00008274
@@ -85,7 +84,7 @@
 #define GK104_DISP_CORE_CHANNEL_DMA                   /* cl507d.h */ 0x0000917d
 #define GK110_DISP_CORE_CHANNEL_DMA                   /* cl507d.h */ 0x0000927d
 #define GM107_DISP_CORE_CHANNEL_DMA                   /* cl507d.h */ 0x0000947d
-#define GM200_DISP_CORE_CHANNEL_DMA                   /* cl507d.h */ 0x0000957d
+#define GM204_DISP_CORE_CHANNEL_DMA                   /* cl507d.h */ 0x0000957d
 
 #define NV50_DISP_OVERLAY_CHANNEL_DMA                 /* cl507e.h */ 0x0000507e
 #define G82_DISP_OVERLAY_CHANNEL_DMA                  /* cl507e.h */ 0x0000827e

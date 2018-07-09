@@ -191,7 +191,7 @@ static inline void writeq(u64 value, volatile void __iomem *addr)
 #define readl_relaxed readl
 #endif
 
-#if defined(readq) && !defined(readq_relaxed)
+#ifndef readq_relaxed
 #define readq_relaxed readq
 #endif
 
@@ -207,7 +207,7 @@ static inline void writeq(u64 value, volatile void __iomem *addr)
 #define writel_relaxed writel
 #endif
 
-#if defined(writeq) && !defined(writeq_relaxed)
+#ifndef writeq_relaxed
 #define writeq_relaxed writeq
 #endif
 

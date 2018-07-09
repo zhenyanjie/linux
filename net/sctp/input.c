@@ -84,7 +84,7 @@ static inline int sctp_rcv_checksum(struct net *net, struct sk_buff *skb)
 
 	if (val != cmp) {
 		/* CRC failure, dump it. */
-		__SCTP_INC_STATS(net, SCTP_MIB_CHECKSUMERRORS);
+		SCTP_INC_STATS_BH(net, SCTP_MIB_CHECKSUMERRORS);
 		return -1;
 	}
 	return 0;
@@ -112,6 +112,7 @@ int sctp_rcv(struct sk_buff *skb)
 	struct sctp_ep_common *rcvr;
 	struct sctp_transport *transport = NULL;
 	struct sctp_chunk *chunk;
+	struct sctphdr *sh;
 	union sctp_addr src;
 	union sctp_addr dest;
 	int family;
@@ -121,10 +122,12 @@ int sctp_rcv(struct sk_buff *skb)
 	if (skb->pkt_type != PACKET_HOST)
 		goto discard_it;
 
-	__SCTP_INC_STATS(net, SCTP_MIB_INSCTPPACKS);
+	SCTP_INC_STATS_BH(net, SCTP_MIB_INSCTPPACKS);
 
 	if (skb_linearize(skb))
 		goto discard_it;
+
+	sh = sctp_hdr(skb);
 
 	/* Pull up the IP and SCTP headers. */
 	__skb_pull(skb, skb_transport_offset(skb));
@@ -205,7 +208,7 @@ int sctp_rcv(struct sk_buff *skb)
 	 */
 	if (!asoc) {
 		if (sctp_rcv_ootb(skb)) {
-			__SCTP_INC_STATS(net, SCTP_MIB_OUTOFBLUES);
+			SCTP_INC_STATS_BH(net, SCTP_MIB_OUTOFBLUES);
 			goto discard_release;
 		}
 	}
@@ -218,7 +221,7 @@ int sctp_rcv(struct sk_buff *skb)
 		goto discard_release;
 
 	/* Create an SCTP packet structure. */
-	chunk = sctp_chunkify(skb, asoc, sk, GFP_ATOMIC);
+	chunk = sctp_chunkify(skb, asoc, sk);
 	if (!chunk)
 		goto discard_release;
 	SCTP_INPUT_CB(skb)->chunk = chunk;
@@ -227,7 +230,7 @@ int sctp_rcv(struct sk_buff *skb)
 	chunk->rcvr = rcvr;
 
 	/* Remember the SCTP header. */
-	chunk->sctp_hdr = sctp_hdr(skb);
+	chunk->sctp_hdr = sh;
 
 	/* Set the source and destination addresses of the incoming chunk.  */
 	sctp_init_addrs(chunk, &src, &dest);
@@ -261,9 +264,9 @@ int sctp_rcv(struct sk_buff *skb)
 			skb = NULL; /* sctp_chunk_free already freed the skb */
 			goto discard_release;
 		}
-		__SCTP_INC_STATS(net, SCTP_MIB_IN_PKT_BACKLOG);
+		SCTP_INC_STATS_BH(net, SCTP_MIB_IN_PKT_BACKLOG);
 	} else {
-		__SCTP_INC_STATS(net, SCTP_MIB_IN_PKT_SOFTIRQ);
+		SCTP_INC_STATS_BH(net, SCTP_MIB_IN_PKT_SOFTIRQ);
 		sctp_inq_push(&chunk->rcvr->inqueue, chunk);
 	}
 
@@ -278,7 +281,7 @@ int sctp_rcv(struct sk_buff *skb)
 	return 0;
 
 discard_it:
-	__SCTP_INC_STATS(net, SCTP_MIB_IN_PKT_DISCARDS);
+	SCTP_INC_STATS_BH(net, SCTP_MIB_IN_PKT_DISCARDS);
 	kfree_skb(skb);
 	return 0;
 
@@ -328,7 +331,6 @@ int sctp_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 		 */
 
 		sk = rcvr->sk;
-		local_bh_disable();
 		bh_lock_sock(sk);
 
 		if (sock_owned_by_user(sk)) {
@@ -340,7 +342,6 @@ int sctp_backlog_rcv(struct sock *sk, struct sk_buff *skb)
 			sctp_inq_push(inqueue, chunk);
 
 		bh_unlock_sock(sk);
-		local_bh_enable();
 
 		/* If the chunk was backloged again, don't drop refs */
 		if (backloged)
@@ -531,7 +532,7 @@ struct sock *sctp_err_lookup(struct net *net, int family, struct sk_buff *skb,
 	 * servers this needs to be solved differently.
 	 */
 	if (sock_owned_by_user(sk))
-		__NET_INC_STATS(net, LINUX_MIB_LOCKDROPPEDICMPS);
+		NET_INC_STATS_BH(net, LINUX_MIB_LOCKDROPPEDICMPS);
 
 	*app = asoc;
 	*tpp = transport;
@@ -588,7 +589,7 @@ void sctp_v4_err(struct sk_buff *skb, __u32 info)
 	skb->network_header = saveip;
 	skb->transport_header = savesctp;
 	if (!sk) {
-		__ICMP_INC_STATS(net, ICMP_MIB_INERRORS);
+		ICMP_INC_STATS_BH(net, ICMP_MIB_INERRORS);
 		return;
 	}
 	/* Warning:  The sock lock is held.  Remember to call
@@ -605,8 +606,7 @@ void sctp_v4_err(struct sk_buff *skb, __u32 info)
 
 		/* PMTU discovery (RFC1191) */
 		if (ICMP_FRAG_NEEDED == code) {
-			sctp_icmp_frag_needed(sk, asoc, transport,
-					      WORD_TRUNC(info));
+			sctp_icmp_frag_needed(sk, asoc, transport, info);
 			goto out_unlock;
 		} else {
 			if (ICMP_PROT_UNREACH == code) {
@@ -937,6 +937,7 @@ static struct sctp_association *__sctp_lookup_association(
 	struct sctp_transport *t;
 	struct sctp_association *asoc = NULL;
 
+	rcu_read_lock();
 	t = sctp_addrs_lookup_transport(net, local, peer);
 	if (!t || !sctp_transport_hold(t))
 		goto out;
@@ -948,6 +949,7 @@ static struct sctp_association *__sctp_lookup_association(
 	sctp_transport_put(t);
 
 out:
+	rcu_read_unlock();
 	return asoc;
 }
 
@@ -960,9 +962,7 @@ struct sctp_association *sctp_lookup_association(struct net *net,
 {
 	struct sctp_association *asoc;
 
-	rcu_read_lock();
 	asoc = __sctp_lookup_association(net, laddr, paddr, transportp);
-	rcu_read_unlock();
 
 	return asoc;
 }

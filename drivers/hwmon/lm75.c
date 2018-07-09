@@ -77,6 +77,7 @@ static const u8 LM75_REG_TEMP[3] = {
 struct lm75_data {
 	struct i2c_client	*client;
 	struct device		*hwmon_dev;
+	struct thermal_zone_device	*tz;
 	struct mutex		update_lock;
 	u8			orig_conf;
 	u8			resolution;	/* In bits, between 9 and 12 */
@@ -305,9 +306,11 @@ lm75_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	if (IS_ERR(data->hwmon_dev))
 		return PTR_ERR(data->hwmon_dev);
 
-	devm_thermal_zone_of_sensor_register(data->hwmon_dev, 0,
-					     data->hwmon_dev,
-					     &lm75_of_thermal_ops);
+	data->tz = thermal_zone_of_sensor_register(data->hwmon_dev, 0,
+						   data->hwmon_dev,
+						   &lm75_of_thermal_ops);
+	if (IS_ERR(data->tz))
+		data->tz = NULL;
 
 	dev_info(dev, "%s: sensor '%s'\n",
 		 dev_name(data->hwmon_dev), client->name);
@@ -319,6 +322,7 @@ static int lm75_remove(struct i2c_client *client)
 {
 	struct lm75_data *data = i2c_get_clientdata(client);
 
+	thermal_zone_of_sensor_unregister(data->hwmon_dev, data->tz);
 	hwmon_device_unregister(data->hwmon_dev);
 	lm75_write_value(client, LM75_REG_CONF, data->orig_conf);
 	return 0;

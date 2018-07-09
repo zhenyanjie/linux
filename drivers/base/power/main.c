@@ -1557,6 +1557,7 @@ int dpm_suspend(pm_message_t state)
 static int device_prepare(struct device *dev, pm_message_t state)
 {
 	int (*callback)(struct device *) = NULL;
+	char *info = NULL;
 	int ret = 0;
 
 	if (dev->power.syscore)
@@ -1579,17 +1580,24 @@ static int device_prepare(struct device *dev, pm_message_t state)
 		goto unlock;
 	}
 
-	if (dev->pm_domain)
+	if (dev->pm_domain) {
+		info = "preparing power domain ";
 		callback = dev->pm_domain->ops.prepare;
-	else if (dev->type && dev->type->pm)
+	} else if (dev->type && dev->type->pm) {
+		info = "preparing type ";
 		callback = dev->type->pm->prepare;
-	else if (dev->class && dev->class->pm)
+	} else if (dev->class && dev->class->pm) {
+		info = "preparing class ";
 		callback = dev->class->pm->prepare;
-	else if (dev->bus && dev->bus->pm)
+	} else if (dev->bus && dev->bus->pm) {
+		info = "preparing bus ";
 		callback = dev->bus->pm->prepare;
+	}
 
-	if (!callback && dev->driver && dev->driver->pm)
+	if (!callback && dev->driver && dev->driver->pm) {
+		info = "preparing driver ";
 		callback = dev->driver->pm->prepare;
+	}
 
 	if (callback)
 		ret = callback(dev);

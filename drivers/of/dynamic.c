@@ -55,7 +55,7 @@ void __of_detach_node_sysfs(struct device_node *np)
 	/* only remove properties if on sysfs */
 	if (of_node_is_attached(np)) {
 		for_each_property_of_node(np, pp)
-			__of_sysfs_remove_bin_file(np, pp);
+			sysfs_remove_bin_file(&np->kobj, &pp->attr);
 		kobject_del(&np->kobj);
 	}
 
@@ -311,7 +311,6 @@ int of_detach_node(struct device_node *np)
 
 	return rc;
 }
-EXPORT_SYMBOL_GPL(of_detach_node);
 
 /**
  * of_node_release() - release a dynamically allocated node
@@ -498,11 +497,6 @@ static void __of_changeset_entry_invert(struct of_changeset_entry *ce,
 	case OF_RECONFIG_UPDATE_PROPERTY:
 		rce->old_prop = ce->prop;
 		rce->prop = ce->old_prop;
-		/* update was used but original property did not exist */
-		if (!rce->prop) {
-			rce->action = OF_RECONFIG_REMOVE_PROPERTY;
-			rce->prop = ce->prop;
-		}
 		break;
 	}
 }

@@ -1642,8 +1642,7 @@ static int dvb_register(struct cx8802_dev *dev)
 
 	/* register everything */
 	res = vb2_dvb_register_bus(&dev->frontends, THIS_MODULE, dev,
-				   &dev->pci->dev, NULL, adapter_nr,
-				   mfe_shared);
+		&dev->pci->dev, adapter_nr, mfe_shared);
 	if (res)
 		goto frontend_detach;
 	return res;

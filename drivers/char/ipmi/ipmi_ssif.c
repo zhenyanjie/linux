@@ -920,18 +920,23 @@ static void msg_written_handler(struct ssif_info *ssif_info, int result,
 			msg_done_handler(ssif_info, -EIO, NULL, 0);
 		}
 	} else {
-		/* Ready to request the result. */
 		unsigned long oflags, *flags;
+		bool got_alert;
 
 		ssif_inc_stat(ssif_info, sent_messages);
 		ssif_inc_stat(ssif_info, sent_messages_parts);
 
 		flags = ipmi_ssif_lock_cond(ssif_info, &oflags);
-		if (ssif_info->got_alert) {
-			/* The result is already ready, just start it. */
+		got_alert = ssif_info->got_alert;
+		if (got_alert) {
 			ssif_info->got_alert = false;
+			ssif_info->waiting_alert = false;
+		}
+
+		if (got_alert) {
 			ipmi_ssif_unlock_cond(ssif_info, flags);
-			start_get(ssif_info);
+			/* The alert already happened, try now. */
+			retry_timeout((unsigned long) ssif_info);
 		} else {
 			/* Wait a jiffie then request the next message */
 			ssif_info->waiting_alert = true;
@@ -1870,7 +1875,7 @@ static int try_init_spmi(struct SPMITable *spmi)
 		return -EIO;
 	}
 
-	myaddr = spmi->addr.address & 0x7f;
+	myaddr = spmi->addr.address >> 1;
 
 	return new_ssif_client(myaddr, NULL, 0, 0, SI_SPMI);
 }

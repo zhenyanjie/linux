@@ -35,7 +35,6 @@ MODULE_DESCRIPTION("Common USB driver for BCMA Bus");
 MODULE_LICENSE("GPL");
 
 struct bcma_hcd_device {
-	struct bcma_device *core;
 	struct platform_device *ehci_dev;
 	struct platform_device *ohci_dev;
 	struct gpio_desc *gpio_desc;
@@ -245,10 +244,7 @@ static const struct usb_ehci_pdata ehci_pdata = {
 static const struct usb_ohci_pdata ohci_pdata = {
 };
 
-static struct platform_device *bcma_hcd_create_pdev(struct bcma_device *dev,
-						    const char *name, u32 addr,
-						    const void *data,
-						    size_t size)
+static struct platform_device *bcma_hcd_create_pdev(struct bcma_device *dev, bool ohci, u32 addr)
 {
 	struct platform_device *hci_dev;
 	struct resource hci_res[2];
@@ -263,7 +259,8 @@ static struct platform_device *bcma_hcd_create_pdev(struct bcma_device *dev,
 	hci_res[1].start = dev->irq;
 	hci_res[1].flags = IORESOURCE_IRQ;
 
-	hci_dev = platform_device_alloc(name, 0);
+	hci_dev = platform_device_alloc(ohci ? "ohci-platform" :
+					"ehci-platform" , 0);
 	if (!hci_dev)
 		return ERR_PTR(-ENOMEM);
 
@@ -274,8 +271,12 @@ static struct platform_device *bcma_hcd_create_pdev(struct bcma_device *dev,
 					    ARRAY_SIZE(hci_res));
 	if (ret)
 		goto err_alloc;
-	if (data)
-		ret = platform_device_add_data(hci_dev, data, size);
+	if (ohci)
+		ret = platform_device_add_data(hci_dev, &ohci_pdata,
+					       sizeof(ohci_pdata));
+	else
+		ret = platform_device_add_data(hci_dev, &ehci_pdata,
+					       sizeof(ehci_pdata));
 	if (ret)
 		goto err_alloc;
 	ret = platform_device_add(hci_dev);
@@ -289,15 +290,30 @@ err_alloc:
 	return ERR_PTR(ret);
 }
 
-static int bcma_hcd_usb20_init(struct bcma_hcd_device *usb_dev)
+static int bcma_hcd_probe(struct bcma_device *dev)
 {
-	struct bcma_device *dev = usb_dev->core;
-	struct bcma_chipinfo *chipinfo = &dev->bus->chipinfo;
-	u32 ohci_addr;
 	int err;
+	u32 ohci_addr;
+	struct bcma_hcd_device *usb_dev;
+	struct bcma_chipinfo *chipinfo;
+
+	chipinfo = &dev->bus->chipinfo;
+
+	/* TODO: Probably need checks here; is the core connected? */
 
 	if (dma_set_mask_and_coherent(dev->dma_dev, DMA_BIT_MASK(32)))
 		return -EOPNOTSUPP;
+
+	usb_dev = devm_kzalloc(&dev->dev, sizeof(struct bcma_hcd_device),
+			       GFP_KERNEL);
+	if (!usb_dev)
+		return -ENOMEM;
+
+	if (dev->dev.of_node)
+		usb_dev->gpio_desc = devm_get_gpiod_from_child(&dev->dev, "vcc",
+							       &dev->dev.of_node->fwnode);
+	if (!IS_ERR_OR_NULL(usb_dev->gpio_desc))
+		gpiod_direction_output(usb_dev->gpio_desc, 1);
 
 	switch (dev->id.id) {
 	case BCMA_CORE_NS_USB20:
@@ -317,57 +333,22 @@ static int bcma_hcd_usb20_init(struct bcma_hcd_device *usb_dev)
 	    && chipinfo->rev == 0)
 		ohci_addr = 0x18009000;
 
-	usb_dev->ohci_dev = bcma_hcd_create_pdev(dev, "ohci-platform",
-						 ohci_addr, &ohci_pdata,
-						 sizeof(ohci_pdata));
+	usb_dev->ohci_dev = bcma_hcd_create_pdev(dev, true, ohci_addr);
 	if (IS_ERR(usb_dev->ohci_dev))
 		return PTR_ERR(usb_dev->ohci_dev);
 
-	usb_dev->ehci_dev = bcma_hcd_create_pdev(dev, "ehci-platform",
-						 dev->addr, &ehci_pdata,
-						 sizeof(ehci_pdata));
+	usb_dev->ehci_dev = bcma_hcd_create_pdev(dev, false, dev->addr);
 	if (IS_ERR(usb_dev->ehci_dev)) {
 		err = PTR_ERR(usb_dev->ehci_dev);
 		goto err_unregister_ohci_dev;
 	}
 
+	bcma_set_drvdata(dev, usb_dev);
 	return 0;
 
 err_unregister_ohci_dev:
 	platform_device_unregister(usb_dev->ohci_dev);
 	return err;
-}
-
-static int bcma_hcd_probe(struct bcma_device *core)
-{
-	int err;
-	struct bcma_hcd_device *usb_dev;
-
-	/* TODO: Probably need checks here; is the core connected? */
-
-	usb_dev = devm_kzalloc(&core->dev, sizeof(struct bcma_hcd_device),
-			       GFP_KERNEL);
-	if (!usb_dev)
-		return -ENOMEM;
-	usb_dev->core = core;
-
-	if (core->dev.of_node)
-		usb_dev->gpio_desc = devm_gpiod_get(&core->dev, "vcc",
-						    GPIOD_OUT_HIGH);
-
-	switch (core->id.id) {
-	case BCMA_CORE_USB20_HOST:
-	case BCMA_CORE_NS_USB20:
-		err = bcma_hcd_usb20_init(usb_dev);
-		if (err)
-			return err;
-		break;
-	default:
-		return -ENODEV;
-	}
-
-	bcma_set_drvdata(core, usb_dev);
-	return 0;
 }
 
 static void bcma_hcd_remove(struct bcma_device *dev)

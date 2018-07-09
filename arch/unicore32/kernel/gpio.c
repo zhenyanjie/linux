@@ -14,8 +14,6 @@
 
 #include <linux/init.h>
 #include <linux/module.h>
-#include <linux/gpio/driver.h>
-/* FIXME: needed for gpio_set_value() - convert to use descriptors or hogs */
 #include <linux/gpio.h>
 #include <mach/hardware.h>
 
@@ -54,7 +52,7 @@ device_initcall(puv3_gpio_leds_init);
 
 static int puv3_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
-	return !!(readl(GPIO_GPLR) & GPIO_GPIO(offset));
+	return readl(GPIO_GPLR) & GPIO_GPIO(offset);
 }
 
 static void puv3_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
@@ -120,5 +118,5 @@ void __init puv3_init_gpio(void)
  *	gpio_set_value(GPO_SET_V2, 1);
  */
 #endif
-	gpiochip_add_data(&puv3_gpio_chip, NULL);
+	gpiochip_add(&puv3_gpio_chip);
 }

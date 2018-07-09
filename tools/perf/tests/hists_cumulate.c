@@ -81,6 +81,11 @@ static int add_hist_entries(struct hists *hists, struct machine *machine)
 	size_t i;
 
 	for (i = 0; i < ARRAY_SIZE(fake_samples); i++) {
+		const union perf_event event = {
+			.header = {
+				.misc = PERF_RECORD_MISC_USER,
+			},
+		};
 		struct hist_entry_iter iter = {
 			.evsel = evsel,
 			.sample	= &sample,
@@ -92,16 +97,16 @@ static int add_hist_entries(struct hists *hists, struct machine *machine)
 		else
 			iter.ops = &hist_iter_normal;
 
-		sample.cpumode = PERF_RECORD_MISC_USER;
 		sample.pid = fake_samples[i].pid;
 		sample.tid = fake_samples[i].pid;
 		sample.ip = fake_samples[i].ip;
 		sample.callchain = (struct ip_callchain *)fake_callchains[i];
 
-		if (machine__resolve(machine, &al, &sample) < 0)
+		if (perf_event__preprocess_sample(&event, machine, &al,
+						  &sample) < 0)
 			goto out;
 
-		if (hist_entry_iter__add(&iter, &al, sysctl_perf_event_max_stack,
+		if (hist_entry_iter__add(&iter, &al, PERF_MAX_STACK_DEPTH,
 					 NULL) < 0) {
 			addr_location__put(&al);
 			goto out;
@@ -126,7 +131,7 @@ static void del_hist_entries(struct hists *hists)
 	struct rb_root *root_out;
 	struct rb_node *node;
 
-	if (hists__has(hists, need_collapse))
+	if (sort__need_collapse)
 		root_in = &hists->entries_collapsed;
 	else
 		root_in = hists->entries_in;
@@ -186,7 +191,7 @@ static int do_test(struct hists *hists, struct result *expected, size_t nr_expec
 	 * function since TEST_ASSERT_VAL() returns in case of failure.
 	 */
 	hists__collapse_resort(hists, NULL);
-	perf_evsel__output_resort(hists_to_evsel(hists), NULL);
+	hists__output_resort(hists, NULL);
 
 	if (verbose > 2) {
 		pr_info("use callchain: %d, cumulate callchain: %d\n",

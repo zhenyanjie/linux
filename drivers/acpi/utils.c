@@ -201,6 +201,10 @@ acpi_extract_package(union acpi_object *package,
 		u8 **pointer = NULL;
 		union acpi_object *element = &(package->package.elements[i]);
 
+		if (!element) {
+			return AE_BAD_DATA;
+		}
+
 		switch (element->type) {
 
 		case ACPI_TYPE_INTEGER:
@@ -625,7 +629,7 @@ acpi_status acpi_evaluate_lck(acpi_handle handle, int lock)
  * some old BIOSes do expect a buffer or an integer etc.
  */
 union acpi_object *
-acpi_evaluate_dsm(acpi_handle handle, const u8 *uuid, u64 rev, u64 func,
+acpi_evaluate_dsm(acpi_handle handle, const u8 *uuid, int rev, int func,
 		  union acpi_object *argv4)
 {
 	acpi_status ret;
@@ -674,7 +678,7 @@ EXPORT_SYMBOL(acpi_evaluate_dsm);
  * functions. Currently only support 64 functions at maximum, should be
  * enough for now.
  */
-bool acpi_check_dsm(acpi_handle handle, const u8 *uuid, u64 rev, u64 funcs)
+bool acpi_check_dsm(acpi_handle handle, const u8 *uuid, int rev, u64 funcs)
 {
 	int i;
 	u64 mask = 0;
@@ -692,7 +696,7 @@ bool acpi_check_dsm(acpi_handle handle, const u8 *uuid, u64 rev, u64 funcs)
 		mask = obj->integer.value;
 	else if (obj->type == ACPI_TYPE_BUFFER)
 		for (i = 0; i < obj->buffer.length && i < 8; i++)
-			mask |= (((u64)obj->buffer.pointer[i]) << (i * 8));
+			mask |= (((u8)obj->buffer.pointer[i]) << (i * 8));
 	ACPI_FREE(obj);
 
 	/*
@@ -707,7 +711,7 @@ bool acpi_check_dsm(acpi_handle handle, const u8 *uuid, u64 rev, u64 funcs)
 EXPORT_SYMBOL(acpi_check_dsm);
 
 /**
- * acpi_dev_found - Detect presence of a given ACPI device in the namespace.
+ * acpi_dev_present - Detect presence of a given ACPI device in the system.
  * @hid: Hardware ID of the device.
  *
  * Return %true if the device was present at the moment of invocation.
@@ -719,7 +723,7 @@ EXPORT_SYMBOL(acpi_check_dsm);
  * instead). Calling from module_init() is fine (which is synonymous
  * with device_initcall()).
  */
-bool acpi_dev_found(const char *hid)
+bool acpi_dev_present(const char *hid)
 {
 	struct acpi_device_bus_id *acpi_device_bus_id;
 	bool found = false;
@@ -734,7 +738,7 @@ bool acpi_dev_found(const char *hid)
 
 	return found;
 }
-EXPORT_SYMBOL(acpi_dev_found);
+EXPORT_SYMBOL(acpi_dev_present);
 
 /*
  * acpi_backlight= handling, this is done here rather then in video_detect.c

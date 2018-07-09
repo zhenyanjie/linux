@@ -68,7 +68,7 @@ int btrfs_init_test_fs(void)
 	if (IS_ERR(test_mnt)) {
 		printk(KERN_ERR "btrfs: cannot mount test file system\n");
 		unregister_filesystem(&test_type);
-		return PTR_ERR(test_mnt);
+		return ret;
 	}
 	return 0;
 }
@@ -137,6 +137,7 @@ static void btrfs_free_dummy_fs_info(struct btrfs_fs_info *fs_info)
 	void **slot;
 
 	spin_lock(&fs_info->buffer_lock);
+restart:
 	radix_tree_for_each_slot(slot, &fs_info->buffer_radix, &iter, 0) {
 		struct extent_buffer *eb;
 
@@ -146,7 +147,7 @@ static void btrfs_free_dummy_fs_info(struct btrfs_fs_info *fs_info)
 		/* Shouldn't happen but that kind of thinking creates CVE's */
 		if (radix_tree_exception(eb)) {
 			if (radix_tree_deref_retry(eb))
-				slot = radix_tree_iter_retry(&iter);
+				goto restart;
 			continue;
 		}
 		spin_unlock(&fs_info->buffer_lock);
@@ -175,7 +176,7 @@ void btrfs_free_dummy_root(struct btrfs_root *root)
 }
 
 struct btrfs_block_group_cache *
-btrfs_alloc_dummy_block_group(unsigned long length, u32 sectorsize)
+btrfs_alloc_dummy_block_group(unsigned long length)
 {
 	struct btrfs_block_group_cache *cache;
 
@@ -192,8 +193,8 @@ btrfs_alloc_dummy_block_group(unsigned long length, u32 sectorsize)
 	cache->key.objectid = 0;
 	cache->key.offset = length;
 	cache->key.type = BTRFS_BLOCK_GROUP_ITEM_KEY;
-	cache->sectorsize = sectorsize;
-	cache->full_stripe_len = sectorsize;
+	cache->sectorsize = 4096;
+	cache->full_stripe_len = 4096;
 
 	INIT_LIST_HEAD(&cache->list);
 	INIT_LIST_HEAD(&cache->cluster_list);

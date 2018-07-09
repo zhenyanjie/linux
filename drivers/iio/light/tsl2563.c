@@ -806,7 +806,8 @@ static int tsl2563_probe(struct i2c_client *client,
 	return 0;
 
 fail:
-	cancel_delayed_work_sync(&chip->poweroff_work);
+	cancel_delayed_work(&chip->poweroff_work);
+	flush_scheduled_work();
 	return err;
 }
 

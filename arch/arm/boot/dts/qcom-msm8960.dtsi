@@ -251,7 +251,7 @@
 		};
 
 		amba {
-			compatible = "simple-bus";
+			compatible = "arm,amba-bus";
 			#address-cells = <1>;
 			#size-cells = <1>;
 			ranges;

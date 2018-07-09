@@ -40,6 +40,7 @@ struct visorchannel {
 	bool requested;
 	struct channel_header chan_hdr;
 	uuid_le guid;
+	ulong size;
 	bool needs_lock;	/* channel creator knows if more than one */
 				/* thread will be inserting or removing */
 	spinlock_t insert_lock; /* protect head writes in chan_hdr */
@@ -72,7 +73,7 @@ visorchannel_create_guts(u64 physaddr, unsigned long channel_bytes,
 
 	channel = kzalloc(sizeof(*channel), gfp);
 	if (!channel)
-		return NULL;
+		goto cleanup;
 
 	channel->needs_lock = needs_lock;
 	spin_lock_init(&channel->insert_lock);
@@ -88,14 +89,14 @@ visorchannel_create_guts(u64 physaddr, unsigned long channel_bytes,
 	if (!channel->requested) {
 		if (uuid_le_cmp(guid, spar_video_guid)) {
 			/* Not the video channel we care about this */
-			goto err_destroy_channel;
+			goto cleanup;
 		}
 	}
 
 	channel->mapped = memremap(physaddr, size, MEMREMAP_WB);
 	if (!channel->mapped) {
 		release_mem_region(physaddr, size);
-		goto err_destroy_channel;
+		goto cleanup;
 	}
 
 	channel->physaddr = physaddr;
@@ -104,7 +105,7 @@ visorchannel_create_guts(u64 physaddr, unsigned long channel_bytes,
 	err = visorchannel_read(channel, 0, &channel->chan_hdr,
 				sizeof(struct channel_header));
 	if (err)
-		goto err_destroy_channel;
+		goto cleanup;
 
 	/* we had better be a CLIENT of this channel */
 	if (channel_bytes == 0)
@@ -121,7 +122,7 @@ visorchannel_create_guts(u64 physaddr, unsigned long channel_bytes,
 	if (!channel->requested) {
 		if (uuid_le_cmp(guid, spar_video_guid)) {
 			/* Different we care about this */
-			goto err_destroy_channel;
+			goto cleanup;
 		}
 	}
 
@@ -129,14 +130,16 @@ visorchannel_create_guts(u64 physaddr, unsigned long channel_bytes,
 			MEMREMAP_WB);
 	if (!channel->mapped) {
 		release_mem_region(channel->physaddr, channel_bytes);
-		goto err_destroy_channel;
+		goto cleanup;
 	}
 
 	channel->nbytes = channel_bytes;
+
+	channel->size = channel_bytes;
 	channel->guid = guid;
 	return channel;
 
-err_destroy_channel:
+cleanup:
 	visorchannel_destroy(channel);
 	return NULL;
 }
@@ -183,7 +186,7 @@ EXPORT_SYMBOL_GPL(visorchannel_get_physaddr);
 ulong
 visorchannel_get_nbytes(struct visorchannel *channel)
 {
-	return channel->nbytes;
+	return channel->size;
 }
 EXPORT_SYMBOL_GPL(visorchannel_get_nbytes);
 
@@ -290,14 +293,14 @@ visorchannel_clear(struct visorchannel *channel, ulong offset, u8 ch,
 		err = visorchannel_write(channel, offset + written,
 					 buf, thisbytes);
 		if (err)
-			goto out_free_page;
+			goto cleanup;
 
 		written += thisbytes;
 		nbytes -= thisbytes;
 	}
 	err = 0;
 
-out_free_page:
+cleanup:
 	free_page((unsigned long)buf);
 	return err;
 }
@@ -458,7 +461,7 @@ signalinsert_inner(struct visorchannel *channel, u32 queue, void *msg)
 	if (!sig_read_header(channel, queue, &sig_hdr))
 		return false;
 
-	sig_hdr.head = (sig_hdr.head + 1) % sig_hdr.max_slots;
+	sig_hdr.head = ((sig_hdr.head + 1) % sig_hdr.max_slots);
 	if (sig_hdr.head == sig_hdr.tail) {
 		sig_hdr.num_overflows++;
 		visorchannel_write(channel,
@@ -518,7 +521,7 @@ visorchannel_signalqueue_slots_avail(struct visorchannel *channel, u32 queue)
 	tail = sig_hdr.tail;
 	if (head < tail)
 		head = head + sig_hdr.max_slots;
-	slots_used = head - tail;
+	slots_used = (head - tail);
 	slots_avail = sig_hdr.max_signals - slots_used;
 	return (int)slots_avail;
 }

@@ -54,6 +54,10 @@
 #include <asm/rtc.h>
 #include <asm/uv/uv.h>
 
+#define EFI_DEBUG
+
+struct efi_memory_map memmap;
+
 static struct efi efi_phys __initdata;
 static efi_system_table_t efi_systab __initdata;
 
@@ -115,10 +119,11 @@ void efi_get_time(struct timespec *now)
 
 void __init efi_find_mirror(void)
 {
-	efi_memory_desc_t *md;
+	void *p;
 	u64 mirror_size = 0, total_size = 0;
 
-	for_each_efi_memory_desc(md) {
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		efi_memory_desc_t *md = p;
 		unsigned long long start = md->phys_addr;
 		unsigned long long size = md->num_pages << EFI_PAGE_SHIFT;
 
@@ -141,9 +146,10 @@ void __init efi_find_mirror(void)
 
 static void __init do_add_efi_memmap(void)
 {
-	efi_memory_desc_t *md;
+	void *p;
 
-	for_each_efi_memory_desc(md) {
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		efi_memory_desc_t *md = p;
 		unsigned long long start = md->phys_addr;
 		unsigned long long size = md->num_pages << EFI_PAGE_SHIFT;
 		int e820_type;
@@ -203,47 +209,47 @@ int __init efi_memblock_x86_reserve_range(void)
 #else
 	pmap = (e->efi_memmap |	((__u64)e->efi_memmap_hi << 32));
 #endif
-	efi.memmap.phys_map	= pmap;
-	efi.memmap.nr_map	= e->efi_memmap_size /
+	memmap.phys_map		= pmap;
+	memmap.nr_map		= e->efi_memmap_size /
 				  e->efi_memdesc_size;
-	efi.memmap.desc_size	= e->efi_memdesc_size;
-	efi.memmap.desc_version	= e->efi_memdesc_version;
+	memmap.desc_size	= e->efi_memdesc_size;
+	memmap.desc_version	= e->efi_memdesc_version;
 
-	WARN(efi.memmap.desc_version != 1,
-	     "Unexpected EFI_MEMORY_DESCRIPTOR version %ld",
-	     efi.memmap.desc_version);
+	memblock_reserve(pmap, memmap.nr_map * memmap.desc_size);
 
-	memblock_reserve(pmap, efi.memmap.nr_map * efi.memmap.desc_size);
+	efi.memmap = &memmap;
 
 	return 0;
 }
 
 void __init efi_print_memmap(void)
 {
+#ifdef EFI_DEBUG
 	efi_memory_desc_t *md;
-	int i = 0;
+	void *p;
+	int i;
 
-	for_each_efi_memory_desc(md) {
+	for (p = memmap.map, i = 0;
+	     p < memmap.map_end;
+	     p += memmap.desc_size, i++) {
 		char buf[64];
 
-		pr_info("mem%02u: %s range=[0x%016llx-0x%016llx] (%lluMB)\n",
-			i++, efi_md_typeattr_format(buf, sizeof(buf), md),
+		md = p;
+		pr_info("mem%02u: %s range=[0x%016llx-0x%016llx) (%lluMB)\n",
+			i, efi_md_typeattr_format(buf, sizeof(buf), md),
 			md->phys_addr,
-			md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT) - 1,
+			md->phys_addr + (md->num_pages << EFI_PAGE_SHIFT),
 			(md->num_pages >> (20 - EFI_PAGE_SHIFT)));
 	}
+#endif  /*  EFI_DEBUG  */
 }
 
 void __init efi_unmap_memmap(void)
 {
-	unsigned long size;
-
 	clear_bit(EFI_MEMMAP, &efi.flags);
-
-	size = efi.memmap.nr_map * efi.memmap.desc_size;
-	if (efi.memmap.map) {
-		early_memunmap(efi.memmap.map, size);
-		efi.memmap.map = NULL;
+	if (memmap.map) {
+		early_memunmap(memmap.map, memmap.nr_map * memmap.desc_size);
+		memmap.map = NULL;
 	}
 }
 
@@ -346,6 +352,8 @@ static int __init efi_systab_init(void *phys)
 		       efi.systab->hdr.revision >> 16,
 		       efi.systab->hdr.revision & 0xffff);
 
+	set_bit(EFI_SYSTEM_TABLES, &efi.flags);
+
 	return 0;
 }
 
@@ -432,22 +440,17 @@ static int __init efi_runtime_init(void)
 
 static int __init efi_memmap_init(void)
 {
-	unsigned long addr, size;
-
 	if (efi_enabled(EFI_PARAVIRT))
 		return 0;
 
 	/* Map the EFI memory map */
-	size = efi.memmap.nr_map * efi.memmap.desc_size;
-	addr = (unsigned long)efi.memmap.phys_map;
-
-	efi.memmap.map = early_memremap(addr, size);
-	if (efi.memmap.map == NULL) {
+	memmap.map = early_memremap((unsigned long)memmap.phys_map,
+				   memmap.nr_map * memmap.desc_size);
+	if (memmap.map == NULL) {
 		pr_err("Could not map the memory map!\n");
 		return -ENOMEM;
 	}
-
-	efi.memmap.map_end = efi.memmap.map + size;
+	memmap.map_end = memmap.map + (memmap.nr_map * memmap.desc_size);
 
 	if (add_efi_memmap)
 		do_add_efi_memmap();
@@ -549,9 +552,12 @@ void __init efi_set_executable(efi_memory_desc_t *md, bool executable)
 void __init runtime_code_page_mkexec(void)
 {
 	efi_memory_desc_t *md;
+	void *p;
 
 	/* Make EFI runtime service code area executable */
-	for_each_efi_memory_desc(md) {
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		md = p;
+
 		if (md->type != EFI_RUNTIME_SERVICES_CODE)
 			continue;
 
@@ -598,10 +604,12 @@ void __init old_map_region(efi_memory_desc_t *md)
 /* Merge contiguous regions of the same type and attribute */
 static void __init efi_merge_regions(void)
 {
+	void *p;
 	efi_memory_desc_t *md, *prev_md = NULL;
 
-	for_each_efi_memory_desc(md) {
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
 		u64 prev_size;
+		md = p;
 
 		if (!prev_md) {
 			prev_md = md;
@@ -643,31 +651,30 @@ static void __init get_systab_virt_addr(efi_memory_desc_t *md)
 static void __init save_runtime_map(void)
 {
 #ifdef CONFIG_KEXEC_CORE
-	unsigned long desc_size;
 	efi_memory_desc_t *md;
-	void *tmp, *q = NULL;
+	void *tmp, *p, *q = NULL;
 	int count = 0;
 
 	if (efi_enabled(EFI_OLD_MEMMAP))
 		return;
 
-	desc_size = efi.memmap.desc_size;
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		md = p;
 
-	for_each_efi_memory_desc(md) {
 		if (!(md->attribute & EFI_MEMORY_RUNTIME) ||
 		    (md->type == EFI_BOOT_SERVICES_CODE) ||
 		    (md->type == EFI_BOOT_SERVICES_DATA))
 			continue;
-		tmp = krealloc(q, (count + 1) * desc_size, GFP_KERNEL);
+		tmp = krealloc(q, (count + 1) * memmap.desc_size, GFP_KERNEL);
 		if (!tmp)
 			goto out;
 		q = tmp;
 
-		memcpy(q + count * desc_size, md, desc_size);
+		memcpy(q + count * memmap.desc_size, md, memmap.desc_size);
 		count++;
 	}
 
-	efi_runtime_map_setup(q, count, desc_size);
+	efi_runtime_map_setup(q, count, memmap.desc_size);
 	return;
 
 out:
@@ -707,10 +714,10 @@ static inline void *efi_map_next_entry_reverse(void *entry)
 {
 	/* Initial call */
 	if (!entry)
-		return efi.memmap.map_end - efi.memmap.desc_size;
+		return memmap.map_end - memmap.desc_size;
 
-	entry -= efi.memmap.desc_size;
-	if (entry < efi.memmap.map)
+	entry -= memmap.desc_size;
+	if (entry < memmap.map)
 		return NULL;
 
 	return entry;
@@ -752,10 +759,10 @@ static void *efi_map_next_entry(void *entry)
 
 	/* Initial call */
 	if (!entry)
-		return efi.memmap.map;
+		return memmap.map;
 
-	entry += efi.memmap.desc_size;
-	if (entry >= efi.memmap.map_end)
+	entry += memmap.desc_size;
+	if (entry >= memmap.map_end)
 		return NULL;
 
 	return entry;
@@ -769,10 +776,7 @@ static void * __init efi_map_regions(int *count, int *pg_shift)
 {
 	void *p, *new_memmap = NULL;
 	unsigned long left = 0;
-	unsigned long desc_size;
 	efi_memory_desc_t *md;
-
-	desc_size = efi.memmap.desc_size;
 
 	p = NULL;
 	while ((p = efi_map_next_entry(p))) {
@@ -788,7 +792,7 @@ static void * __init efi_map_regions(int *count, int *pg_shift)
 		efi_map_region(md);
 		get_systab_virt_addr(md);
 
-		if (left < desc_size) {
+		if (left < memmap.desc_size) {
 			new_memmap = realloc_pages(new_memmap, *pg_shift);
 			if (!new_memmap)
 				return NULL;
@@ -797,9 +801,10 @@ static void * __init efi_map_regions(int *count, int *pg_shift)
 			(*pg_shift)++;
 		}
 
-		memcpy(new_memmap + (*count * desc_size), md, desc_size);
+		memcpy(new_memmap + (*count * memmap.desc_size), md,
+		       memmap.desc_size);
 
-		left -= desc_size;
+		left -= memmap.desc_size;
 		(*count)++;
 	}
 
@@ -810,7 +815,7 @@ static void __init kexec_enter_virtual_mode(void)
 {
 #ifdef CONFIG_KEXEC_CORE
 	efi_memory_desc_t *md;
-	unsigned int num_pages;
+	void *p;
 
 	efi.systab = NULL;
 
@@ -824,17 +829,12 @@ static void __init kexec_enter_virtual_mode(void)
 		return;
 	}
 
-	if (efi_alloc_page_tables()) {
-		pr_err("Failed to allocate EFI page tables\n");
-		clear_bit(EFI_RUNTIME_SERVICES, &efi.flags);
-		return;
-	}
-
 	/*
 	* Map efi regions which were passed via setup_data. The virt_addr is a
 	* fixed addr which was used in first kernel of a kexec boot.
 	*/
-	for_each_efi_memory_desc(md) {
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		md = p;
 		efi_map_region_fixed(md); /* FIXME: add error handling */
 		get_systab_virt_addr(md);
 	}
@@ -842,14 +842,6 @@ static void __init kexec_enter_virtual_mode(void)
 	save_runtime_map();
 
 	BUG_ON(!efi.systab);
-
-	num_pages = ALIGN(efi.memmap.nr_map * efi.memmap.desc_size, PAGE_SIZE);
-	num_pages >>= PAGE_SHIFT;
-
-	if (efi_setup_page_tables(efi.memmap.phys_map, num_pages)) {
-		clear_bit(EFI_RUNTIME_SERVICES, &efi.flags);
-		return;
-	}
 
 	efi_sync_low_kernel_mappings();
 
@@ -877,7 +869,7 @@ static void __init kexec_enter_virtual_mode(void)
  * This function will switch the EFI runtime services to virtual mode.
  * Essentially, we look through the EFI memmap and map every region that
  * has the runtime attribute bit set in its memory descriptor into the
- * efi_pgd page table.
+ * ->trampoline_pgd page table using a top-down VA allocation scheme.
  *
  * The old method which used to update that memory descriptor with the
  * virtual address obtained from ioremap() is still supported when the
@@ -887,8 +879,8 @@ static void __init kexec_enter_virtual_mode(void)
  *
  * The new method does a pagetable switch in a preemption-safe manner
  * so that we're in a different address space when calling a runtime
- * function. For function arguments passing we do copy the PUDs of the
- * kernel page table into efi_pgd prior to each call.
+ * function. For function arguments passing we do copy the PGDs of the
+ * kernel page table into ->trampoline_pgd prior to each call.
  *
  * Specially for kexec boot, efi runtime maps in previous kernel should
  * be passed in via setup_data. In that case runtime ranges will be mapped
@@ -902,12 +894,6 @@ static void __init __efi_enter_virtual_mode(void)
 	efi_status_t status;
 
 	efi.systab = NULL;
-
-	if (efi_alloc_page_tables()) {
-		pr_err("Failed to allocate EFI page tables\n");
-		clear_bit(EFI_RUNTIME_SERVICES, &efi.flags);
-		return;
-	}
 
 	efi_merge_regions();
 	new_memmap = efi_map_regions(&count, &pg_shift);
@@ -927,19 +913,20 @@ static void __init __efi_enter_virtual_mode(void)
 	}
 
 	efi_sync_low_kernel_mappings();
+	efi_dump_pagetable();
 
 	if (efi_is_native()) {
 		status = phys_efi_set_virtual_address_map(
-				efi.memmap.desc_size * count,
-				efi.memmap.desc_size,
-				efi.memmap.desc_version,
+				memmap.desc_size * count,
+				memmap.desc_size,
+				memmap.desc_version,
 				(efi_memory_desc_t *)__pa(new_memmap));
 	} else {
 		status = efi_thunk_set_virtual_address_map(
 				efi_phys.set_virtual_address_map,
-				efi.memmap.desc_size * count,
-				efi.memmap.desc_size,
-				efi.memmap.desc_version,
+				memmap.desc_size * count,
+				memmap.desc_size,
+				memmap.desc_version,
 				(efi_memory_desc_t *)__pa(new_memmap));
 	}
 
@@ -964,20 +951,31 @@ static void __init __efi_enter_virtual_mode(void)
 
 	efi.set_virtual_address_map = NULL;
 
-	/*
-	 * Apply more restrictive page table mapping attributes now that
-	 * SVAM() has been called and the firmware has performed all
-	 * necessary relocation fixups for the new virtual addresses.
-	 */
-	efi_runtime_update_mappings();
-	efi_dump_pagetable();
+	efi_runtime_mkexec();
 
 	/*
-	 * We mapped the descriptor array into the EFI pagetable above
-	 * but we're not unmapping it here because if we're running in
-	 * EFI mixed mode we need all of memory to be accessible when
-	 * we pass parameters to the EFI runtime services in the
-	 * thunking code.
+	 * We mapped the descriptor array into the EFI pagetable above but we're
+	 * not unmapping it here. Here's why:
+	 *
+	 * We're copying select PGDs from the kernel page table to the EFI page
+	 * table and when we do so and make changes to those PGDs like unmapping
+	 * stuff from them, those changes appear in the kernel page table and we
+	 * go boom.
+	 *
+	 * From setup_real_mode():
+	 *
+	 * ...
+	 * trampoline_pgd[0] = init_level4_pgt[pgd_index(__PAGE_OFFSET)].pgd;
+	 *
+	 * In this particular case, our allocation is in PGD 0 of the EFI page
+	 * table but we've copied that PGD from PGD[272] of the EFI page table:
+	 *
+	 *	pgd_index(__PAGE_OFFSET = 0xffff880000000000) = 272
+	 *
+	 * where the direct memory mapping in kernel space is.
+	 *
+	 * new_memmap's VA comes from that direct mapping and thus clearing it,
+	 * it would get cleared in the kernel page table too.
 	 *
 	 * efi_cleanup_page_tables(__pa(new_memmap), 1 << pg_shift);
 	 */
@@ -1004,11 +1002,13 @@ void __init efi_enter_virtual_mode(void)
 u32 efi_mem_type(unsigned long phys_addr)
 {
 	efi_memory_desc_t *md;
+	void *p;
 
 	if (!efi_enabled(EFI_MEMMAP))
 		return 0;
 
-	for_each_efi_memory_desc(md) {
+	for (p = memmap.map; p < memmap.map_end; p += memmap.desc_size) {
+		md = p;
 		if ((md->phys_addr <= phys_addr) &&
 		    (phys_addr < (md->phys_addr +
 				  (md->num_pages << EFI_PAGE_SHIFT))))

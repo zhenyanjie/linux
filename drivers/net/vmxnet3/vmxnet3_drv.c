@@ -1022,16 +1022,14 @@ vmxnet3_tq_xmit(struct sk_buff *skb, struct vmxnet3_tx_queue *tq,
 		if (ctx.mss) {
 			if (unlikely(ctx.eth_ip_hdr_size + ctx.l4_hdr_size >
 				     VMXNET3_MAX_TX_BUF_SIZE)) {
-				tq->stats.drop_oversized_hdr++;
-				goto drop_pkt;
+				goto hdr_too_big;
 			}
 		} else {
 			if (skb->ip_summed == CHECKSUM_PARTIAL) {
 				if (unlikely(ctx.eth_ip_hdr_size +
 					     skb->csum_offset >
 					     VMXNET3_MAX_CSUM_OFFSET)) {
-					tq->stats.drop_oversized_hdr++;
-					goto drop_pkt;
+					goto hdr_too_big;
 				}
 			}
 		}
@@ -1125,6 +1123,8 @@ vmxnet3_tq_xmit(struct sk_buff *skb, struct vmxnet3_tx_queue *tq,
 
 	return NETDEV_TX_OK;
 
+hdr_too_big:
+	tq->stats.drop_oversized_hdr++;
 unlock_drop_pkt:
 	spin_unlock_irqrestore(&tq->tx_lock, flags);
 drop_pkt:
@@ -1152,16 +1152,12 @@ vmxnet3_rx_csum(struct vmxnet3_adapter *adapter,
 		union Vmxnet3_GenericDesc *gdesc)
 {
 	if (!gdesc->rcd.cnc && adapter->netdev->features & NETIF_F_RXCSUM) {
-		if (gdesc->rcd.v4 &&
-		    (le32_to_cpu(gdesc->dword[3]) &
-		     VMXNET3_RCD_CSUM_OK) == VMXNET3_RCD_CSUM_OK) {
+		/* typical case: TCP/UDP over IP and both csums are correct */
+		if ((le32_to_cpu(gdesc->dword[3]) & VMXNET3_RCD_CSUM_OK) ==
+							VMXNET3_RCD_CSUM_OK) {
 			skb->ip_summed = CHECKSUM_UNNECESSARY;
 			BUG_ON(!(gdesc->rcd.tcp || gdesc->rcd.udp));
-			BUG_ON(gdesc->rcd.frg);
-		} else if (gdesc->rcd.v6 && (le32_to_cpu(gdesc->dword[3]) &
-					     (1 << VMXNET3_RCD_TUC_SHIFT))) {
-			skb->ip_summed = CHECKSUM_UNNECESSARY;
-			BUG_ON(!(gdesc->rcd.tcp || gdesc->rcd.udp));
+			BUG_ON(!(gdesc->rcd.v4  || gdesc->rcd.v6));
 			BUG_ON(gdesc->rcd.frg);
 		} else {
 			if (gdesc->rcd.csum) {
@@ -1369,7 +1365,7 @@ vmxnet3_rq_rx_complete(struct vmxnet3_rx_queue *rq,
 				rcdlro = (struct Vmxnet3_RxCompDescExt *)rcd;
 
 				segCnt = rcdlro->segCnt;
-				WARN_ON_ONCE(segCnt == 0);
+				BUG_ON(segCnt <= 1);
 				mss = rcdlro->mss;
 				if (unlikely(segCnt <= 1))
 					segCnt = 0;

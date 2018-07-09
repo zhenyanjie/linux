@@ -129,8 +129,7 @@ bool perf_can_record_cpu_wide(void)
 	return true;
 }
 
-void perf_evlist__config(struct perf_evlist *evlist, struct record_opts *opts,
-			 struct callchain_param *callchain)
+void perf_evlist__config(struct perf_evlist *evlist, struct record_opts *opts)
 {
 	struct perf_evsel *evsel;
 	bool use_sample_identifier = false;
@@ -149,7 +148,7 @@ void perf_evlist__config(struct perf_evlist *evlist, struct record_opts *opts,
 	use_comm_exec = perf_can_comm_exec();
 
 	evlist__for_each(evlist, evsel) {
-		perf_evsel__config(evsel, opts, callchain);
+		perf_evsel__config(evsel, opts);
 		if (evsel->tracking && use_comm_exec)
 			evsel->attr.comm_exec = 1;
 	}

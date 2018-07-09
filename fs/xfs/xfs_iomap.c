@@ -132,7 +132,6 @@ xfs_iomap_write_direct(
 	int		error;
 	int		lockmode;
 	int		bmapi_flags = XFS_BMAPI_PREALLOC;
-	uint		tflags = 0;
 
 	rt = XFS_IS_REALTIME_INODE(ip);
 	extsz = xfs_get_extsz_hint(ip);
@@ -193,6 +192,11 @@ xfs_iomap_write_direct(
 		return error;
 
 	/*
+	 * Allocate and setup the transaction
+	 */
+	tp = xfs_trans_alloc(mp, XFS_TRANS_DIOSTRAT);
+
+	/*
 	 * For DAX, we do not allocate unwritten extents, but instead we zero
 	 * the block before we commit the transaction.  Ideally we'd like to do
 	 * this outside the transaction context, but if we commit and then crash
@@ -205,17 +209,23 @@ xfs_iomap_write_direct(
 	 * the reserve block pool for bmbt block allocation if there is no space
 	 * left but we need to do unwritten extent conversion.
 	 */
+
 	if (IS_DAX(VFS_I(ip))) {
 		bmapi_flags = XFS_BMAPI_CONVERT | XFS_BMAPI_ZERO;
 		if (ISUNWRITTEN(imap)) {
-			tflags |= XFS_TRANS_RESERVE;
+			tp->t_flags |= XFS_TRANS_RESERVE;
 			resblks = XFS_DIOSTRAT_SPACE_RES(mp, 0) << 1;
 		}
 	}
-	error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, resrtextents,
-			tflags, &tp);
-	if (error)
+	error = xfs_trans_reserve(tp, &M_RES(mp)->tr_write,
+				  resblks, resrtextents);
+	/*
+	 * Check for running out of space, note: need lock to return
+	 */
+	if (error) {
+		xfs_trans_cancel(tp);
 		return error;
+	}
 
 	lockmode = XFS_ILOCK_EXCL;
 	xfs_ilock(ip, lockmode);
@@ -716,13 +726,15 @@ xfs_iomap_write_allocate(
 
 		nimaps = 0;
 		while (nimaps == 0) {
+			tp = xfs_trans_alloc(mp, XFS_TRANS_STRAT_WRITE);
+			tp->t_flags |= XFS_TRANS_RESERVE;
 			nres = XFS_EXTENTADD_SPACE_RES(mp, XFS_DATA_FORK);
-
-			error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, nres,
-					0, XFS_TRANS_RESERVE, &tp);
-			if (error)
+			error = xfs_trans_reserve(tp, &M_RES(mp)->tr_write,
+						  nres, 0);
+			if (error) {
+				xfs_trans_cancel(tp);
 				return error;
-
+			}
 			xfs_ilock(ip, XFS_ILOCK_EXCL);
 			xfs_trans_ijoin(tp, ip, 0);
 
@@ -866,18 +878,25 @@ xfs_iomap_write_unwritten(
 
 	do {
 		/*
-		 * Set up a transaction to convert the range of extents
+		 * set up a transaction to convert the range of extents
 		 * from unwritten to real. Do allocations in a loop until
 		 * we have covered the range passed in.
 		 *
-		 * Note that we can't risk to recursing back into the filesystem
-		 * here as we might be asked to write out the same inode that we
-		 * complete here and might deadlock on the iolock.
+		 * Note that we open code the transaction allocation here
+		 * to pass KM_NOFS--we can't risk to recursing back into
+		 * the filesystem here as we might be asked to write out
+		 * the same inode that we complete here and might deadlock
+		 * on the iolock.
 		 */
-		error = xfs_trans_alloc(mp, &M_RES(mp)->tr_write, resblks, 0,
-				XFS_TRANS_RESERVE | XFS_TRANS_NOFS, &tp);
-		if (error)
+		sb_start_intwrite(mp->m_super);
+		tp = _xfs_trans_alloc(mp, XFS_TRANS_STRAT_WRITE, KM_NOFS);
+		tp->t_flags |= XFS_TRANS_RESERVE | XFS_TRANS_FREEZE_PROT;
+		error = xfs_trans_reserve(tp, &M_RES(mp)->tr_write,
+					  resblks, 0);
+		if (error) {
+			xfs_trans_cancel(tp);
 			return error;
+		}
 
 		xfs_ilock(ip, XFS_ILOCK_EXCL);
 		xfs_trans_ijoin(tp, ip, 0);

@@ -27,6 +27,8 @@
 #include <linux/mmc/sdio_func.h>
 #include <linux/mmc/card.h>
 #include <linux/mmc/host.h>
+#include <linux/platform_device.h>
+#include <linux/platform_data/brcmfmac-sdio.h>
 #include <linux/pm_runtime.h>
 #include <linux/suspend.h>
 #include <linux/errno.h>
@@ -44,6 +46,7 @@
 #include "bus.h"
 #include "debug.h"
 #include "sdio.h"
+#include "of.h"
 #include "core.h"
 #include "common.h"
 
@@ -103,18 +106,18 @@ static void brcmf_sdiod_dummy_irqhandler(struct sdio_func *func)
 
 int brcmf_sdiod_intr_register(struct brcmf_sdio_dev *sdiodev)
 {
-	struct brcmfmac_sdio_pd *pdata;
 	int ret = 0;
 	u8 data;
 	u32 addr, gpiocontrol;
 	unsigned long flags;
 
-	pdata = &sdiodev->settings->bus.sdio;
-	if (pdata->oob_irq_supported) {
+	if ((sdiodev->pdata) && (sdiodev->pdata->oob_irq_supported)) {
 		brcmf_dbg(SDIO, "Enter, register OOB IRQ %d\n",
-			  pdata->oob_irq_nr);
-		ret = request_irq(pdata->oob_irq_nr, brcmf_sdiod_oob_irqhandler,
-				  pdata->oob_irq_flags, "brcmf_oob_intr",
+			  sdiodev->pdata->oob_irq_nr);
+		ret = request_irq(sdiodev->pdata->oob_irq_nr,
+				  brcmf_sdiod_oob_irqhandler,
+				  sdiodev->pdata->oob_irq_flags,
+				  "brcmf_oob_intr",
 				  &sdiodev->func[1]->dev);
 		if (ret != 0) {
 			brcmf_err("request_irq failed %d\n", ret);
@@ -126,7 +129,7 @@ int brcmf_sdiod_intr_register(struct brcmf_sdio_dev *sdiodev)
 		sdiodev->irq_en = true;
 		spin_unlock_irqrestore(&sdiodev->irq_en_lock, flags);
 
-		ret = enable_irq_wake(pdata->oob_irq_nr);
+		ret = enable_irq_wake(sdiodev->pdata->oob_irq_nr);
 		if (ret != 0) {
 			brcmf_err("enable_irq_wake failed %d\n", ret);
 			return ret;
@@ -155,7 +158,7 @@ int brcmf_sdiod_intr_register(struct brcmf_sdio_dev *sdiodev)
 
 		/* redirect, configure and enable io for interrupt signal */
 		data = SDIO_SEPINT_MASK | SDIO_SEPINT_OE;
-		if (pdata->oob_irq_flags & IRQF_TRIGGER_HIGH)
+		if (sdiodev->pdata->oob_irq_flags & IRQF_TRIGGER_HIGH)
 			data |= SDIO_SEPINT_ACT_HI;
 		brcmf_sdiod_regwb(sdiodev, SDIO_CCCR_BRCM_SEPINT, data, &ret);
 
@@ -173,12 +176,9 @@ int brcmf_sdiod_intr_register(struct brcmf_sdio_dev *sdiodev)
 
 int brcmf_sdiod_intr_unregister(struct brcmf_sdio_dev *sdiodev)
 {
-	struct brcmfmac_sdio_pd *pdata;
-
 	brcmf_dbg(SDIO, "Entering\n");
 
-	pdata = &sdiodev->settings->bus.sdio;
-	if (pdata->oob_irq_supported) {
+	if ((sdiodev->pdata) && (sdiodev->pdata->oob_irq_supported)) {
 		sdio_claim_host(sdiodev->func[1]);
 		brcmf_sdiod_regwb(sdiodev, SDIO_CCCR_BRCM_SEPINT, 0, NULL);
 		brcmf_sdiod_regwb(sdiodev, SDIO_CCCR_IENx, 0, NULL);
@@ -187,10 +187,11 @@ int brcmf_sdiod_intr_unregister(struct brcmf_sdio_dev *sdiodev)
 		if (sdiodev->oob_irq_requested) {
 			sdiodev->oob_irq_requested = false;
 			if (sdiodev->irq_wake) {
-				disable_irq_wake(pdata->oob_irq_nr);
+				disable_irq_wake(sdiodev->pdata->oob_irq_nr);
 				sdiodev->irq_wake = false;
 			}
-			free_irq(pdata->oob_irq_nr, &sdiodev->func[1]->dev);
+			free_irq(sdiodev->pdata->oob_irq_nr,
+				 &sdiodev->func[1]->dev);
 			sdiodev->irq_en = false;
 		}
 	} else {
@@ -250,7 +251,7 @@ static int brcmf_sdiod_request_data(struct brcmf_sdio_dev *sdiodev, u8 fn,
 				    u32 addr, u8 regsz, void *data, bool write)
 {
 	struct sdio_func *func;
-	int ret = -EINVAL;
+	int ret;
 
 	brcmf_dbg(SDIO, "rw=%d, func=%d, addr=0x%05x, nbytes=%d\n",
 		  write, fn, addr, regsz);
@@ -522,7 +523,7 @@ static int brcmf_sdiod_sglist_rw(struct brcmf_sdio_dev *sdiodev, uint fn,
 	target_list = pktlist;
 	/* for host with broken sg support, prepare a page aligned list */
 	__skb_queue_head_init(&local_list);
-	if (!write && sdiodev->settings->bus.sdio.broken_sg_support) {
+	if (sdiodev->pdata && sdiodev->pdata->broken_sg_support && !write) {
 		req_sz = 0;
 		skb_queue_walk(pktlist, pkt_next)
 			req_sz += pkt_next->len;
@@ -629,7 +630,7 @@ static int brcmf_sdiod_sglist_rw(struct brcmf_sdio_dev *sdiodev, uint fn,
 		}
 	}
 
-	if (!write && sdiodev->settings->bus.sdio.broken_sg_support) {
+	if (sdiodev->pdata && sdiodev->pdata->broken_sg_support && !write) {
 		local_pkt_next = local_list.next;
 		orig_offset = 0;
 		skb_queue_walk(pktlist, pkt_next) {
@@ -722,10 +723,8 @@ int brcmf_sdiod_recv_chain(struct brcmf_sdio_dev *sdiodev,
 			return -ENOMEM;
 		err = brcmf_sdiod_buffrw(sdiodev, SDIO_FUNC_2, false, addr,
 					 glom_skb);
-		if (err) {
-			brcmu_pkt_buf_free_skb(glom_skb);
+		if (err)
 			goto done;
-		}
 
 		skb_queue_walk(pktq, skb) {
 			memcpy(skb->data, glom_skb->data, skb->len);
@@ -902,7 +901,7 @@ void brcmf_sdiod_sgtable_alloc(struct brcmf_sdio_dev *sdiodev)
 		return;
 
 	nents = max_t(uint, BRCMF_DEFAULT_RXGLOM_SIZE,
-		      sdiodev->settings->bus.sdio.txglomsz);
+		      sdiodev->bus_if->drvr->settings->sdiod_txglomsz);
 	nents += (nents >> 4) + 1;
 
 	WARN_ON(nents > sdiodev->max_segment_count);
@@ -914,7 +913,7 @@ void brcmf_sdiod_sgtable_alloc(struct brcmf_sdio_dev *sdiodev)
 		sdiodev->sg_support = false;
 	}
 
-	sdiodev->txglomsz = sdiodev->settings->bus.sdio.txglomsz;
+	sdiodev->txglomsz = sdiodev->bus_if->drvr->settings->sdiod_txglomsz;
 }
 
 #ifdef CONFIG_PM_SLEEP
@@ -1100,10 +1099,11 @@ static const struct sdio_device_id brcmf_sdmmc_ids[] = {
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_43430),
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_4345),
 	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_4354),
-	BRCMF_SDIO_DEVICE(SDIO_DEVICE_ID_BROADCOM_4356),
 	{ /* end: all zeroes */ }
 };
 MODULE_DEVICE_TABLE(sdio, brcmf_sdmmc_ids);
+
+static struct brcmfmac_sdio_platform_data *brcmfmac_sdio_pdata;
 
 
 static void brcmf_sdiod_acpi_set_power_manageable(struct device *dev,
@@ -1167,6 +1167,20 @@ static int brcmf_ops_sdio_probe(struct sdio_func *func,
 	dev_set_drvdata(&func->dev, bus_if);
 	dev_set_drvdata(&sdiodev->func[1]->dev, bus_if);
 	sdiodev->dev = &sdiodev->func[1]->dev;
+	sdiodev->pdata = brcmfmac_sdio_pdata;
+
+	if (!sdiodev->pdata)
+		brcmf_of_probe(sdiodev);
+
+#ifdef CONFIG_PM_SLEEP
+	/* wowl can be supported when KEEP_POWER is true and (WAKE_SDIO_IRQ
+	 * is true or when platform data OOB irq is true).
+	 */
+	if ((sdio_get_host_pm_caps(sdiodev->func[1]) & MMC_PM_KEEP_POWER) &&
+	    ((sdio_get_host_pm_caps(sdiodev->func[1]) & MMC_PM_WAKE_SDIO_IRQ) ||
+	     (sdiodev->pdata && sdiodev->pdata->oob_irq_supported)))
+		bus_if->wowl_supported = true;
+#endif
 
 	brcmf_sdiod_change_state(sdiodev, BRCMF_SDIOD_DOWN);
 
@@ -1249,8 +1263,8 @@ static int brcmf_ops_sdio_suspend(struct device *dev)
 
 	sdio_flags = MMC_PM_KEEP_POWER;
 	if (sdiodev->wowl_enabled) {
-		if (sdiodev->settings->bus.sdio.oob_irq_supported)
-			enable_irq_wake(sdiodev->settings->bus.sdio.oob_irq_nr);
+		if (sdiodev->pdata->oob_irq_supported)
+			enable_irq_wake(sdiodev->pdata->oob_irq_nr);
 		else
 			sdio_flags |= MMC_PM_WAKE_SDIO_IRQ;
 	}
@@ -1282,7 +1296,7 @@ static const struct dev_pm_ops brcmf_sdio_pm_ops = {
 static struct sdio_driver brcmf_sdmmc_driver = {
 	.probe = brcmf_ops_sdio_probe,
 	.remove = brcmf_ops_sdio_remove,
-	.name = KBUILD_MODNAME,
+	.name = BRCMFMAC_SDIO_PDATA_NAME,
 	.id_table = brcmf_sdmmc_ids,
 	.drv = {
 		.owner = THIS_MODULE,
@@ -1290,6 +1304,37 @@ static struct sdio_driver brcmf_sdmmc_driver = {
 		.pm = &brcmf_sdio_pm_ops,
 #endif	/* CONFIG_PM_SLEEP */
 	},
+};
+
+static int __init brcmf_sdio_pd_probe(struct platform_device *pdev)
+{
+	brcmf_dbg(SDIO, "Enter\n");
+
+	brcmfmac_sdio_pdata = dev_get_platdata(&pdev->dev);
+
+	if (brcmfmac_sdio_pdata->power_on)
+		brcmfmac_sdio_pdata->power_on();
+
+	return 0;
+}
+
+static int brcmf_sdio_pd_remove(struct platform_device *pdev)
+{
+	brcmf_dbg(SDIO, "Enter\n");
+
+	if (brcmfmac_sdio_pdata->power_off)
+		brcmfmac_sdio_pdata->power_off();
+
+	sdio_unregister_driver(&brcmf_sdmmc_driver);
+
+	return 0;
+}
+
+static struct platform_driver brcmf_sdio_pd = {
+	.remove		= brcmf_sdio_pd_remove,
+	.driver		= {
+		.name	= BRCMFMAC_SDIO_PDATA_NAME,
+	}
 };
 
 void brcmf_sdio_register(void)
@@ -1305,6 +1350,19 @@ void brcmf_sdio_exit(void)
 {
 	brcmf_dbg(SDIO, "Enter\n");
 
-	sdio_unregister_driver(&brcmf_sdmmc_driver);
+	if (brcmfmac_sdio_pdata)
+		platform_driver_unregister(&brcmf_sdio_pd);
+	else
+		sdio_unregister_driver(&brcmf_sdmmc_driver);
 }
 
+void __init brcmf_sdio_init(void)
+{
+	int ret;
+
+	brcmf_dbg(SDIO, "Enter\n");
+
+	ret = platform_driver_probe(&brcmf_sdio_pd, brcmf_sdio_pd_probe);
+	if (ret == -ENODEV)
+		brcmf_dbg(SDIO, "No platform data available.\n");
+}

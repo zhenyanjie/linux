@@ -16,7 +16,6 @@ struct vc4_dev {
 	struct vc4_hvs *hvs;
 	struct vc4_crtc *crtc[3];
 	struct vc4_v3d *v3d;
-	struct vc4_dpi *dpi;
 
 	struct drm_fbdev_cma *fbdev;
 
@@ -53,7 +52,7 @@ struct vc4_dev {
 	/* Protects bo_cache and the BO stats. */
 	struct mutex bo_lock;
 
-	/* Sequence number for the last job queued in bin_job_list.
+	/* Sequence number for the last job queued in job_list.
 	 * Starts at 0 (no jobs emitted).
 	 */
 	uint64_t emit_seqno;
@@ -63,19 +62,11 @@ struct vc4_dev {
 	 */
 	uint64_t finished_seqno;
 
-	/* List of all struct vc4_exec_info for jobs to be executed in
-	 * the binner.  The first job in the list is the one currently
-	 * programmed into ct0ca for execution.
+	/* List of all struct vc4_exec_info for jobs to be executed.
+	 * The first job in the list is the one currently programmed
+	 * into ct0ca/ct1ca for execution.
 	 */
-	struct list_head bin_job_list;
-
-	/* List of all struct vc4_exec_info for jobs that have
-	 * completed binning and are ready for rendering.  The first
-	 * job in the list is the one currently programmed into ct1ca
-	 * for execution.
-	 */
-	struct list_head render_job_list;
-
+	struct list_head job_list;
 	/* List of the finished vc4_exec_infos waiting to be freed by
 	 * job_done_work.
 	 */
@@ -163,17 +154,7 @@ struct vc4_v3d {
 struct vc4_hvs {
 	struct platform_device *pdev;
 	void __iomem *regs;
-	u32 __iomem *dlist;
-
-	/* Memory manager for CRTCs to allocate space in the display
-	 * list.  Units are dwords.
-	 */
-	struct drm_mm dlist_mm;
-	/* Memory manager for the LBM memory used by HVS scaling. */
-	struct drm_mm lbm_mm;
-	spinlock_t mm_lock;
-
-	struct drm_mm_node mitchell_netravali_filter;
+	void __iomem *dlist;
 };
 
 struct vc4_plane {
@@ -305,29 +286,11 @@ struct vc4_exec_info {
 };
 
 static inline struct vc4_exec_info *
-vc4_first_bin_job(struct vc4_dev *vc4)
+vc4_first_job(struct vc4_dev *vc4)
 {
-	if (list_empty(&vc4->bin_job_list))
+	if (list_empty(&vc4->job_list))
 		return NULL;
-	return list_first_entry(&vc4->bin_job_list, struct vc4_exec_info, head);
-}
-
-static inline struct vc4_exec_info *
-vc4_first_render_job(struct vc4_dev *vc4)
-{
-	if (list_empty(&vc4->render_job_list))
-		return NULL;
-	return list_first_entry(&vc4->render_job_list,
-				struct vc4_exec_info, head);
-}
-
-static inline struct vc4_exec_info *
-vc4_last_render_job(struct vc4_dev *vc4)
-{
-	if (list_empty(&vc4->render_job_list))
-		return NULL;
-	return list_last_entry(&vc4->render_job_list,
-			       struct vc4_exec_info, head);
+	return list_first_entry(&vc4->job_list, struct vc4_exec_info, head);
 }
 
 /**
@@ -423,6 +386,7 @@ int vc4_bo_stats_debugfs(struct seq_file *m, void *arg);
 extern struct platform_driver vc4_crtc_driver;
 int vc4_enable_vblank(struct drm_device *dev, unsigned int crtc_id);
 void vc4_disable_vblank(struct drm_device *dev, unsigned int crtc_id);
+void vc4_cancel_page_flip(struct drm_crtc *crtc, struct drm_file *file);
 int vc4_crtc_debugfs_regs(struct seq_file *m, void *arg);
 
 /* vc4_debugfs.c */
@@ -431,10 +395,6 @@ void vc4_debugfs_cleanup(struct drm_minor *minor);
 
 /* vc4_drv.c */
 void __iomem *vc4_ioremap_regs(struct platform_device *dev, int index);
-
-/* vc4_dpi.c */
-extern struct platform_driver vc4_dpi_driver;
-int vc4_dpi_debugfs_regs(struct seq_file *m, void *unused);
 
 /* vc4_gem.c */
 void vc4_gem_init(struct drm_device *dev);
@@ -445,9 +405,7 @@ int vc4_wait_seqno_ioctl(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
 int vc4_wait_bo_ioctl(struct drm_device *dev, void *data,
 		      struct drm_file *file_priv);
-void vc4_submit_next_bin_job(struct drm_device *dev);
-void vc4_submit_next_render_job(struct drm_device *dev);
-void vc4_move_job_to_render(struct drm_device *dev, struct vc4_exec_info *exec);
+void vc4_submit_next_job(struct drm_device *dev);
 int vc4_wait_for_seqno(struct drm_device *dev, uint64_t seqno,
 		       uint64_t timeout_ns, bool interruptible);
 void vc4_job_handle_completed(struct vc4_dev *vc4);

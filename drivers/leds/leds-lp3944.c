@@ -199,11 +199,8 @@ static int lp3944_led_set(struct lp3944_led_data *led, u8 status)
 	if (status > LP3944_LED_STATUS_DIM1)
 		return -EINVAL;
 
-	/*
-	 * Invert status only when it's < 2 (i.e. 0 or 1) which means it's
-	 * controlling the on/off state directly.
-	 * When, instead, status is >= 2 don't invert it because it would mean
-	 * to mess with the hardware blinking mode.
+	/* invert only 0 and 1, leave unchanged the other values,
+	 * remember we are abusing status to set blink patterns
 	 */
 	if (led->type == LP3944_LED_TYPE_LED_INVERTED && status < 2)
 		status = 1 - status;

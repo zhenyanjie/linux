@@ -123,7 +123,8 @@ rockchip_user_fb_create(struct drm_device *dev, struct drm_file *file_priv,
 		unsigned int height = mode_cmd->height / (i ? vsub : 1);
 		unsigned int min_size;
 
-		obj = drm_gem_object_lookup(file_priv, mode_cmd->handles[i]);
+		obj = drm_gem_object_lookup(dev, file_priv,
+					    mode_cmd->handles[i]);
 		if (!obj) {
 			dev_err(dev->dev, "Failed to lookup GEM object\n");
 			ret = -ENXIO;
@@ -275,7 +276,7 @@ void rockchip_drm_atomic_work(struct work_struct *work)
 
 int rockchip_drm_atomic_commit(struct drm_device *dev,
 			       struct drm_atomic_state *state,
-			       bool nonblock)
+			       bool async)
 {
 	struct rockchip_drm_private *private = dev->dev_private;
 	struct rockchip_atomic_commit *commit = &private->commit;
@@ -285,7 +286,7 @@ int rockchip_drm_atomic_commit(struct drm_device *dev,
 	if (ret)
 		return ret;
 
-	/* serialize outstanding nonblocking commits */
+	/* serialize outstanding asynchronous commits */
 	mutex_lock(&commit->lock);
 	flush_work(&commit->work);
 
@@ -294,7 +295,7 @@ int rockchip_drm_atomic_commit(struct drm_device *dev,
 	commit->dev = dev;
 	commit->state = state;
 
-	if (nonblock)
+	if (async)
 		schedule_work(&commit->work);
 	else
 		rockchip_atomic_commit_complete(commit);

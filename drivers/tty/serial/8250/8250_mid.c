@@ -9,10 +9,9 @@
  * published by the Free Software Foundation.
  */
 
-#include <linux/bitops.h>
+#include <linux/rational.h>
 #include <linux/module.h>
 #include <linux/pci.h>
-#include <linux/rational.h>
 
 #include <linux/dma/hsu.h>
 #include <linux/8250_pci.h>
@@ -80,11 +79,7 @@ static int tng_setup(struct mid8250 *mid, struct uart_port *p)
 	struct pci_dev *pdev = to_pci_dev(p->dev);
 	int index = PCI_FUNC(pdev->devfn);
 
-	/*
-	 * Device 0000:00:04.0 is not a real HSU port. It provides a global
-	 * register set for all HSU ports, although it has the same PCI ID.
-	 * Skip it here.
-	 */
+	/* Currently no support for HSU port0 */
 	if (index-- == 0)
 		return -ENODEV;
 
@@ -153,9 +148,6 @@ static void mid8250_set_termios(struct uart_port *p,
 	unsigned long fuart = baud * ps;
 	unsigned long w = BIT(24) - 1;
 	unsigned long mul, div;
-
-	/* Gracefully handle the B0 case: fall back to B9600 */
-	fuart = fuart ? fuart : 9600 * 16;
 
 	if (mid->board->freq < fuart) {
 		/* Find prescaler value that satisfies Fuart < Fref */

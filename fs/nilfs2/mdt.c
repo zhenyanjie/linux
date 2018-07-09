@@ -13,7 +13,11 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * Written by Ryusuke Konishi.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * Written by Ryusuke Konishi <ryusuke@osrg.net>
  */
 
 #include <linux/buffer_head.h>
@@ -28,7 +32,6 @@
 #include "segment.h"
 #include "page.h"
 #include "mdt.h"
-#include "alloc.h"		/* nilfs_palloc_destroy_cache() */
 
 #include <trace/events/nilfs2.h>
 
@@ -107,7 +110,7 @@ static int nilfs_mdt_create_block(struct inode *inode, unsigned long block,
 
  failed_bh:
 	unlock_page(bh->b_page);
-	put_page(bh->b_page);
+	page_cache_release(bh->b_page);
 	brelse(bh);
 
  failed_unlock:
@@ -167,7 +170,7 @@ nilfs_mdt_submit_block(struct inode *inode, unsigned long blkoff,
 
  failed_bh:
 	unlock_page(bh->b_page);
-	put_page(bh->b_page);
+	page_cache_release(bh->b_page);
 	brelse(bh);
  failed:
 	return ret;
@@ -360,7 +363,7 @@ int nilfs_mdt_delete_block(struct inode *inode, unsigned long block)
 int nilfs_mdt_forget_block(struct inode *inode, unsigned long block)
 {
 	pgoff_t index = (pgoff_t)block >>
-		(PAGE_SHIFT - inode->i_blkbits);
+		(PAGE_CACHE_SHIFT - inode->i_blkbits);
 	struct page *page;
 	unsigned long first_block;
 	int ret = 0;
@@ -373,7 +376,7 @@ int nilfs_mdt_forget_block(struct inode *inode, unsigned long block)
 	wait_on_page_writeback(page);
 
 	first_block = (unsigned long)index <<
-		(PAGE_SHIFT - inode->i_blkbits);
+		(PAGE_CACHE_SHIFT - inode->i_blkbits);
 	if (page_has_buffers(page)) {
 		struct buffer_head *bh;
 
@@ -382,12 +385,40 @@ int nilfs_mdt_forget_block(struct inode *inode, unsigned long block)
 	}
 	still_dirty = PageDirty(page);
 	unlock_page(page);
-	put_page(page);
+	page_cache_release(page);
 
 	if (still_dirty ||
 	    invalidate_inode_pages2_range(inode->i_mapping, index, index) != 0)
 		ret = -EBUSY;
 	return ret;
+}
+
+/**
+ * nilfs_mdt_mark_block_dirty - mark a block on the meta data file dirty.
+ * @inode: inode of the meta data file
+ * @block: block offset
+ *
+ * Return Value: On success, it returns 0. On error, the following negative
+ * error code is returned.
+ *
+ * %-ENOMEM - Insufficient memory available.
+ *
+ * %-EIO - I/O error
+ *
+ * %-ENOENT - the specified block does not exist (hole block)
+ */
+int nilfs_mdt_mark_block_dirty(struct inode *inode, unsigned long block)
+{
+	struct buffer_head *bh;
+	int err;
+
+	err = nilfs_mdt_read_block(inode, block, 0, &bh);
+	if (unlikely(err))
+		return err;
+	mark_buffer_dirty(bh);
+	nilfs_mdt_mark_dirty(inode);
+	brelse(bh);
+	return 0;
 }
 
 int nilfs_mdt_fetch_dirty(struct inode *inode)
@@ -466,32 +497,8 @@ int nilfs_mdt_init(struct inode *inode, gfp_t gfp_mask, size_t objsz)
 	return 0;
 }
 
-/**
- * nilfs_mdt_clear - do cleanup for the metadata file
- * @inode: inode of the metadata file
- */
-void nilfs_mdt_clear(struct inode *inode)
-{
-	struct nilfs_mdt_info *mdi = NILFS_MDT(inode);
-
-	if (mdi->mi_palloc_cache)
-		nilfs_palloc_destroy_cache(inode);
-}
-
-/**
- * nilfs_mdt_destroy - release resources used by the metadata file
- * @inode: inode of the metadata file
- */
-void nilfs_mdt_destroy(struct inode *inode)
-{
-	struct nilfs_mdt_info *mdi = NILFS_MDT(inode);
-
-	kfree(mdi->mi_bgl); /* kfree(NULL) is safe */
-	kfree(mdi);
-}
-
-void nilfs_mdt_set_entry_size(struct inode *inode, unsigned int entry_size,
-			      unsigned int header_size)
+void nilfs_mdt_set_entry_size(struct inode *inode, unsigned entry_size,
+			      unsigned header_size)
 {
 	struct nilfs_mdt_info *mi = NILFS_MDT(inode);
 
@@ -571,7 +578,7 @@ int nilfs_mdt_freeze_buffer(struct inode *inode, struct buffer_head *bh)
 	}
 
 	unlock_page(page);
-	put_page(page);
+	page_cache_release(page);
 	return 0;
 }
 
@@ -590,7 +597,7 @@ nilfs_mdt_get_frozen_buffer(struct inode *inode, struct buffer_head *bh)
 			bh_frozen = nilfs_page_get_nth_block(page, n);
 		}
 		unlock_page(page);
-		put_page(page);
+		page_cache_release(page);
 	}
 	return bh_frozen;
 }

@@ -4,7 +4,6 @@
 #include <asm/io.h>
 #include <asm/mmu_context.h>
 #include <asm/neon.h>
-#include <asm/ptrace.h>
 #include <asm/tlbflush.h>
 
 #ifdef CONFIG_EFI
@@ -15,28 +14,31 @@ extern void efi_init(void);
 
 int efi_create_mapping(struct mm_struct *mm, efi_memory_desc_t *md);
 
-#define efi_set_mapping_permissions	efi_create_mapping
-
-#define arch_efi_call_virt_setup()					\
-({									\
-	kernel_neon_begin();						\
-	efi_virtmap_load();						\
-})
-
-#define arch_efi_call_virt(f, args...)					\
+#define efi_call_virt(f, ...)						\
 ({									\
 	efi_##f##_t *__f;						\
+	efi_status_t __s;						\
+									\
+	kernel_neon_begin();						\
+	efi_virtmap_load();						\
 	__f = efi.systab->runtime->f;					\
-	__f(args);							\
+	__s = __f(__VA_ARGS__);						\
+	efi_virtmap_unload();						\
+	kernel_neon_end();						\
+	__s;								\
 })
 
-#define arch_efi_call_virt_teardown()					\
+#define __efi_call_virt(f, ...)						\
 ({									\
+	efi_##f##_t *__f;						\
+									\
+	kernel_neon_begin();						\
+	efi_virtmap_load();						\
+	__f = efi.systab->runtime->f;					\
+	__f(__VA_ARGS__);						\
 	efi_virtmap_unload();						\
 	kernel_neon_end();						\
 })
-
-#define ARCH_EFI_IRQ_FLAGS_MASK (PSR_D_BIT | PSR_A_BIT | PSR_I_BIT | PSR_F_BIT)
 
 /* arch specific definitions used by the stub code */
 
@@ -48,16 +50,7 @@ int efi_create_mapping(struct mm_struct *mm, efi_memory_desc_t *md);
 #define EFI_FDT_ALIGN	SZ_2M   /* used by allocate_new_fdt_and_exit_boot() */
 #define MAX_FDT_OFFSET	SZ_512M
 
-#define efi_call_early(f, ...)		sys_table_arg->boottime->f(__VA_ARGS__)
-#define __efi_call_early(f, ...)	f(__VA_ARGS__)
-#define efi_is_64bit()			(true)
-
-#define alloc_screen_info(x...)		&screen_info
-#define free_screen_info(x...)
-
-static inline void efifb_setup_from_dmi(struct screen_info *si, const char *opt)
-{
-}
+#define efi_call_early(f, ...) sys_table_arg->boottime->f(__VA_ARGS__)
 
 #define EFI_ALLOC_ALIGN		SZ_64K
 

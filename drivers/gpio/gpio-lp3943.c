@@ -204,8 +204,15 @@ static int lp3943_gpio_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, lp3943_gpio);
 
-	return devm_gpiochip_add_data(&pdev->dev, &lp3943_gpio->chip,
-				      lp3943_gpio);
+	return gpiochip_add_data(&lp3943_gpio->chip, lp3943_gpio);
+}
+
+static int lp3943_gpio_remove(struct platform_device *pdev)
+{
+	struct lp3943_gpio *lp3943_gpio = platform_get_drvdata(pdev);
+
+	gpiochip_remove(&lp3943_gpio->chip);
+	return 0;
 }
 
 static const struct of_device_id lp3943_gpio_of_match[] = {
@@ -216,6 +223,7 @@ MODULE_DEVICE_TABLE(of, lp3943_gpio_of_match);
 
 static struct platform_driver lp3943_gpio_driver = {
 	.probe = lp3943_gpio_probe,
+	.remove = lp3943_gpio_remove,
 	.driver = {
 		.name = "lp3943-gpio",
 		.of_match_table = lp3943_gpio_of_match,

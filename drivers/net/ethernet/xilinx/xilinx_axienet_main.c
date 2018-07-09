@@ -508,7 +508,7 @@ static void axienet_device_reset(struct net_device *ndev)
 	axienet_set_multicast_list(ndev);
 	axienet_setoptions(ndev, lp->options);
 
-	netif_trans_update(ndev);
+	ndev->trans_start = jiffies;
 }
 
 /**

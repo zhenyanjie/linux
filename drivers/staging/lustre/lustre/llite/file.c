@@ -45,7 +45,6 @@
 #include "../include/lustre_lite.h"
 #include <linux/pagemap.h>
 #include <linux/file.h>
-#include <linux/mount.h>
 #include "llite_internal.h"
 #include "../include/lustre/ll_fiemap.h"
 
@@ -65,8 +64,8 @@ static struct ll_file_data *ll_file_data_get(void)
 {
 	struct ll_file_data *fd;
 
-	fd = kmem_cache_zalloc(ll_file_data_slab, GFP_NOFS);
-	if (!fd)
+	fd = kmem_cache_alloc(ll_file_data_slab, GFP_NOFS | __GFP_ZERO);
+	if (fd == NULL)
 		return NULL;
 	fd->fd_write_failed = false;
 	return fd;
@@ -74,7 +73,7 @@ static struct ll_file_data *ll_file_data_get(void)
 
 static void ll_file_data_put(struct ll_file_data *fd)
 {
-	if (fd)
+	if (fd != NULL)
 		kmem_cache_free(ll_file_data_slab, fd);
 }
 
@@ -88,7 +87,8 @@ void ll_pack_inode2opdata(struct inode *inode, struct md_op_data *op_data,
 	op_data->op_attr.ia_ctime = inode->i_ctime;
 	op_data->op_attr.ia_size = i_size_read(inode);
 	op_data->op_attr_blocks = inode->i_blocks;
-	op_data->op_attr_flags = ll_inode_to_ext_flags(inode->i_flags);
+	((struct ll_iattr *)&op_data->op_attr)->ia_attr_flags =
+					ll_inode_to_ext_flags(inode->i_flags);
 	op_data->op_ioepoch = ll_i2info(inode)->lli_ioepoch;
 	if (fh)
 		op_data->op_handle = *fh;
@@ -134,7 +134,7 @@ static int ll_close_inode_openhandle(struct obd_export *md_exp,
 	int epoch_close = 1;
 	int rc;
 
-	if (!obd) {
+	if (obd == NULL) {
 		/*
 		 * XXX: in case of LMV, is this correct to access
 		 * ->exp_handle?
@@ -153,7 +153,7 @@ static int ll_close_inode_openhandle(struct obd_export *md_exp,
 	}
 
 	ll_prepare_close(inode, op_data, och);
-	if (data_version) {
+	if (data_version != NULL) {
 		/* Pass in data_version implies release. */
 		op_data->op_bias |= MDS_HSM_RELEASE;
 		op_data->op_data_version = *data_version;
@@ -166,24 +166,20 @@ static int ll_close_inode_openhandle(struct obd_export *md_exp,
 		/* This close must have the epoch closed. */
 		LASSERT(epoch_close);
 		/* MDS has instructed us to obtain Size-on-MDS attribute from
-		 * OSTs and send setattr to back to MDS.
-		 */
+		 * OSTs and send setattr to back to MDS. */
 		rc = ll_som_update(inode, op_data);
 		if (rc) {
-			CERROR("%s: inode "DFID" mdc Size-on-MDS update failed: rc = %d\n",
-			       ll_i2mdexp(inode)->exp_obd->obd_name,
-			       PFID(ll_inode2fid(inode)), rc);
+			CERROR("inode %lu mdc Size-on-MDS update failed: rc = %d\n",
+			       inode->i_ino, rc);
 			rc = 0;
 		}
 	} else if (rc) {
-		CERROR("%s: inode "DFID" mdc close failed: rc = %d\n",
-		       ll_i2mdexp(inode)->exp_obd->obd_name,
-		       PFID(ll_inode2fid(inode)), rc);
+		CERROR("inode %lu mdc close failed: rc = %d\n",
+		       inode->i_ino, rc);
 	}
 
 	/* DATA_MODIFIED flag was successfully sent on close, cancel data
-	 * modification flag.
-	 */
+	 * modification flag. */
 	if (rc == 0 && (op_data->op_bias & MDS_DATA_MODIFIED)) {
 		struct ll_inode_info *lli = ll_i2info(inode);
 
@@ -246,8 +242,7 @@ int ll_md_real_close(struct inode *inode, fmode_t fmode)
 	mutex_lock(&lli->lli_och_mutex);
 	if (*och_usecount > 0) {
 		/* There are still users of this handle, so skip
-		 * freeing it.
-		 */
+		 * freeing it. */
 		mutex_unlock(&lli->lli_och_mutex);
 		return 0;
 	}
@@ -256,10 +251,9 @@ int ll_md_real_close(struct inode *inode, fmode_t fmode)
 	*och_p = NULL;
 	mutex_unlock(&lli->lli_och_mutex);
 
-	if (och) {
+	if (och != NULL) {
 		/* There might be a race and this handle may already
-		 * be closed.
-		 */
+		   be closed. */
 		rc = ll_close_inode_openhandle(ll_i2sbi(inode)->ll_md_exp,
 					       inode, och, NULL);
 	}
@@ -280,31 +274,28 @@ static int ll_md_close(struct obd_export *md_exp, struct inode *inode,
 
 	/* clear group lock, if present */
 	if (unlikely(fd->fd_flags & LL_FILE_GROUP_LOCKED))
-		ll_put_grouplock(inode, file, fd->fd_grouplock.lg_gid);
+		ll_put_grouplock(inode, file, fd->fd_grouplock.cg_gid);
 
-	if (fd->fd_lease_och) {
+	if (fd->fd_lease_och != NULL) {
 		bool lease_broken;
 
 		/* Usually the lease is not released when the
-		 * application crashed, we need to release here.
-		 */
+		 * application crashed, we need to release here. */
 		rc = ll_lease_close(fd->fd_lease_och, inode, &lease_broken);
-		CDEBUG(rc ? D_ERROR : D_INODE,
-		       "Clean up lease " DFID " %d/%d\n",
-		       PFID(&lli->lli_fid), rc, lease_broken);
+		CDEBUG(rc ? D_ERROR : D_INODE, "Clean up lease "DFID" %d/%d\n",
+			PFID(&lli->lli_fid), rc, lease_broken);
 
 		fd->fd_lease_och = NULL;
 	}
 
-	if (fd->fd_och) {
+	if (fd->fd_och != NULL) {
 		rc = ll_close_inode_openhandle(md_exp, inode, fd->fd_och, NULL);
 		fd->fd_och = NULL;
 		goto out;
 	}
 
 	/* Let's see if we have good enough OPEN lock on the file and if
-	 * we can skip talking to MDS
-	 */
+	   we can skip talking to MDS */
 
 	mutex_lock(&lli->lli_och_mutex);
 	if (fd->fd_omode & FMODE_WRITE) {
@@ -345,13 +336,14 @@ int ll_file_release(struct inode *inode, struct file *file)
 	struct ll_inode_info *lli = ll_i2info(inode);
 	int rc;
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p)\n",
-	       PFID(ll_inode2fid(inode)), inode);
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu/%u(%p)\n", inode->i_ino,
+	       inode->i_generation, inode);
 
 #ifdef CONFIG_FS_POSIX_ACL
 	if (sbi->ll_flags & LL_SBI_RMT_CLIENT && is_root_inode(inode)) {
 		struct ll_file_data *fd = LUSTRE_FPRIVATE(file);
 
+		LASSERT(fd != NULL);
 		if (unlikely(fd->fd_flags & LL_FILE_RMTACL)) {
 			fd->fd_flags &= ~LL_FILE_RMTACL;
 			rct_del(&sbi->ll_rct, current_pid());
@@ -363,12 +355,11 @@ int ll_file_release(struct inode *inode, struct file *file)
 	if (!is_root_inode(inode))
 		ll_stats_ops_tally(sbi, LPROC_LL_RELEASE, 1);
 	fd = LUSTRE_FPRIVATE(file);
-	LASSERT(fd);
+	LASSERT(fd != NULL);
 
-	/* The last ref on @file, maybe not be the owner pid of statahead.
+	/* The last ref on @file, maybe not the owner pid of statahead.
 	 * Different processes can open the same dir, "ll_opendir_key" means:
-	 * it is me that should stop the statahead thread.
-	 */
+	 * it is me that should stop the statahead thread. */
 	if (S_ISDIR(inode->i_mode) && lli->lli_opendir_key == fd &&
 	    lli->lli_opendir_pid != 0)
 		ll_stop_statahead(inode, lli->lli_opendir_key);
@@ -405,16 +396,16 @@ static int ll_intent_file_open(struct dentry *dentry, void *lmm,
 	__u32 opc = LUSTRE_OPC_ANY;
 	int rc;
 
-	/* Usually we come here only for NFSD, and we want open lock. */
+	/* Usually we come here only for NFSD, and we want open lock.
+	   But we can also get here with pre 2.6.15 patchless kernels, and in
+	   that case that lock is also ok */
 	/* We can also get here if there was cached open handle in revalidate_it
 	 * but it disappeared while we were getting from there to ll_file_open.
 	 * But this means this file was closed and immediately opened which
-	 * makes a good candidate for using OPEN lock
-	 */
+	 * makes a good candidate for using OPEN lock */
 	/* If lmmsize & lmm are not 0, we are just setting stripe info
-	 * parameters. No need for the open lock
-	 */
-	if (!lmm && lmmsize == 0) {
+	 * parameters. No need for the open lock */
+	if (lmm == NULL && lmmsize == 0) {
 		itp->it_flags |= MDS_OPEN_LOCK;
 		if (itp->it_flags & FMODE_WRITE)
 			opc = LUSTRE_OPC_CREATE;
@@ -435,7 +426,7 @@ static int ll_intent_file_open(struct dentry *dentry, void *lmm,
 		* with messages with -ESTALE errors.
 		*/
 		if (!it_disposition(itp, DISP_OPEN_OPEN) ||
-		    it_open_error(DISP_OPEN_OPEN, itp))
+		     it_open_error(DISP_OPEN_OPEN, itp))
 			goto out;
 		ll_release_openhandle(inode, itp);
 		goto out;
@@ -501,7 +492,7 @@ static int ll_local_open(struct file *file, struct lookup_intent *it,
 
 	LASSERT(!LUSTRE_FPRIVATE(file));
 
-	LASSERT(fd);
+	LASSERT(fd != NULL);
 
 	if (och) {
 		struct ptlrpc_request *req = it->d.lustre.it_data;
@@ -545,14 +536,14 @@ int ll_file_open(struct inode *inode, struct file *file)
 	struct ll_file_data *fd;
 	int rc = 0, opendir_set = 0;
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p), flags %o\n",
-	       PFID(ll_inode2fid(inode)), inode, file->f_flags);
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu/%u(%p), flags %o\n", inode->i_ino,
+	       inode->i_generation, inode, file->f_flags);
 
 	it = file->private_data; /* XXX: compat macro */
 	file->private_data = NULL; /* prevent ll_local_open assertion */
 
 	fd = ll_file_data_get();
-	if (!fd) {
+	if (fd == NULL) {
 		rc = -ENOMEM;
 		goto out_openerr;
 	}
@@ -560,7 +551,7 @@ int ll_file_open(struct inode *inode, struct file *file)
 	fd->fd_file = file;
 	if (S_ISDIR(inode->i_mode)) {
 		spin_lock(&lli->lli_sa_lock);
-		if (!lli->lli_opendir_key && !lli->lli_sai &&
+		if (lli->lli_opendir_key == NULL && lli->lli_sai == NULL &&
 		    lli->lli_opendir_pid == 0) {
 			lli->lli_opendir_key = fd;
 			lli->lli_opendir_pid = current_pid();
@@ -577,8 +568,7 @@ int ll_file_open(struct inode *inode, struct file *file)
 	if (!it || !it->d.lustre.it_disposition) {
 		/* Convert f_flags into access mode. We cannot use file->f_mode,
 		 * because everything but O_ACCMODE mask was stripped from
-		 * there
-		 */
+		 * there */
 		if ((oit.it_flags + 1) & O_ACCMODE)
 			oit.it_flags++;
 		if (file->f_flags & O_TRUNC)
@@ -587,20 +577,17 @@ int ll_file_open(struct inode *inode, struct file *file)
 		/* kernel only call f_op->open in dentry_open.  filp_open calls
 		 * dentry_open after call to open_namei that checks permissions.
 		 * Only nfsd_open call dentry_open directly without checking
-		 * permissions and because of that this code below is safe.
-		 */
+		 * permissions and because of that this code below is safe. */
 		if (oit.it_flags & (FMODE_WRITE | FMODE_READ))
 			oit.it_flags |= MDS_OPEN_OWNEROVERRIDE;
 
 		/* We do not want O_EXCL here, presumably we opened the file
-		 * already? XXX - NFS implications?
-		 */
+		 * already? XXX - NFS implications? */
 		oit.it_flags &= ~O_EXCL;
 
 		/* bug20584, if "it_flags" contains O_CREAT, the file will be
 		 * created if necessary, then "IT_CREAT" should be set to keep
-		 * consistent with it
-		 */
+		 * consistent with it */
 		if (oit.it_flags & O_CREAT)
 			oit.it_op |= IT_CREAT;
 
@@ -624,8 +611,7 @@ restart:
 	if (*och_p) { /* Open handle is present */
 		if (it_disposition(it, DISP_OPEN_OPEN)) {
 			/* Well, there's extra open request that we do not need,
-			 * let's close it somehow. This will decref request.
-			 */
+			   let's close it somehow. This will decref request. */
 			rc = it_open_error(DISP_OPEN_OPEN, it);
 			if (rc) {
 				mutex_unlock(&lli->lli_och_mutex);
@@ -646,11 +632,10 @@ restart:
 		LASSERT(*och_usecount == 0);
 		if (!it->d.lustre.it_disposition) {
 			/* We cannot just request lock handle now, new ELC code
-			 * means that one of other OPEN locks for this file
-			 * could be cancelled, and since blocking ast handler
-			 * would attempt to grab och_mutex as well, that would
-			 * result in a deadlock
-			 */
+			   means that one of other OPEN locks for this file
+			   could be cancelled, and since blocking ast handler
+			   would attempt to grab och_mutex as well, that would
+			   result in a deadlock */
 			mutex_unlock(&lli->lli_och_mutex);
 			it->it_create_mode |= M_CHECK_STALE;
 			rc = ll_intent_file_open(file->f_path.dentry, NULL, 0, it);
@@ -670,18 +655,14 @@ restart:
 
 		/* md_intent_lock() didn't get a request ref if there was an
 		 * open error, so don't do cleanup on the request here
-		 * (bug 3430)
-		 */
+		 * (bug 3430) */
 		/* XXX (green): Should not we bail out on any error here, not
-		 * just open error?
-		 */
+		 * just open error? */
 		rc = it_open_error(DISP_OPEN_OPEN, it);
 		if (rc)
 			goto out_och_free;
 
-		LASSERTF(it_disposition(it, DISP_ENQ_OPEN_REF),
-			 "inode %p: disposition %x, status %d\n", inode,
-			 it_disposition(it, ~0), it->d.lustre.it_status);
+		LASSERT(it_disposition(it, DISP_ENQ_OPEN_REF));
 
 		rc = ll_local_open(file, it, fd, *och_p);
 		if (rc)
@@ -691,9 +672,8 @@ restart:
 	fd = NULL;
 
 	/* Must do this outside lli_och_mutex lock to prevent deadlock where
-	 * different kind of OPEN lock for this same inode gets cancelled
-	 * by ldlm_cancel_lru
-	 */
+	   different kind of OPEN lock for this same inode gets cancelled
+	   by ldlm_cancel_lru */
 	if (!S_ISREG(inode->i_mode))
 		goto out_och_free;
 
@@ -732,8 +712,7 @@ out_openerr:
 }
 
 static int ll_md_blocking_lease_ast(struct ldlm_lock *lock,
-				    struct ldlm_lock_desc *desc,
-				    void *data, int flag)
+			struct ldlm_lock_desc *desc, void *data, int flag)
 {
 	int rc;
 	struct lustre_handle lockh;
@@ -773,7 +752,7 @@ ll_lease_open(struct inode *inode, struct file *file, fmode_t fmode,
 	if (fmode != FMODE_WRITE && fmode != FMODE_READ)
 		return ERR_PTR(-EINVAL);
 
-	if (file) {
+	if (file != NULL) {
 		struct ll_inode_info *lli = ll_i2info(inode);
 		struct ll_file_data *fd = LUSTRE_FPRIVATE(file);
 		struct obd_client_handle **och_p;
@@ -785,18 +764,18 @@ ll_lease_open(struct inode *inode, struct file *file, fmode_t fmode,
 		/* Get the openhandle of the file */
 		rc = -EBUSY;
 		mutex_lock(&lli->lli_och_mutex);
-		if (fd->fd_lease_och) {
+		if (fd->fd_lease_och != NULL) {
 			mutex_unlock(&lli->lli_och_mutex);
 			return ERR_PTR(rc);
 		}
 
-		if (!fd->fd_och) {
+		if (fd->fd_och == NULL) {
 			if (file->f_mode & FMODE_WRITE) {
-				LASSERT(lli->lli_mds_write_och);
+				LASSERT(lli->lli_mds_write_och != NULL);
 				och_p = &lli->lli_mds_write_och;
 				och_usecount = &lli->lli_open_fd_write_count;
 			} else {
-				LASSERT(lli->lli_mds_read_och);
+				LASSERT(lli->lli_mds_read_och != NULL);
 				och_p = &lli->lli_mds_read_och;
 				och_usecount = &lli->lli_open_fd_read_count;
 			}
@@ -811,7 +790,7 @@ ll_lease_open(struct inode *inode, struct file *file, fmode_t fmode,
 		if (rc < 0) /* more than 1 opener */
 			return ERR_PTR(rc);
 
-		LASSERT(fd->fd_och);
+		LASSERT(fd->fd_och != NULL);
 		old_handle = fd->fd_och->och_fh;
 	}
 
@@ -820,7 +799,7 @@ ll_lease_open(struct inode *inode, struct file *file, fmode_t fmode,
 		return ERR_PTR(-ENOMEM);
 
 	op_data = ll_prep_md_op_data(NULL, inode, inode, NULL, 0, 0,
-				     LUSTRE_OPC_ANY, NULL);
+					LUSTRE_OPC_ANY, NULL);
 	if (IS_ERR(op_data)) {
 		rc = PTR_ERR(op_data);
 		goto out;
@@ -832,14 +811,13 @@ ll_lease_open(struct inode *inode, struct file *file, fmode_t fmode,
 	it.it_flags = fmode | open_flags;
 	it.it_flags |= MDS_OPEN_LOCK | MDS_OPEN_BY_FID | MDS_OPEN_LEASE;
 	rc = md_intent_lock(sbi->ll_md_exp, op_data, NULL, 0, &it, 0, &req,
-			    ll_md_blocking_lease_ast,
+				ll_md_blocking_lease_ast,
 	/* LDLM_FL_NO_LRU: To not put the lease lock into LRU list, otherwise
 	 * it can be cancelled which may mislead applications that the lease is
 	 * broken;
 	 * LDLM_FL_EXCL: Set this flag so that it won't be matched by normal
 	 * open in ll_md_blocking_ast(). Otherwise as ll_md_blocking_lease_ast
-	 * doesn't deal with openhandle, so normal openhandle will be leaked.
-	 */
+	 * doesn't deal with openhandle, so normal openhandle will be leaked. */
 				LDLM_FL_NO_LRU | LDLM_FL_EXCL);
 	ll_finish_md_op_data(op_data);
 	ptlrpc_req_finished(req);
@@ -869,8 +847,8 @@ ll_lease_open(struct inode *inode, struct file *file, fmode_t fmode,
 	    it.d.lustre.it_lock_bits != MDS_INODELOCK_OPEN) {
 		/* open lock must return for lease */
 		CERROR(DFID "lease granted but no open lock, %d/%llu.\n",
-		       PFID(ll_inode2fid(inode)), it.d.lustre.it_lock_mode,
-		       it.d.lustre.it_lock_bits);
+			PFID(ll_inode2fid(inode)), it.d.lustre.it_lock_mode,
+			it.d.lustre.it_lock_bits);
 		rc = -EPROTO;
 		goto out_close;
 	}
@@ -879,19 +857,16 @@ ll_lease_open(struct inode *inode, struct file *file, fmode_t fmode,
 	return och;
 
 out_close:
-	/* Cancel open lock */
+	rc2 = ll_close_inode_openhandle(sbi->ll_md_exp, inode, och, NULL);
+	if (rc2)
+		CERROR("Close openhandle returned %d\n", rc2);
+
+	/* cancel open lock */
 	if (it.d.lustre.it_lock_mode != 0) {
 		ldlm_lock_decref_and_cancel(&och->och_lease_handle,
-					    it.d.lustre.it_lock_mode);
+						it.d.lustre.it_lock_mode);
 		it.d.lustre.it_lock_mode = 0;
-		och->och_lease_handle.cookie = 0ULL;
 	}
-	rc2 = ll_close_inode_openhandle(sbi->ll_md_exp, inode, och, NULL);
-	if (rc2 < 0)
-		CERROR("%s: error closing file "DFID": %d\n",
-		       ll_get_fsname(inode->i_sb, NULL, 0),
-		       PFID(&ll_i2info(inode)->lli_fid), rc2);
-	och = NULL; /* och has been freed in ll_close_inode_openhandle() */
 out_release_it:
 	ll_intent_release(&it);
 out:
@@ -911,19 +886,19 @@ static int ll_lease_close(struct obd_client_handle *och, struct inode *inode,
 	int rc;
 
 	lock = ldlm_handle2lock(&och->och_lease_handle);
-	if (lock) {
+	if (lock != NULL) {
 		lock_res_and_lock(lock);
 		cancelled = ldlm_is_cancel(lock);
 		unlock_res_and_lock(lock);
-		LDLM_LOCK_PUT(lock);
+		ldlm_lock_put(lock);
 	}
 
-	CDEBUG(D_INODE, "lease for " DFID " broken? %d\n",
-	       PFID(&ll_i2info(inode)->lli_fid), cancelled);
+	CDEBUG(D_INODE, "lease for "DFID" broken? %d\n",
+		PFID(&ll_i2info(inode)->lli_fid), cancelled);
 
 	if (!cancelled)
 		ldlm_cli_cancel(&och->och_lease_handle, 0);
-	if (lease_broken)
+	if (lease_broken != NULL)
 		*lease_broken = cancelled;
 
 	rc = ll_close_inode_openhandle(ll_i2sbi(inode)->ll_md_exp, inode, och,
@@ -933,13 +908,13 @@ static int ll_lease_close(struct obd_client_handle *och, struct inode *inode,
 
 /* Fills the obdo with the attributes for the lsm */
 static int ll_lsm_getattr(struct lov_stripe_md *lsm, struct obd_export *exp,
-			  struct obdo *obdo, __u64 ioepoch, int dv_flags)
+			  struct obdo *obdo, __u64 ioepoch, int sync)
 {
 	struct ptlrpc_request_set *set;
 	struct obd_info	    oinfo = { };
 	int			rc;
 
-	LASSERT(lsm);
+	LASSERT(lsm != NULL);
 
 	oinfo.oi_md = lsm;
 	oinfo.oi_oa = obdo;
@@ -952,16 +927,14 @@ static int ll_lsm_getattr(struct lov_stripe_md *lsm, struct obd_export *exp,
 			       OBD_MD_FLMTIME | OBD_MD_FLCTIME |
 			       OBD_MD_FLGROUP | OBD_MD_FLEPOCH |
 			       OBD_MD_FLDATAVERSION;
-	if (dv_flags & (LL_DV_WR_FLUSH | LL_DV_RD_FLUSH)) {
+	if (sync) {
 		oinfo.oi_oa->o_valid |= OBD_MD_FLFLAGS;
 		oinfo.oi_oa->o_flags |= OBD_FL_SRVLOCK;
-		if (dv_flags & LL_DV_WR_FLUSH)
-			oinfo.oi_oa->o_flags |= OBD_FL_FLUSH;
 	}
 
 	set = ptlrpc_prep_set();
-	if (!set) {
-		CERROR("cannot allocate ptlrpc set: rc = %d\n", -ENOMEM);
+	if (set == NULL) {
+		CERROR("can't allocate ptlrpc set\n");
 		rc = -ENOMEM;
 	} else {
 		rc = obd_getattr_async(exp, &oinfo, set);
@@ -969,16 +942,11 @@ static int ll_lsm_getattr(struct lov_stripe_md *lsm, struct obd_export *exp,
 			rc = ptlrpc_set_wait(set);
 		ptlrpc_set_destroy(set);
 	}
-	if (rc == 0) {
+	if (rc == 0)
 		oinfo.oi_oa->o_valid &= (OBD_MD_FLBLOCKS | OBD_MD_FLBLKSZ |
 					 OBD_MD_FLATIME | OBD_MD_FLMTIME |
 					 OBD_MD_FLCTIME | OBD_MD_FLSIZE |
-					 OBD_MD_FLDATAVERSION | OBD_MD_FLFLAGS);
-		if (dv_flags & LL_DV_WR_FLUSH &&
-		    !(oinfo.oi_oa->o_valid & OBD_MD_FLFLAGS &&
-		      oinfo.oi_oa->o_flags & OBD_FL_FLUSH))
-			return -ENOTSUPP;
-	}
+					 OBD_MD_FLDATAVERSION);
 	return rc;
 }
 
@@ -994,7 +962,7 @@ int ll_inode_getattr(struct inode *inode, struct obdo *obdo,
 
 	lsm = ccc_inode_lsm_get(inode);
 	rc = ll_lsm_getattr(lsm, ll_i2dtexp(inode),
-			    obdo, ioepoch, sync ? LL_DV_RD_FLUSH : 0);
+			    obdo, ioepoch, sync);
 	if (rc == 0) {
 		struct ost_id *oi = lsm ? &lsm->lsm_oi : &obdo->o_oi;
 
@@ -1008,57 +976,49 @@ int ll_inode_getattr(struct inode *inode, struct obdo *obdo,
 	return rc;
 }
 
-int ll_merge_attr(const struct lu_env *env, struct inode *inode)
+int ll_merge_lvb(const struct lu_env *env, struct inode *inode)
 {
 	struct ll_inode_info *lli = ll_i2info(inode);
 	struct cl_object *obj = lli->lli_clob;
-	struct cl_attr *attr = vvp_env_thread_attr(env);
-	s64 atime;
-	s64 mtime;
-	s64 ctime;
+	struct cl_attr *attr = ccc_env_thread_attr(env);
+	struct ost_lvb lvb;
 	int rc = 0;
 
 	ll_inode_size_lock(inode);
-
 	/* merge timestamps the most recently obtained from mds with
-	 * timestamps obtained from osts
-	 */
-	LTIME_S(inode->i_atime) = lli->lli_atime;
-	LTIME_S(inode->i_mtime) = lli->lli_mtime;
-	LTIME_S(inode->i_ctime) = lli->lli_ctime;
+	   timestamps obtained from osts */
+	LTIME_S(inode->i_atime) = lli->lli_lvb.lvb_atime;
+	LTIME_S(inode->i_mtime) = lli->lli_lvb.lvb_mtime;
+	LTIME_S(inode->i_ctime) = lli->lli_lvb.lvb_ctime;
 
-	mtime = LTIME_S(inode->i_mtime);
-	atime = LTIME_S(inode->i_atime);
-	ctime = LTIME_S(inode->i_ctime);
+	lvb.lvb_size = i_size_read(inode);
+	lvb.lvb_blocks = inode->i_blocks;
+	lvb.lvb_mtime = LTIME_S(inode->i_mtime);
+	lvb.lvb_atime = LTIME_S(inode->i_atime);
+	lvb.lvb_ctime = LTIME_S(inode->i_ctime);
 
 	cl_object_attr_lock(obj);
 	rc = cl_object_attr_get(env, obj, attr);
 	cl_object_attr_unlock(obj);
 
-	if (rc != 0)
-		goto out_size_unlock;
+	if (rc == 0) {
+		if (lvb.lvb_atime < attr->cat_atime)
+			lvb.lvb_atime = attr->cat_atime;
+		if (lvb.lvb_ctime < attr->cat_ctime)
+			lvb.lvb_ctime = attr->cat_ctime;
+		if (lvb.lvb_mtime < attr->cat_mtime)
+			lvb.lvb_mtime = attr->cat_mtime;
 
-	if (atime < attr->cat_atime)
-		atime = attr->cat_atime;
+		CDEBUG(D_VFSTRACE, DFID" updating i_size %llu\n",
+				PFID(&lli->lli_fid), attr->cat_size);
+		cl_isize_write_nolock(inode, attr->cat_size);
 
-	if (ctime < attr->cat_ctime)
-		ctime = attr->cat_ctime;
+		inode->i_blocks = attr->cat_blocks;
 
-	if (mtime < attr->cat_mtime)
-		mtime = attr->cat_mtime;
-
-	CDEBUG(D_VFSTRACE, DFID " updating i_size %llu\n",
-	       PFID(&lli->lli_fid), attr->cat_size);
-
-	i_size_write(inode, attr->cat_size);
-
-	inode->i_blocks = attr->cat_blocks;
-
-	LTIME_S(inode->i_mtime) = mtime;
-	LTIME_S(inode->i_atime) = atime;
-	LTIME_S(inode->i_ctime) = ctime;
-
-out_size_unlock:
+		LTIME_S(inode->i_mtime) = lvb.lvb_mtime;
+		LTIME_S(inode->i_atime) = lvb.lvb_atime;
+		LTIME_S(inode->i_ctime) = lvb.lvb_ctime;
+	}
 	ll_inode_size_unlock(inode);
 
 	return rc;
@@ -1141,48 +1101,47 @@ ll_file_io_generic(const struct lu_env *env, struct vvp_io_args *args,
 	struct cl_io	 *io;
 	ssize_t	       result;
 
-	CDEBUG(D_VFSTRACE, "file: %s, type: %d ppos: %llu, count: %zd\n",
-	       file->f_path.dentry->d_name.name, iot, *ppos, count);
-
 restart:
-	io = vvp_env_thread_io(env);
+	io = ccc_env_thread_io(env);
 	ll_io_init(io, file, iot == CIT_WRITE);
 
 	if (cl_io_rw_init(env, io, iot, *ppos, count) == 0) {
 		struct vvp_io *vio = vvp_env_io(env);
+		struct ccc_io *cio = ccc_env_io(env);
 		int write_mutex_locked = 0;
 
-		vio->vui_fd  = LUSTRE_FPRIVATE(file);
-		vio->vui_io_subtype = args->via_io_subtype;
+		cio->cui_fd  = LUSTRE_FPRIVATE(file);
+		vio->cui_io_subtype = args->via_io_subtype;
 
-		switch (vio->vui_io_subtype) {
+		switch (vio->cui_io_subtype) {
 		case IO_NORMAL:
-			vio->vui_iter = args->u.normal.via_iter;
-			vio->vui_iocb = args->u.normal.via_iocb;
+			cio->cui_iter = args->u.normal.via_iter;
+			cio->cui_iocb = args->u.normal.via_iocb;
 			if ((iot == CIT_WRITE) &&
-			    !(vio->vui_fd->fd_flags & LL_FILE_GROUP_LOCKED)) {
+			    !(cio->cui_fd->fd_flags & LL_FILE_GROUP_LOCKED)) {
 				if (mutex_lock_interruptible(&lli->
 							       lli_write_mutex)) {
 					result = -ERESTARTSYS;
 					goto out;
 				}
 				write_mutex_locked = 1;
+			} else if (iot == CIT_READ) {
+				down_read(&lli->lli_trunc_sem);
 			}
-			down_read(&lli->lli_trunc_sem);
 			break;
 		case IO_SPLICE:
-			vio->u.splice.vui_pipe = args->u.splice.via_pipe;
-			vio->u.splice.vui_flags = args->u.splice.via_flags;
+			vio->u.splice.cui_pipe = args->u.splice.via_pipe;
+			vio->u.splice.cui_flags = args->u.splice.via_flags;
 			break;
 		default:
-			CERROR("Unknown IO type - %u\n", vio->vui_io_subtype);
+			CERROR("Unknown IO type - %u\n", vio->cui_io_subtype);
 			LBUG();
 		}
 		result = cl_io_loop(env, io);
-		if (args->via_io_subtype == IO_NORMAL)
-			up_read(&lli->lli_trunc_sem);
 		if (write_mutex_locked)
 			mutex_unlock(&lli->lli_write_mutex);
+		else if (args->via_io_subtype == IO_NORMAL && iot == CIT_READ)
+			up_read(&lli->lli_trunc_sem);
 	} else {
 		/* cl_io_rw_init() handled IO */
 		result = io->ci_result;
@@ -1196,13 +1155,12 @@ restart:
 out:
 	cl_io_fini(env, io);
 	/* If any bit been read/written (result != 0), we just return
-	 * short read/write instead of restart io.
-	 */
+	 * short read/write instead of restart io. */
 	if ((result == 0 || result == -ENODATA) && io->ci_need_restart) {
 		CDEBUG(D_VFSTRACE, "Restart %s on %pD from %lld, count:%zd\n",
 		       iot == CIT_READ ? "read" : "write",
 		       file, *ppos, count);
-		LASSERTF(io->ci_nob == 0, "%zd\n", io->ci_nob);
+		LASSERTF(io->ci_nob == 0, "%zd", io->ci_nob);
 		goto restart;
 	}
 
@@ -1219,7 +1177,6 @@ out:
 			fd->fd_write_failed = true;
 		}
 	}
-	CDEBUG(D_VFSTRACE, "iot: %d, result: %zd\n", iot, result);
 
 	return result;
 }
@@ -1235,7 +1192,7 @@ static ssize_t ll_file_read_iter(struct kiocb *iocb, struct iov_iter *to)
 	if (IS_ERR(env))
 		return PTR_ERR(env);
 
-	args = ll_env_args(env, IO_NORMAL);
+	args = vvp_env_args(env, IO_NORMAL);
 	args->u.normal.via_iter = to;
 	args->u.normal.via_iocb = iocb;
 
@@ -1259,12 +1216,12 @@ static ssize_t ll_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	if (IS_ERR(env))
 		return PTR_ERR(env);
 
-	args = ll_env_args(env, IO_NORMAL);
+	args = vvp_env_args(env, IO_NORMAL);
 	args->u.normal.via_iter = from;
 	args->u.normal.via_iocb = iocb;
 
 	result = ll_file_io_generic(env, args, iocb->ki_filp, CIT_WRITE,
-				    &iocb->ki_pos, iov_iter_count(from));
+				  &iocb->ki_pos, iov_iter_count(from));
 	cl_env_put(env, &refcheck);
 	return result;
 }
@@ -1285,7 +1242,7 @@ static ssize_t ll_file_splice_read(struct file *in_file, loff_t *ppos,
 	if (IS_ERR(env))
 		return PTR_ERR(env);
 
-	args = ll_env_args(env, IO_SPLICE);
+	args = vvp_env_args(env, IO_SPLICE);
 	args->u.splice.via_pipe = pipe;
 	args->u.splice.via_flags = flags;
 
@@ -1303,8 +1260,8 @@ static int ll_lov_recreate(struct inode *inode, struct ost_id *oi, u32 ost_idx)
 	int rc = 0;
 	struct lov_stripe_md *lsm = NULL, *lsm2;
 
-	oa = kmem_cache_zalloc(obdo_cachep, GFP_NOFS);
-	if (!oa)
+	oa = kmem_cache_alloc(obdo_cachep, GFP_NOFS | __GFP_ZERO);
+	if (oa == NULL)
 		return -ENOMEM;
 
 	lsm = ccc_inode_lsm_get(inode);
@@ -1317,7 +1274,7 @@ static int ll_lov_recreate(struct inode *inode, struct ost_id *oi, u32 ost_idx)
 		   (lsm->lsm_stripe_count));
 
 	lsm2 = libcfs_kvzalloc(lsm_size, GFP_NOFS);
-	if (!lsm2) {
+	if (lsm2 == NULL) {
 		rc = -ENOMEM;
 		goto out;
 	}
@@ -1350,7 +1307,7 @@ static int ll_lov_recreate_obj(struct inode *inode, unsigned long arg)
 	if (!capable(CFS_CAP_SYS_ADMIN))
 		return -EPERM;
 
-	if (copy_from_user(&ucreat, (struct ll_recreate_obj __user *)arg,
+	if (copy_from_user(&ucreat, (struct ll_recreate_obj *)arg,
 			   sizeof(ucreat)))
 		return -EFAULT;
 
@@ -1368,7 +1325,7 @@ static int ll_lov_recreate_fid(struct inode *inode, unsigned long arg)
 	if (!capable(CFS_CAP_SYS_ADMIN))
 		return -EPERM;
 
-	if (copy_from_user(&fid, (struct lu_fid __user *)arg, sizeof(fid)))
+	if (copy_from_user(&fid, (struct lu_fid *)arg, sizeof(fid)))
 		return -EFAULT;
 
 	fid_to_ostid(&fid, &oi);
@@ -1377,18 +1334,17 @@ static int ll_lov_recreate_fid(struct inode *inode, unsigned long arg)
 }
 
 int ll_lov_setstripe_ea_info(struct inode *inode, struct dentry *dentry,
-			     __u64 flags, struct lov_user_md *lum,
-			     int lum_size)
+			     int flags, struct lov_user_md *lum, int lum_size)
 {
 	struct lov_stripe_md *lsm = NULL;
 	struct lookup_intent oit = {.it_op = IT_OPEN, .it_flags = flags};
 	int rc = 0;
 
 	lsm = ccc_inode_lsm_get(inode);
-	if (lsm) {
+	if (lsm != NULL) {
 		ccc_inode_lsm_put(inode, lsm);
-		CDEBUG(D_IOCTL, "stripe already exists for inode "DFID"\n",
-		       PFID(ll_inode2fid(inode)));
+		CDEBUG(D_IOCTL, "stripe already exists for ino %lu\n",
+		       inode->i_ino);
 		rc = -EEXIST;
 		goto out;
 	}
@@ -1445,16 +1401,18 @@ int ll_lov_getstripe_ea_info(struct inode *inode, const char *filename,
 	}
 
 	body = req_capsule_server_get(&req->rq_pill, &RMF_MDT_BODY);
+	LASSERT(body != NULL); /* checked by mdc_getattr_name */
 
 	lmmsize = body->eadatasize;
 
 	if (!(body->valid & (OBD_MD_FLEASIZE | OBD_MD_FLDIREA)) ||
-	    lmmsize == 0) {
+			lmmsize == 0) {
 		rc = -ENODATA;
 		goto out;
 	}
 
 	lmm = req_capsule_server_sized_get(&req->rq_pill, &RMF_MDT_MD, lmmsize);
+	LASSERT(lmm != NULL);
 
 	if ((lmm->lmm_magic != cpu_to_le32(LOV_MAGIC_V1)) &&
 	    (lmm->lmm_magic != cpu_to_le32(LOV_MAGIC_V3))) {
@@ -1475,8 +1433,7 @@ int ll_lov_getstripe_ea_info(struct inode *inode, const char *filename,
 			stripe_count = 0;
 
 		/* if function called for directory - we should
-		 * avoid swab not existent lsm objects
-		 */
+		 * avoid swab not existent lsm objects */
 		if (lmm->lmm_magic == cpu_to_le32(LOV_MAGIC_V1)) {
 			lustre_swab_lov_user_md_v1((struct lov_user_md_v1 *)lmm);
 			if (S_ISREG(body->mode))
@@ -1500,9 +1457,9 @@ out:
 }
 
 static int ll_lov_setea(struct inode *inode, struct file *file,
-			unsigned long arg)
+			    unsigned long arg)
 {
-	__u64			 flags = MDS_OPEN_HAS_OBJS | FMODE_WRITE;
+	int			 flags = MDS_OPEN_HAS_OBJS | FMODE_WRITE;
 	struct lov_user_md	*lump;
 	int			 lum_size = sizeof(struct lov_user_md) +
 					    sizeof(struct lov_user_ost_data);
@@ -1512,16 +1469,16 @@ static int ll_lov_setea(struct inode *inode, struct file *file,
 		return -EPERM;
 
 	lump = libcfs_kvzalloc(lum_size, GFP_NOFS);
-	if (!lump)
+	if (lump == NULL)
 		return -ENOMEM;
 
-	if (copy_from_user(lump, (struct lov_user_md __user *)arg, lum_size)) {
+	if (copy_from_user(lump, (struct lov_user_md *)arg, lum_size)) {
 		kvfree(lump);
 		return -EFAULT;
 	}
 
 	rc = ll_lov_setstripe_ea_info(inode, file->f_path.dentry, flags, lump,
-				      lum_size);
+				     lum_size);
 	cl_lov_delay_create_clear(&file->f_flags);
 
 	kvfree(lump);
@@ -1531,12 +1488,12 @@ static int ll_lov_setea(struct inode *inode, struct file *file,
 static int ll_lov_setstripe(struct inode *inode, struct file *file,
 			    unsigned long arg)
 {
-	struct lov_user_md_v3 lumv3;
-	struct lov_user_md_v1 *lumv1 = (struct lov_user_md_v1 *)&lumv3;
-	struct lov_user_md_v1 __user *lumv1p = (void __user *)arg;
-	struct lov_user_md_v3 __user *lumv3p = (void __user *)arg;
-	int lum_size, rc;
-	__u64 flags = FMODE_WRITE;
+	struct lov_user_md_v3	 lumv3;
+	struct lov_user_md_v1	*lumv1 = (struct lov_user_md_v1 *)&lumv3;
+	struct lov_user_md_v1	*lumv1p = (struct lov_user_md_v1 *)arg;
+	struct lov_user_md_v3	*lumv3p = (struct lov_user_md_v3 *)arg;
+	int			 lum_size, rc;
+	int			 flags = FMODE_WRITE;
 
 	/* first try with v1 which is smaller than v3 */
 	lum_size = sizeof(struct lov_user_md_v1);
@@ -1561,7 +1518,7 @@ static int ll_lov_setstripe(struct inode *inode, struct file *file,
 		ll_layout_refresh(inode, &gen);
 		lsm = ccc_inode_lsm_get(inode);
 		rc = obd_iocontrol(LL_IOC_LOV_GETSTRIPE, ll_i2dtexp(inode),
-				   0, lsm, (void __user *)arg);
+				   0, lsm, (void *)arg);
 		ccc_inode_lsm_put(inode, lsm);
 	}
 	return rc;
@@ -1573,9 +1530,9 @@ static int ll_lov_getstripe(struct inode *inode, unsigned long arg)
 	int rc = -ENODATA;
 
 	lsm = ccc_inode_lsm_get(inode);
-	if (lsm)
+	if (lsm != NULL)
 		rc = obd_iocontrol(LL_IOC_LOV_GETSTRIPE, ll_i2dtexp(inode), 0,
-				   lsm, (void __user *)arg);
+				   lsm, (void *)arg);
 	ccc_inode_lsm_put(inode, lsm);
 	return rc;
 }
@@ -1585,7 +1542,7 @@ ll_get_grouplock(struct inode *inode, struct file *file, unsigned long arg)
 {
 	struct ll_inode_info   *lli = ll_i2info(inode);
 	struct ll_file_data    *fd = LUSTRE_FPRIVATE(file);
-	struct ll_grouplock    grouplock;
+	struct ccc_grouplock    grouplock;
 	int		     rc;
 
 	if (arg == 0) {
@@ -1599,14 +1556,14 @@ ll_get_grouplock(struct inode *inode, struct file *file, unsigned long arg)
 	spin_lock(&lli->lli_lock);
 	if (fd->fd_flags & LL_FILE_GROUP_LOCKED) {
 		CWARN("group lock already existed with gid %lu\n",
-		      fd->fd_grouplock.lg_gid);
+		      fd->fd_grouplock.cg_gid);
 		spin_unlock(&lli->lli_lock);
 		return -EINVAL;
 	}
-	LASSERT(!fd->fd_grouplock.lg_lock);
+	LASSERT(fd->fd_grouplock.cg_lock == NULL);
 	spin_unlock(&lli->lli_lock);
 
-	rc = cl_get_grouplock(ll_i2info(inode)->lli_clob,
+	rc = cl_get_grouplock(cl_i2info(inode)->lli_clob,
 			      arg, (file->f_flags & O_NONBLOCK), &grouplock);
 	if (rc)
 		return rc;
@@ -1632,7 +1589,7 @@ static int ll_put_grouplock(struct inode *inode, struct file *file,
 {
 	struct ll_inode_info   *lli = ll_i2info(inode);
 	struct ll_file_data    *fd = LUSTRE_FPRIVATE(file);
-	struct ll_grouplock    grouplock;
+	struct ccc_grouplock    grouplock;
 
 	spin_lock(&lli->lli_lock);
 	if (!(fd->fd_flags & LL_FILE_GROUP_LOCKED)) {
@@ -1640,11 +1597,11 @@ static int ll_put_grouplock(struct inode *inode, struct file *file,
 		CWARN("no group lock held\n");
 		return -EINVAL;
 	}
-	LASSERT(fd->fd_grouplock.lg_lock);
+	LASSERT(fd->fd_grouplock.cg_lock != NULL);
 
-	if (fd->fd_grouplock.lg_gid != arg) {
+	if (fd->fd_grouplock.cg_gid != arg) {
 		CWARN("group lock %lu doesn't match current id %lu\n",
-		      arg, fd->fd_grouplock.lg_gid);
+		       arg, fd->fd_grouplock.cg_gid);
 		spin_unlock(&lli->lli_lock);
 		return -EINVAL;
 	}
@@ -1731,7 +1688,7 @@ static int ll_do_fiemap(struct inode *inode, struct ll_user_fiemap *fiemap,
 	}
 
 	lsm = ccc_inode_lsm_get(inode);
-	if (!lsm)
+	if (lsm == NULL)
 		return -ENOENT;
 
 	/* If the stripe_count > 1 and the application does not understand
@@ -1825,10 +1782,9 @@ static int ll_ioctl_fiemap(struct inode *inode, unsigned long arg)
 	int rc = 0;
 
 	/* Get the extent count so we can calculate the size of
-	 * required fiemap buffer
-	 */
+	 * required fiemap buffer */
 	if (get_user(extent_count,
-		     &((struct ll_user_fiemap __user *)arg)->fm_extent_count))
+	    &((struct ll_user_fiemap __user *)arg)->fm_extent_count))
 		return -EFAULT;
 
 	if (extent_count >=
@@ -1838,7 +1794,7 @@ static int ll_ioctl_fiemap(struct inode *inode, unsigned long arg)
 					 sizeof(struct ll_fiemap_extent));
 
 	fiemap_s = libcfs_kvzalloc(num_bytes, GFP_NOFS);
-	if (!fiemap_s)
+	if (fiemap_s == NULL)
 		return -ENOMEM;
 
 	/* get the fiemap value */
@@ -1850,12 +1806,11 @@ static int ll_ioctl_fiemap(struct inode *inode, unsigned long arg)
 
 	/* If fm_extent_count is non-zero, read the first extent since
 	 * it is used to calculate end_offset and device from previous
-	 * fiemap call.
-	 */
+	 * fiemap call. */
 	if (extent_count) {
 		if (copy_from_user(&fiemap_s->fm_extents[0],
-				   (char __user *)arg + sizeof(*fiemap_s),
-				   sizeof(struct ll_fiemap_extent))) {
+		    (char __user *)arg + sizeof(*fiemap_s),
+		    sizeof(struct ll_fiemap_extent))) {
 			rc = -EFAULT;
 			goto error;
 		}
@@ -1871,7 +1826,7 @@ static int ll_ioctl_fiemap(struct inode *inode, unsigned long arg)
 		ret_bytes += (fiemap_s->fm_mapped_extents *
 				 sizeof(struct ll_fiemap_extent));
 
-	if (copy_to_user((void __user *)arg, fiemap_s, ret_bytes))
+	if (copy_to_user((void *)arg, fiemap_s, ret_bytes))
 		rc = -EFAULT;
 
 error:
@@ -1885,12 +1840,11 @@ error:
  * This value is computed using stripe object version on OST.
  * Version is computed using server side locking.
  *
- * @param sync  if do sync on the OST side;
- *		0: no sync
- *		LL_DV_RD_FLUSH: flush dirty pages, LCK_PR on OSTs
- *		LL_DV_WR_FLUSH: drop all caching pages, LCK_PW on OSTs
+ * @param extent_lock  Take extent lock. Not needed if a process is already
+ *		       holding the OST object group locks.
  */
-int ll_data_version(struct inode *inode, __u64 *data_version, int flags)
+int ll_data_version(struct inode *inode, __u64 *data_version,
+		    int extent_lock)
 {
 	struct lov_stripe_md	*lsm = NULL;
 	struct ll_sb_info	*sbi = ll_i2sbi(inode);
@@ -1912,7 +1866,7 @@ int ll_data_version(struct inode *inode, __u64 *data_version, int flags)
 		goto out;
 	}
 
-	rc = ll_lsm_getattr(lsm, sbi->ll_dt_exp, obdo, 0, flags);
+	rc = ll_lsm_getattr(lsm, sbi->ll_dt_exp, obdo, 0, extent_lock);
 	if (rc == 0) {
 		if (!(obdo->o_valid & OBD_MD_FLDATAVERSION))
 			rc = -EOPNOTSUPP;
@@ -1948,7 +1902,7 @@ int ll_hsm_release(struct inode *inode)
 	}
 
 	/* Grab latest data_version and [am]time values */
-	rc = ll_data_version(inode, &data_version, LL_DV_WR_FLUSH);
+	rc = ll_data_version(inode, &data_version, 1);
 	if (rc != 0)
 		goto out;
 
@@ -1958,19 +1912,18 @@ int ll_hsm_release(struct inode *inode)
 		goto out;
 	}
 
-	ll_merge_attr(env, inode);
+	ll_merge_lvb(env, inode);
 	cl_env_nested_put(&nest, env);
 
 	/* Release the file.
 	 * NB: lease lock handle is released in mdc_hsm_release_pack() because
-	 * we still need it to pack l_remote_handle to MDT.
-	 */
+	 * we still need it to pack l_remote_handle to MDT. */
 	rc = ll_close_inode_openhandle(ll_i2sbi(inode)->ll_md_exp, inode, och,
 				       &data_version);
 	och = NULL;
 
 out:
-	if (och && !IS_ERR(och)) /* close the file */
+	if (och != NULL && !IS_ERR(och)) /* close the file */
 		ll_lease_close(och, inode, NULL);
 
 	return rc;
@@ -2054,8 +2007,7 @@ static int ll_swap_layouts(struct file *file1, struct file *file2,
 	}
 
 	/* to be able to restore mtime and atime after swap
-	 * we need to first save them
-	 */
+	 * we need to first save them */
 	if (lsl->sl_flags &
 	    (SWAP_LAYOUTS_KEEP_MTIME | SWAP_LAYOUTS_KEEP_ATIME)) {
 		llss->ia1.ia_mtime = llss->inode1->i_mtime;
@@ -2067,8 +2019,7 @@ static int ll_swap_layouts(struct file *file1, struct file *file2,
 	}
 
 	/* ultimate check, before swapping the layouts we check if
-	 * dataversion has changed (if requested)
-	 */
+	 * dataversion has changed (if requested) */
 	if (llss->check_dv1) {
 		rc = ll_data_version(llss->inode1, &dv, 0);
 		if (rc)
@@ -2091,11 +2042,9 @@ static int ll_swap_layouts(struct file *file1, struct file *file2,
 
 	/* struct md_op_data is used to send the swap args to the mdt
 	 * only flags is missing, so we use struct mdc_swap_layouts
-	 * through the md_op_data->op_data
-	 */
+	 * through the md_op_data->op_data */
 	/* flags from user space have to be converted before they are send to
-	 * server, no flag is sent today, they are only used on the client
-	 */
+	 * server, no flag is sent today, they are only used on the client */
 	msl.msl_flags = 0;
 	rc = -ENOMEM;
 	op_data = ll_prep_md_op_data(NULL, llss->inode1, llss->inode2, NULL, 0,
@@ -2164,8 +2113,7 @@ static int ll_hsm_state_set(struct inode *inode, struct hsm_state_set *hss)
 		return -EINVAL;
 
 	/* Non-root users are forbidden to set or clear flags which are
-	 * NOT defined in HSM_USER_MASK.
-	 */
+	 * NOT defined in HSM_USER_MASK. */
 	if (((hss->hss_setmask | hss->hss_clearmask) & ~HSM_USER_MASK) &&
 	    !capable(CFS_CAP_SYS_ADMIN))
 		return -EPERM;
@@ -2252,8 +2200,8 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	struct ll_file_data	*fd = LUSTRE_FPRIVATE(file);
 	int			 flags, rc;
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p),cmd=%x\n",
-	       PFID(ll_inode2fid(inode)), inode, cmd);
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu/%u(%p),cmd=%x\n", inode->i_ino,
+	       inode->i_generation, inode, cmd);
 	ll_stats_ops_tally(ll_i2sbi(inode), LPROC_LL_IOCTL, 1);
 
 	/* asm-ppc{,64} declares TCGETS, et. al. as type 't' not 'T' */
@@ -2263,14 +2211,14 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	switch (cmd) {
 	case LL_IOC_GETFLAGS:
 		/* Get the current value of the file flags */
-		return put_user(fd->fd_flags, (int __user *)arg);
+		return put_user(fd->fd_flags, (int *)arg);
 	case LL_IOC_SETFLAGS:
 	case LL_IOC_CLRFLAGS:
 		/* Set or clear specific file flags */
 		/* XXX This probably needs checks to ensure the flags are
 		 *     not abused, and to handle any flag side effects.
 		 */
-		if (get_user(flags, (int __user *)arg))
+		if (get_user(flags, (int *) arg))
 			return -EFAULT;
 
 		if (cmd == LL_IOC_SETFLAGS) {
@@ -2294,15 +2242,15 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		struct file *file2;
 		struct lustre_swap_layouts lsl;
 
-		if (copy_from_user(&lsl, (char __user *)arg,
-				   sizeof(struct lustre_swap_layouts)))
+		if (copy_from_user(&lsl, (char *)arg,
+				       sizeof(struct lustre_swap_layouts)))
 			return -EFAULT;
 
 		if ((file->f_flags & O_ACCMODE) == 0) /* O_RDONLY */
 			return -EPERM;
 
 		file2 = fget(lsl.sl_fd);
-		if (!file2)
+		if (file2 == NULL)
 			return -EBADF;
 
 		rc = -EPERM;
@@ -2324,13 +2272,13 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		return ll_iocontrol(inode, file, cmd, arg);
 	case FSFILT_IOC_GETVERSION_OLD:
 	case FSFILT_IOC_GETVERSION:
-		return put_user(inode->i_generation, (int __user *)arg);
+		return put_user(inode->i_generation, (int *)arg);
 	case LL_IOC_GROUP_LOCK:
 		return ll_get_grouplock(inode, file, arg);
 	case LL_IOC_GROUP_UNLOCK:
 		return ll_put_grouplock(inode, file, arg);
 	case IOC_OBD_STATFS:
-		return ll_obd_statfs(inode, (void __user *)arg);
+		return ll_obd_statfs(inode, (void *)arg);
 
 	/* We need to special case any other ioctls we want to handle,
 	 * to send them to the MDS/OST as appropriate and to properly
@@ -2341,25 +2289,25 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case LL_IOC_FLUSHCTX:
 		return ll_flush_ctx(inode);
 	case LL_IOC_PATH2FID: {
-		if (copy_to_user((void __user *)arg, ll_inode2fid(inode),
+		if (copy_to_user((void *)arg, ll_inode2fid(inode),
 				 sizeof(struct lu_fid)))
 			return -EFAULT;
 
 		return 0;
 	}
 	case OBD_IOC_FID2PATH:
-		return ll_fid2path(inode, (void __user *)arg);
+		return ll_fid2path(inode, (void *)arg);
 	case LL_IOC_DATA_VERSION: {
 		struct ioc_data_version	idv;
 		int			rc;
 
-		if (copy_from_user(&idv, (char __user *)arg, sizeof(idv)))
+		if (copy_from_user(&idv, (char *)arg, sizeof(idv)))
 			return -EFAULT;
 
-		idv.idv_flags &= LL_DV_RD_FLUSH | LL_DV_WR_FLUSH;
-		rc = ll_data_version(inode, &idv.idv_version, idv.idv_flags);
-		if (rc == 0 && copy_to_user((char __user *)arg, &idv,
-					    sizeof(idv)))
+		rc = ll_data_version(inode, &idv.idv_version,
+				!(idv.idv_flags & LL_DV_NOFLUSH));
+
+		if (rc == 0 && copy_to_user((char *) arg, &idv, sizeof(idv)))
 			return -EFAULT;
 
 		return rc;
@@ -2372,7 +2320,7 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		if (mdtidx < 0)
 			return mdtidx;
 
-		if (put_user(mdtidx, (int __user *)arg))
+		if (put_user((int)mdtidx, (int *)arg))
 			return -EFAULT;
 
 		return 0;
@@ -2399,7 +2347,7 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		rc = obd_iocontrol(cmd, ll_i2mdexp(inode), sizeof(*op_data),
 				   op_data, NULL);
 
-		if (copy_to_user((void __user *)arg, hus, sizeof(*hus)))
+		if (copy_to_user((void *)arg, hus, sizeof(*hus)))
 			rc = -EFAULT;
 
 		ll_finish_md_op_data(op_data);
@@ -2410,7 +2358,7 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		struct hsm_state_set	*hss;
 		int			 rc;
 
-		hss = memdup_user((char __user *)arg, sizeof(*hss));
+		hss = memdup_user((char *)arg, sizeof(*hss));
 		if (IS_ERR(hss))
 			return PTR_ERR(hss);
 
@@ -2438,7 +2386,7 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		rc = obd_iocontrol(cmd, ll_i2mdexp(inode), sizeof(*op_data),
 				   op_data, NULL);
 
-		if (copy_to_user((char __user *)arg, hca, sizeof(*hca)))
+		if (copy_to_user((char *)arg, hca, sizeof(*hca)))
 			rc = -EFAULT;
 
 		ll_finish_md_op_data(op_data);
@@ -2464,13 +2412,13 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			break;
 		case F_UNLCK:
 			mutex_lock(&lli->lli_och_mutex);
-			if (fd->fd_lease_och) {
+			if (fd->fd_lease_och != NULL) {
 				och = fd->fd_lease_och;
 				fd->fd_lease_och = NULL;
 			}
 			mutex_unlock(&lli->lli_och_mutex);
 
-			if (och) {
+			if (och != NULL) {
 				mode = och->och_flags &
 				       (FMODE_READ|FMODE_WRITE);
 				rc = ll_lease_close(och, inode, &lease_broken);
@@ -2495,12 +2443,12 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		rc = 0;
 		mutex_lock(&lli->lli_och_mutex);
-		if (!fd->fd_lease_och) {
+		if (fd->fd_lease_och == NULL) {
 			fd->fd_lease_och = och;
 			och = NULL;
 		}
 		mutex_unlock(&lli->lli_och_mutex);
-		if (och) {
+		if (och != NULL) {
 			/* impossible now that only excl is supported for now */
 			ll_lease_close(och, inode, &lease_broken);
 			rc = -EBUSY;
@@ -2513,17 +2461,17 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
 		rc = 0;
 		mutex_lock(&lli->lli_och_mutex);
-		if (fd->fd_lease_och) {
+		if (fd->fd_lease_och != NULL) {
 			struct obd_client_handle *och = fd->fd_lease_och;
 
 			lock = ldlm_handle2lock(&och->och_lease_handle);
-			if (lock) {
+			if (lock != NULL) {
 				lock_res_and_lock(lock);
 				if (!ldlm_is_cancel(lock))
 					rc = och->och_flags &
 						(FMODE_READ | FMODE_WRITE);
 				unlock_res_and_lock(lock);
-				LDLM_LOCK_PUT(lock);
+				ldlm_lock_put(lock);
 			}
 		}
 		mutex_unlock(&lli->lli_och_mutex);
@@ -2532,7 +2480,7 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case LL_IOC_HSM_IMPORT: {
 		struct hsm_user_import *hui;
 
-		hui = memdup_user((void __user *)arg, sizeof(*hui));
+		hui = memdup_user((void *)arg, sizeof(*hui));
 		if (IS_ERR(hui))
 			return PTR_ERR(hui);
 
@@ -2549,7 +2497,7 @@ ll_file_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 			return err;
 
 		return obd_iocontrol(cmd, ll_i2dtexp(inode), 0, NULL,
-				     (void __user *)arg);
+				     (void *)arg);
 	}
 	}
 }
@@ -2561,8 +2509,9 @@ static loff_t ll_file_seek(struct file *file, loff_t offset, int origin)
 
 	retval = offset + ((origin == SEEK_END) ? i_size_read(inode) :
 			   (origin == SEEK_CUR) ? file->f_pos : 0);
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p), to=%llu=%#llx(%d)\n",
-	       PFID(ll_inode2fid(inode)), inode, retval, retval, origin);
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu/%u(%p), to=%llu=%#llx(%d)\n",
+	       inode->i_ino, inode->i_generation, inode, retval, retval,
+	       origin);
 	ll_stats_ops_tally(ll_i2sbi(inode), LPROC_LL_LLSEEK, 1);
 
 	if (origin == SEEK_END || origin == SEEK_HOLE || origin == SEEK_DATA) {
@@ -2587,17 +2536,15 @@ static int ll_flush(struct file *file, fl_owner_t id)
 	LASSERT(!S_ISDIR(inode->i_mode));
 
 	/* catch async errors that were recorded back when async writeback
-	 * failed for pages in this mapping.
-	 */
+	 * failed for pages in this mapping. */
 	rc = lli->lli_async_rc;
 	lli->lli_async_rc = 0;
 	err = lov_read_and_clear_async_rc(lli->lli_clob);
 	if (rc == 0)
 		rc = err;
 
-	/* The application has been told about write failure already.
-	 * Do not report failure again.
-	 */
+	/* The application has been told write failure already.
+	 * Do not report failure again. */
 	if (fd->fd_write_failed)
 		return 0;
 	return rc ? -EIO : 0;
@@ -2626,8 +2573,8 @@ int cl_sync_file_range(struct inode *inode, loff_t start, loff_t end,
 	if (IS_ERR(env))
 		return PTR_ERR(env);
 
-	io = vvp_env_thread_io(env);
-	io->ci_obj = ll_i2info(inode)->lli_clob;
+	io = ccc_env_thread_io(env);
+	io->ci_obj = cl_i2info(inode)->lli_clob;
 	io->ci_ignore_layout = ignore_layout;
 
 	/* initialize parameters for sync */
@@ -2657,16 +2604,15 @@ int ll_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 	struct ptlrpc_request *req;
 	int rc, err;
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p)\n",
-	       PFID(ll_inode2fid(inode)), inode);
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu/%u(%p)\n", inode->i_ino,
+	       inode->i_generation, inode);
 	ll_stats_ops_tally(ll_i2sbi(inode), LPROC_LL_FSYNC, 1);
 
 	rc = filemap_write_and_wait_range(inode->i_mapping, start, end);
 	inode_lock(inode);
 
 	/* catch async errors that were recorded back when async writeback
-	 * failed for pages in this mapping.
-	 */
+	 * failed for pages in this mapping. */
 	if (!S_ISDIR(inode->i_mode)) {
 		err = lli->lli_async_rc;
 		lli->lli_async_rc = 0;
@@ -2716,8 +2662,8 @@ ll_file_flock(struct file *file, int cmd, struct file_lock *file_lock)
 	int rc;
 	int rc2 = 0;
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID" file_lock=%p\n",
-	       PFID(ll_inode2fid(inode)), file_lock);
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu file_lock=%p\n",
+	       inode->i_ino, file_lock);
 
 	ll_stats_ops_tally(ll_i2sbi(inode), LPROC_LL_FLOCK, 1);
 
@@ -2737,8 +2683,7 @@ ll_file_flock(struct file *file, int cmd, struct file_lock *file_lock)
 	 * I guess between lockd processes) and then compares pid.
 	 * As such we assign pid to the owner field to make it all work,
 	 * conflict with normal locks is unlikely since pid space and
-	 * pointer space for current->files are not intersecting
-	 */
+	 * pointer space for current->files are not intersecting */
 	if (file_lock->fl_lmops && file_lock->fl_lmops->lm_compare_owner)
 		flock.l_flock.owner = (unsigned long)file_lock->fl_pid;
 
@@ -2754,8 +2699,7 @@ ll_file_flock(struct file *file, int cmd, struct file_lock *file_lock)
 		 * order to process an unlock request we need all of the same
 		 * information that is given with a normal read or write record
 		 * lock request. To avoid creating another ldlm unlock (cancel)
-		 * message we'll treat a LCK_NL flock request as an unlock.
-		 */
+		 * message we'll treat a LCK_NL flock request as an unlock. */
 		einfo.ei_mode = LCK_NL;
 		break;
 	case F_WRLCK:
@@ -2763,7 +2707,7 @@ ll_file_flock(struct file *file, int cmd, struct file_lock *file_lock)
 		break;
 	default:
 		CDEBUG(D_INFO, "Unknown fcntl lock type: %d\n",
-		       file_lock->fl_type);
+			file_lock->fl_type);
 		return -ENOTSUPP;
 	}
 
@@ -2786,8 +2730,7 @@ ll_file_flock(struct file *file, int cmd, struct file_lock *file_lock)
 #endif
 		flags = LDLM_FL_TEST_LOCK;
 		/* Save the old mode so that if the mode in the lock changes we
-		 * can decrement the appropriate reader or writer refcount.
-		 */
+		 * can decrement the appropriate reader or writer refcount. */
 		file_lock->fl_type = einfo.ei_mode;
 		break;
 	default:
@@ -2800,9 +2743,9 @@ ll_file_flock(struct file *file, int cmd, struct file_lock *file_lock)
 	if (IS_ERR(op_data))
 		return PTR_ERR(op_data);
 
-	CDEBUG(D_DLMTRACE, "inode="DFID", pid=%u, flags=%#llx, mode=%u, start=%llu, end=%llu\n",
-	       PFID(ll_inode2fid(inode)), flock.l_flock.pid, flags,
-	       einfo.ei_mode, flock.l_flock.start, flock.l_flock.end);
+	CDEBUG(D_DLMTRACE, "inode=%lu, pid=%u, flags=%#llx, mode=%u, start=%llu, end=%llu\n",
+	       inode->i_ino, flock.l_flock.pid, flags, einfo.ei_mode,
+	       flock.l_flock.start, flock.l_flock.end);
 
 	rc = md_enqueue(sbi->ll_md_exp, &einfo, NULL,
 			op_data, &lockh, &flock, 0, NULL /* req */, flags);
@@ -2814,7 +2757,7 @@ ll_file_flock(struct file *file, int cmd, struct file_lock *file_lock)
 	if (rc2 && file_lock->fl_type != F_UNLCK) {
 		einfo.ei_mode = LCK_NL;
 		md_enqueue(sbi->ll_md_exp, &einfo, NULL,
-			   op_data, &lockh, &flock, 0, NULL /* req */, flags);
+			op_data, &lockh, &flock, 0, NULL /* req */, flags);
 		rc = rc2;
 	}
 
@@ -2839,12 +2782,11 @@ ll_file_noflock(struct file *file, int cmd, struct file_lock *file_lock)
  * \param l_req_mode [IN] searched lock mode
  * \retval boolean, true iff all bits are found
  */
-int ll_have_md_lock(struct inode *inode, __u64 *bits,
-		    enum ldlm_mode l_req_mode)
+int ll_have_md_lock(struct inode *inode, __u64 *bits,  ldlm_mode_t l_req_mode)
 {
 	struct lustre_handle lockh;
 	ldlm_policy_data_t policy;
-	enum ldlm_mode mode = (l_req_mode == LCK_MINMODE) ?
+	ldlm_mode_t mode = (l_req_mode == LCK_MINMODE) ?
 				(LCK_CR|LCK_CW|LCK_PR|LCK_PW) : l_req_mode;
 	struct lu_fid *fid;
 	__u64 flags;
@@ -2880,13 +2822,13 @@ int ll_have_md_lock(struct inode *inode, __u64 *bits,
 	return *bits == 0;
 }
 
-enum ldlm_mode ll_take_md_lock(struct inode *inode, __u64 bits,
-			       struct lustre_handle *lockh, __u64 flags,
-			       enum ldlm_mode mode)
+ldlm_mode_t ll_take_md_lock(struct inode *inode, __u64 bits,
+			    struct lustre_handle *lockh, __u64 flags,
+			    ldlm_mode_t mode)
 {
 	ldlm_policy_data_t policy = { .l_inodebits = {bits} };
 	struct lu_fid *fid;
-	enum ldlm_mode rc;
+	ldlm_mode_t rc;
 
 	fid = &ll_i2info(inode)->lli_fid;
 	CDEBUG(D_INFO, "trying to match res "DFID"\n", PFID(fid));
@@ -2924,15 +2866,16 @@ static int __ll_inode_revalidate(struct dentry *dentry, __u64 ibits)
 	struct obd_export *exp;
 	int rc = 0;
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p),name=%pd\n",
-	       PFID(ll_inode2fid(inode)), inode, dentry);
+	LASSERT(inode != NULL);
+
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu/%u(%p),name=%pd\n",
+	       inode->i_ino, inode->i_generation, inode, dentry);
 
 	exp = ll_i2mdexp(inode);
 
 	/* XXX: Enable OBD_CONNECT_ATTRFID to reduce unnecessary getattr RPC.
 	 *      But under CMD case, it caused some lock issues, should be fixed
-	 *      with new CMD ibits lock. See bug 12718
-	 */
+	 *      with new CMD ibits lock. See bug 12718 */
 	if (exp_connect_flags(exp) & OBD_CONNECT_ATTRFID) {
 		struct lookup_intent oit = { .it_op = IT_GETATTR };
 		struct md_op_data *op_data;
@@ -2950,8 +2893,7 @@ static int __ll_inode_revalidate(struct dentry *dentry, __u64 ibits)
 		oit.it_create_mode |= M_CHECK_STALE;
 		rc = md_intent_lock(exp, op_data, NULL, 0,
 				    /* we are not interested in name
-				     * based lookup
-				     */
+				       based lookup */
 				    &oit, 0, &req,
 				    ll_md_blocking_ast, 0);
 		ll_finish_md_op_data(op_data);
@@ -2968,10 +2910,9 @@ static int __ll_inode_revalidate(struct dentry *dentry, __u64 ibits)
 		}
 
 		/* Unlinked? Unhash dentry, so it is not picked up later by
-		 * do_lookup() -> ll_revalidate_it(). We cannot use d_drop
-		 * here to preserve get_cwd functionality on 2.6.
-		 * Bug 10503
-		 */
+		   do_lookup() -> ll_revalidate_it(). We cannot use d_drop
+		   here to preserve get_cwd functionality on 2.6.
+		   Bug 10503 */
 		if (!d_inode(dentry)->i_nlink)
 			d_lustre_invalidate(dentry, 0);
 
@@ -3021,9 +2962,9 @@ static int ll_inode_revalidate(struct dentry *dentry, __u64 ibits)
 
 	/* if object isn't regular file, don't validate size */
 	if (!S_ISREG(inode->i_mode)) {
-		LTIME_S(inode->i_atime) = ll_i2info(inode)->lli_atime;
-		LTIME_S(inode->i_mtime) = ll_i2info(inode)->lli_mtime;
-		LTIME_S(inode->i_ctime) = ll_i2info(inode)->lli_ctime;
+		LTIME_S(inode->i_atime) = ll_i2info(inode)->lli_lvb.lvb_atime;
+		LTIME_S(inode->i_mtime) = ll_i2info(inode)->lli_lvb.lvb_mtime;
+		LTIME_S(inode->i_ctime) = ll_i2info(inode)->lli_lvb.lvb_ctime;
 	} else {
 		/* In case of restore, the MDT has the right size and has
 		 * already send it back without granting the layout lock,
@@ -3085,33 +3026,26 @@ static int ll_fiemap(struct inode *inode, struct fiemap_extent_info *fieinfo,
 				       sizeof(struct ll_fiemap_extent));
 	fiemap = libcfs_kvzalloc(num_bytes, GFP_NOFS);
 
-	if (!fiemap)
+	if (fiemap == NULL)
 		return -ENOMEM;
 
 	fiemap->fm_flags = fieinfo->fi_flags;
 	fiemap->fm_extent_count = fieinfo->fi_extents_max;
 	fiemap->fm_start = start;
 	fiemap->fm_length = len;
-	if (extent_count > 0 &&
-	    copy_from_user(&fiemap->fm_extents[0], fieinfo->fi_extents_start,
-			   sizeof(struct ll_fiemap_extent)) != 0) {
-		rc = -EFAULT;
-		goto out;
-	}
+	if (extent_count > 0)
+		memcpy(&fiemap->fm_extents[0], fieinfo->fi_extents_start,
+		       sizeof(struct ll_fiemap_extent));
 
 	rc = ll_do_fiemap(inode, fiemap, num_bytes);
 
 	fieinfo->fi_flags = fiemap->fm_flags;
 	fieinfo->fi_extents_mapped = fiemap->fm_mapped_extents;
-	if (extent_count > 0 &&
-	    copy_to_user(fieinfo->fi_extents_start, &fiemap->fm_extents[0],
-			 fiemap->fm_mapped_extents *
-			 sizeof(struct ll_fiemap_extent)) != 0) {
-		rc = -EFAULT;
-		goto out;
-	}
+	if (extent_count > 0)
+		memcpy(fieinfo->fi_extents_start, &fiemap->fm_extents[0],
+		       fiemap->fm_mapped_extents *
+		       sizeof(struct ll_fiemap_extent));
 
-out:
 	kvfree(fiemap);
 	return rc;
 }
@@ -3133,12 +3067,13 @@ int ll_inode_permission(struct inode *inode, int mask)
 {
 	int rc = 0;
 
+#ifdef MAY_NOT_BLOCK
 	if (mask & MAY_NOT_BLOCK)
 		return -ECHILD;
+#endif
 
        /* as root inode are NOT getting validated in lookup operation,
-	* need to do it before permission check.
-	*/
+	* need to do it before permission check. */
 
 	if (is_root_inode(inode)) {
 		rc = __ll_inode_revalidate(inode->i_sb->s_root,
@@ -3147,8 +3082,8 @@ int ll_inode_permission(struct inode *inode, int mask)
 			return rc;
 	}
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p), inode mode %x mask %o\n",
-	       PFID(ll_inode2fid(inode)), inode, inode->i_mode, mask);
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu/%u(%p), inode mode %x mask %o\n",
+	       inode->i_ino, inode->i_generation, inode, inode->i_mode, mask);
 
 	if (ll_i2sbi(inode)->ll_flags & LL_SBI_RMT_CLIENT)
 		return lustre_check_remote_perm(inode, mask);
@@ -3238,7 +3173,8 @@ void *ll_iocontrol_register(llioc_callback_t cb, int count, unsigned int *cmd)
 	unsigned int size;
 	struct llioc_data *in_data = NULL;
 
-	if (!cb || !cmd || count > LLIOC_MAX_CMD || count < 0)
+	if (cb == NULL || cmd == NULL ||
+	    count > LLIOC_MAX_CMD || count < 0)
 		return NULL;
 
 	size = sizeof(*in_data) + count * sizeof(unsigned int);
@@ -3264,7 +3200,7 @@ void ll_iocontrol_unregister(void *magic)
 {
 	struct llioc_data *tmp;
 
-	if (!magic)
+	if (magic == NULL)
 		return;
 
 	down_write(&llioc.ioc_sem);
@@ -3318,7 +3254,7 @@ int ll_layout_conf(struct inode *inode, const struct cl_object_conf *conf)
 	struct lu_env *env;
 	int result;
 
-	if (!lli->lli_clob)
+	if (lli->lli_clob == NULL)
 		return 0;
 
 	env = cl_env_nested_get(&nest);
@@ -3331,14 +3267,13 @@ int ll_layout_conf(struct inode *inode, const struct cl_object_conf *conf)
 	if (conf->coc_opc == OBJECT_CONF_SET) {
 		struct ldlm_lock *lock = conf->coc_lock;
 
-		LASSERT(lock);
+		LASSERT(lock != NULL);
 		LASSERT(ldlm_has_layout(lock));
 		if (result == 0) {
 			/* it can only be allowed to match after layout is
 			 * applied to inode otherwise false layout would be
 			 * seen. Applying layout should happen before dropping
-			 * the intent lock.
-			 */
+			 * the intent lock. */
 			ldlm_lock_allow_match(lock);
 		}
 	}
@@ -3358,18 +3293,17 @@ static int ll_layout_fetch(struct inode *inode, struct ldlm_lock *lock)
 	int rc;
 
 	CDEBUG(D_INODE, DFID" LVB_READY=%d l_lvb_data=%p l_lvb_len=%d\n",
-	       PFID(ll_inode2fid(inode)), ldlm_is_lvb_ready(lock),
+	       PFID(ll_inode2fid(inode)), !!(lock->l_flags & LDLM_FL_LVB_READY),
 	       lock->l_lvb_data, lock->l_lvb_len);
 
-	if (lock->l_lvb_data && ldlm_is_lvb_ready(lock))
+	if ((lock->l_lvb_data != NULL) && (lock->l_flags & LDLM_FL_LVB_READY))
 		return 0;
 
 	/* if layout lock was granted right away, the layout is returned
 	 * within DLM_LVB of dlm reply; otherwise if the lock was ever
 	 * blocked and then granted via completion ast, we have to fetch
 	 * layout here. Please note that we can't use the LVB buffer in
-	 * completion AST because it doesn't have a large enough buffer
-	 */
+	 * completion AST because it doesn't have a large enough buffer */
 	rc = ll_get_default_mdsize(sbi, &lmmsize);
 	if (rc == 0)
 		rc = md_getxattr(sbi->ll_md_exp, ll_inode2fid(inode),
@@ -3379,7 +3313,7 @@ static int ll_layout_fetch(struct inode *inode, struct ldlm_lock *lock)
 		return rc;
 
 	body = req_capsule_server_get(&req->rq_pill, &RMF_MDT_BODY);
-	if (!body) {
+	if (body == NULL) {
 		rc = -EPROTO;
 		goto out;
 	}
@@ -3391,20 +3325,20 @@ static int ll_layout_fetch(struct inode *inode, struct ldlm_lock *lock)
 	}
 
 	lmm = req_capsule_server_sized_get(&req->rq_pill, &RMF_EADATA, lmmsize);
-	if (!lmm) {
+	if (lmm == NULL) {
 		rc = -EFAULT;
 		goto out;
 	}
 
 	lvbdata = libcfs_kvzalloc(lmmsize, GFP_NOFS);
-	if (!lvbdata) {
+	if (lvbdata == NULL) {
 		rc = -ENOMEM;
 		goto out;
 	}
 
 	memcpy(lvbdata, lmm, lmmsize);
 	lock_res_and_lock(lock);
-	if (lock->l_lvb_data)
+	if (lock->l_lvb_data != NULL)
 		kvfree(lock->l_lvb_data);
 
 	lock->l_lvb_data = lvbdata;
@@ -3420,8 +3354,8 @@ out:
  * Apply the layout to the inode. Layout lock is held and will be released
  * in this function.
  */
-static int ll_layout_lock_set(struct lustre_handle *lockh, enum ldlm_mode mode,
-			      struct inode *inode, __u32 *gen, bool reconf)
+static int ll_layout_lock_set(struct lustre_handle *lockh, ldlm_mode_t mode,
+				struct inode *inode, __u32 *gen, bool reconf)
 {
 	struct ll_inode_info *lli = ll_i2info(inode);
 	struct ll_sb_info    *sbi = ll_i2sbi(inode);
@@ -3435,27 +3369,25 @@ static int ll_layout_lock_set(struct lustre_handle *lockh, enum ldlm_mode mode,
 	LASSERT(lustre_handle_is_used(lockh));
 
 	lock = ldlm_handle2lock(lockh);
-	LASSERT(lock);
+	LASSERT(lock != NULL);
 	LASSERT(ldlm_has_layout(lock));
 
-	LDLM_DEBUG(lock, "File "DFID"(%p) being reconfigured: %d",
-		   PFID(&lli->lli_fid), inode, reconf);
+	LDLM_DEBUG(lock, "File %p/"DFID" being reconfigured: %d.\n",
+		   inode, PFID(&lli->lli_fid), reconf);
 
 	/* in case this is a caching lock and reinstate with new inode */
 	md_set_lock_data(sbi->ll_md_exp, &lockh->cookie, inode, NULL);
 
 	lock_res_and_lock(lock);
-	lvb_ready = ldlm_is_lvb_ready(lock);
+	lvb_ready = !!(lock->l_flags & LDLM_FL_LVB_READY);
 	unlock_res_and_lock(lock);
 	/* checking lvb_ready is racy but this is okay. The worst case is
-	 * that multi processes may configure the file on the same time.
-	 */
+	 * that multi processes may configure the file on the same time. */
 	if (lvb_ready || !reconf) {
 		rc = -ENODATA;
 		if (lvb_ready) {
 			/* layout_gen must be valid if layout lock is not
-			 * cancelled and stripe has already set
-			 */
+			 * cancelled and stripe has already set */
 			*gen = ll_layout_version_get(lli);
 			rc = 0;
 		}
@@ -3469,28 +3401,26 @@ static int ll_layout_lock_set(struct lustre_handle *lockh, enum ldlm_mode mode,
 	/* for layout lock, lmm is returned in lock's lvb.
 	 * lvb_data is immutable if the lock is held so it's safe to access it
 	 * without res lock. See the description in ldlm_lock_decref_internal()
-	 * for the condition to free lvb_data of layout lock
-	 */
-	if (lock->l_lvb_data) {
+	 * for the condition to free lvb_data of layout lock */
+	if (lock->l_lvb_data != NULL) {
 		rc = obd_unpackmd(sbi->ll_dt_exp, &md.lsm,
 				  lock->l_lvb_data, lock->l_lvb_len);
 		if (rc >= 0) {
 			*gen = LL_LAYOUT_GEN_EMPTY;
-			if (md.lsm)
+			if (md.lsm != NULL)
 				*gen = md.lsm->lsm_layout_gen;
 			rc = 0;
 		} else {
-			CERROR("%s: file " DFID " unpackmd error: %d\n",
-			       ll_get_fsname(inode->i_sb, NULL, 0),
-			       PFID(&lli->lli_fid), rc);
+			CERROR("%s: file "DFID" unpackmd error: %d\n",
+				ll_get_fsname(inode->i_sb, NULL, 0),
+				PFID(&lli->lli_fid), rc);
 		}
 	}
 	if (rc < 0)
 		goto out;
 
 	/* set layout to file. Unlikely this will fail as old layout was
-	 * surely eliminated
-	 */
+	 * surely eliminated */
 	memset(&conf, 0, sizeof(conf));
 	conf.coc_opc = OBJECT_CONF_SET;
 	conf.coc_inode = inode;
@@ -3498,7 +3428,7 @@ static int ll_layout_lock_set(struct lustre_handle *lockh, enum ldlm_mode mode,
 	conf.u.coc_md = &md;
 	rc = ll_layout_conf(inode, &conf);
 
-	if (md.lsm)
+	if (md.lsm != NULL)
 		obd_free_memmd(sbi->ll_dt_exp, &md.lsm);
 
 	/* refresh layout failed, need to wait */
@@ -3510,9 +3440,9 @@ out:
 
 	/* wait for IO to complete if it's still being used. */
 	if (wait_layout) {
-		CDEBUG(D_INODE, "%s: "DFID"(%p) wait for layout reconf\n",
-		       ll_get_fsname(inode->i_sb, NULL, 0),
-		       PFID(&lli->lli_fid), inode);
+		CDEBUG(D_INODE, "%s: %p/"DFID" wait for layout reconf.\n",
+			ll_get_fsname(inode->i_sb, NULL, 0),
+			inode, PFID(&lli->lli_fid));
 
 		memset(&conf, 0, sizeof(conf));
 		conf.coc_opc = OBJECT_CONF_WAIT;
@@ -3521,9 +3451,8 @@ out:
 		if (rc == 0)
 			rc = -EAGAIN;
 
-		CDEBUG(D_INODE, "%s: file="DFID" waiting layout return: %d.\n",
-		       ll_get_fsname(inode->i_sb, NULL, 0),
-		       PFID(&lli->lli_fid), rc);
+		CDEBUG(D_INODE, "file: "DFID" waiting layout return: %d.\n",
+			PFID(&lli->lli_fid), rc);
 	}
 	return rc;
 }
@@ -3548,7 +3477,7 @@ int ll_layout_refresh(struct inode *inode, __u32 *gen)
 	struct md_op_data     *op_data;
 	struct lookup_intent   it;
 	struct lustre_handle   lockh;
-	enum ldlm_mode	       mode;
+	ldlm_mode_t	       mode;
 	struct ldlm_enqueue_info einfo = {
 		.ei_type = LDLM_IBITS,
 		.ei_mode = LCK_CR,
@@ -3570,8 +3499,7 @@ int ll_layout_refresh(struct inode *inode, __u32 *gen)
 
 again:
 	/* mostly layout lock is caching on the local side, so try to match
-	 * it before grabbing layout lock mutex.
-	 */
+	 * it before grabbing layout lock mutex. */
 	mode = ll_take_md_lock(inode, MDS_INODELOCK_LAYOUT, &lockh, 0,
 			       LCK_CR | LCK_CW | LCK_PR | LCK_PW);
 	if (mode != 0) { /* hit cached lock */
@@ -3584,7 +3512,7 @@ again:
 	}
 
 	op_data = ll_prep_md_op_data(NULL, inode, inode, NULL,
-				     0, 0, LUSTRE_OPC_ANY, NULL);
+			0, 0, LUSTRE_OPC_ANY, NULL);
 	if (IS_ERR(op_data)) {
 		mutex_unlock(&lli->lli_layout_mutex);
 		return PTR_ERR(op_data);
@@ -3595,13 +3523,14 @@ again:
 	it.it_op = IT_LAYOUT;
 	lockh.cookie = 0ULL;
 
-	LDLM_DEBUG_NOLOCK("%s: requeue layout lock for file "DFID"(%p)",
-			  ll_get_fsname(inode->i_sb, NULL, 0),
-			  PFID(&lli->lli_fid), inode);
+	LDLM_DEBUG_NOLOCK("%s: requeue layout lock for file %p/"DFID".\n",
+			ll_get_fsname(inode->i_sb, NULL, 0), inode,
+			PFID(&lli->lli_fid));
 
 	rc = md_enqueue(sbi->ll_md_exp, &einfo, &it, op_data, &lockh,
 			NULL, 0, NULL, 0);
-	ptlrpc_req_finished(it.d.lustre.it_data);
+	if (it.d.lustre.it_data != NULL)
+		ptlrpc_req_finished(it.d.lustre.it_data);
 	it.d.lustre.it_data = NULL;
 
 	ll_finish_md_op_data(op_data);
@@ -3625,7 +3554,7 @@ again:
 /**
  *  This function send a restore request to the MDT
  */
-int ll_layout_restore(struct inode *inode, loff_t offset, __u64 length)
+int ll_layout_restore(struct inode *inode)
 {
 	struct hsm_user_request	*hur;
 	int			 len, rc;
@@ -3641,10 +3570,9 @@ int ll_layout_restore(struct inode *inode, loff_t offset, __u64 length)
 	hur->hur_request.hr_flags = 0;
 	memcpy(&hur->hur_user_item[0].hui_fid, &ll_i2info(inode)->lli_fid,
 	       sizeof(hur->hur_user_item[0].hui_fid));
-	hur->hur_user_item[0].hui_extent.offset = offset;
-	hur->hur_user_item[0].hui_extent.length = length;
+	hur->hur_user_item[0].hui_extent.length = -1;
 	hur->hur_request.hr_itemcount = 1;
-	rc = obd_iocontrol(LL_IOC_HSM_REQUEST, ll_i2sbi(inode)->ll_md_exp,
+	rc = obd_iocontrol(LL_IOC_HSM_REQUEST, cl_i2sbi(inode)->ll_md_exp,
 			   len, hur, NULL);
 	kfree(hur);
 	return rc;

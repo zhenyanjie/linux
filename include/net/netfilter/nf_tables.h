@@ -167,7 +167,6 @@ struct nft_set_elem {
 
 struct nft_set;
 struct nft_set_iter {
-	u8		genmask;
 	unsigned int	count;
 	unsigned int	skip;
 	int		err;
@@ -304,7 +303,7 @@ void nft_unregister_set(struct nft_set_ops *ops);
 struct nft_set {
 	struct list_head		list;
 	struct list_head		bindings;
-	char				name[NFT_SET_MAXNAMELEN];
+	char				name[IFNAMSIZ];
 	u32				ktype;
 	u32				dtype;
 	u32				size;

@@ -13,7 +13,7 @@
  * GNU General Public License for more details.
  */
 
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/acpi.h>
 #include <linux/mfd/intel_soc_pmic.h>
 #include <linux/regmap.h>
@@ -205,4 +205,7 @@ static int __init intel_crc_pmic_opregion_driver_init(void)
 {
 	return platform_driver_register(&intel_crc_pmic_opregion_driver);
 }
-device_initcall(intel_crc_pmic_opregion_driver_init);
+module_init(intel_crc_pmic_opregion_driver_init);
+
+MODULE_DESCRIPTION("CrystalCove ACPI operation region driver");
+MODULE_LICENSE("GPL");

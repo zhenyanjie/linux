@@ -265,7 +265,7 @@ static int acpi_aml_write_kern(const char *buf, int len)
 	char *p;
 
 	ret = acpi_aml_lock_write(crc, ACPI_AML_OUT_KERN);
-	if (ret < 0)
+	if (IS_ERR_VALUE(ret))
 		return ret;
 	/* sync tail before inserting logs */
 	smp_mb();
@@ -286,7 +286,7 @@ static int acpi_aml_readb_kern(void)
 	char *p;
 
 	ret = acpi_aml_lock_read(crc, ACPI_AML_IN_KERN);
-	if (ret < 0)
+	if (IS_ERR_VALUE(ret))
 		return ret;
 	/* sync head before removing cmds */
 	smp_rmb();
@@ -330,7 +330,7 @@ again:
 				goto again;
 			break;
 		}
-		if (ret < 0)
+		if (IS_ERR_VALUE(ret))
 			break;
 		size += ret;
 		count -= ret;
@@ -373,7 +373,7 @@ again:
 			if (ret == 0)
 				goto again;
 		}
-		if (ret < 0)
+		if (IS_ERR_VALUE(ret))
 			break;
 		*(msg + size) = (char)ret;
 		size++;
@@ -526,7 +526,7 @@ static int acpi_aml_open(struct inode *inode, struct file *file)
 	}
 	acpi_aml_io.users++;
 err_lock:
-	if (ret < 0) {
+	if (IS_ERR_VALUE(ret)) {
 		if (acpi_aml_active_reader == file)
 			acpi_aml_active_reader = NULL;
 	}
@@ -587,7 +587,7 @@ static int acpi_aml_read_user(char __user *buf, int len)
 	char *p;
 
 	ret = acpi_aml_lock_read(crc, ACPI_AML_OUT_USER);
-	if (ret < 0)
+	if (IS_ERR_VALUE(ret))
 		return ret;
 	/* sync head before removing logs */
 	smp_rmb();
@@ -602,7 +602,7 @@ static int acpi_aml_read_user(char __user *buf, int len)
 	crc->tail = (crc->tail + n) & (ACPI_AML_BUF_SIZE - 1);
 	ret = n;
 out:
-	acpi_aml_unlock_fifo(ACPI_AML_OUT_USER, ret >= 0);
+	acpi_aml_unlock_fifo(ACPI_AML_OUT_USER, !IS_ERR_VALUE(ret));
 	return ret;
 }
 
@@ -634,7 +634,7 @@ again:
 					goto again;
 			}
 		}
-		if (ret < 0) {
+		if (IS_ERR_VALUE(ret)) {
 			if (!acpi_aml_running())
 				ret = 0;
 			break;
@@ -657,7 +657,7 @@ static int acpi_aml_write_user(const char __user *buf, int len)
 	char *p;
 
 	ret = acpi_aml_lock_write(crc, ACPI_AML_IN_USER);
-	if (ret < 0)
+	if (IS_ERR_VALUE(ret))
 		return ret;
 	/* sync tail before inserting cmds */
 	smp_mb();
@@ -672,7 +672,7 @@ static int acpi_aml_write_user(const char __user *buf, int len)
 	crc->head = (crc->head + n) & (ACPI_AML_BUF_SIZE - 1);
 	ret = n;
 out:
-	acpi_aml_unlock_fifo(ACPI_AML_IN_USER, ret >= 0);
+	acpi_aml_unlock_fifo(ACPI_AML_IN_USER, !IS_ERR_VALUE(ret));
 	return n;
 }
 
@@ -704,7 +704,7 @@ again:
 					goto again;
 			}
 		}
-		if (ret < 0) {
+		if (IS_ERR_VALUE(ret)) {
 			if (!acpi_aml_running())
 				ret = 0;
 			break;

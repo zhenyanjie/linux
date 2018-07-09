@@ -170,8 +170,6 @@ static inline int lwtunnel_input(struct sk_buff *skb)
 	return -EOPNOTSUPP;
 }
 
-#endif /* CONFIG_LWTUNNEL */
-
-#define MODULE_ALIAS_RTNL_LWT(encap_type) MODULE_ALIAS("rtnl-lwt-" __stringify(encap_type))
+#endif
 
 #endif /* __NET_LWTUNNEL_H */

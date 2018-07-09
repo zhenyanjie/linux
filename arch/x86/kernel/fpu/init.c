@@ -29,22 +29,22 @@ static void fpu__init_cpu_generic(void)
 	unsigned long cr0;
 	unsigned long cr4_mask = 0;
 
-	if (boot_cpu_has(X86_FEATURE_FXSR))
+	if (cpu_has_fxsr)
 		cr4_mask |= X86_CR4_OSFXSR;
-	if (boot_cpu_has(X86_FEATURE_XMM))
+	if (cpu_has_xmm)
 		cr4_mask |= X86_CR4_OSXMMEXCPT;
 	if (cr4_mask)
 		cr4_set_bits(cr4_mask);
 
 	cr0 = read_cr0();
 	cr0 &= ~(X86_CR0_TS|X86_CR0_EM); /* clear TS and EM */
-	if (!boot_cpu_has(X86_FEATURE_FPU))
+	if (!cpu_has_fpu)
 		cr0 |= X86_CR0_EM;
 	write_cr0(cr0);
 
 	/* Flush out any pending x87 state: */
 #ifdef CONFIG_MATH_EMULATION
-	if (!boot_cpu_has(X86_FEATURE_FPU))
+	if (!cpu_has_fpu)
 		fpstate_init_soft(&current->thread.fpu.state.soft);
 	else
 #endif
@@ -89,7 +89,7 @@ static void fpu__init_system_early_generic(struct cpuinfo_x86 *c)
 	}
 
 #ifndef CONFIG_MATH_EMULATION
-	if (!boot_cpu_has(X86_FEATURE_FPU)) {
+	if (!cpu_has_fpu) {
 		pr_emerg("x86/fpu: Giving up, no FPU found and no math emulation present\n");
 		for (;;)
 			asm volatile("hlt");
@@ -106,7 +106,7 @@ static void __init fpu__init_system_mxcsr(void)
 {
 	unsigned int mask = 0;
 
-	if (boot_cpu_has(X86_FEATURE_FXSR)) {
+	if (cpu_has_fxsr) {
 		/* Static because GCC does not get 16-byte stack alignment right: */
 		static struct fxregs_state fxregs __initdata;
 
@@ -212,7 +212,7 @@ static void __init fpu__init_system_xstate_size_legacy(void)
 	 * fpu__init_system_xstate().
 	 */
 
-	if (!boot_cpu_has(X86_FEATURE_FPU)) {
+	if (!cpu_has_fpu) {
 		/*
 		 * Disable xsave as we do not support it if i387
 		 * emulation is enabled.
@@ -221,7 +221,7 @@ static void __init fpu__init_system_xstate_size_legacy(void)
 		setup_clear_cpu_cap(X86_FEATURE_XSAVEOPT);
 		xstate_size = sizeof(struct swregs_state);
 	} else {
-		if (boot_cpu_has(X86_FEATURE_FXSR))
+		if (cpu_has_fxsr)
 			xstate_size = sizeof(struct fxregs_state);
 		else
 			xstate_size = sizeof(struct fregs_state);
@@ -262,10 +262,7 @@ static void __init fpu__init_system_xstate_size_legacy(void)
  * not only saved the restores along the way, but we also have the
  * FPU ready to be used for the original task.
  *
- * 'lazy' is deprecated because it's almost never a performance win
- * and it's much more complicated than 'eager'.
- *
- * 'eager' switching is by default on all CPUs, there we switch the FPU
+ * 'eager' switching is used on modern CPUs, there we switch the FPU
  * state during every context switch, regardless of whether the task
  * has used FPU instructions in that time slice or not. This is done
  * because modern FPU context saving instructions are able to optimize
@@ -276,7 +273,7 @@ static void __init fpu__init_system_xstate_size_legacy(void)
  *   to use 'eager' restores, if we detect that a task is using the FPU
  *   frequently. See the fpu->counter logic in fpu/internal.h for that. ]
  */
-static enum { ENABLE, DISABLE } eagerfpu = ENABLE;
+static enum { AUTO, ENABLE, DISABLE } eagerfpu = AUTO;
 
 /*
  * Find supported xfeatures based on cpu features and command-line input.
@@ -347,9 +344,15 @@ static void __init fpu__init_system_ctx_switch(void)
  */
 static void __init fpu__init_parse_early_param(void)
 {
+	/*
+	 * No need to check "eagerfpu=auto" again, since it is the
+	 * initial default.
+	 */
 	if (cmdline_find_option_bool(boot_command_line, "eagerfpu=off")) {
 		eagerfpu = DISABLE;
 		fpu__clear_eager_fpu_features();
+	} else if (cmdline_find_option_bool(boot_command_line, "eagerfpu=on")) {
+		eagerfpu = ENABLE;
 	}
 
 	if (cmdline_find_option_bool(boot_command_line, "no387"))

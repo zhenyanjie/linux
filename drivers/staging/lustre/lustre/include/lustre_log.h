@@ -241,8 +241,7 @@ struct llog_ctxt {
 	struct obd_llog_group   *loc_olg; /* group containing that ctxt */
 	struct obd_export       *loc_exp; /* parent "disk" export (e.g. MDS) */
 	struct obd_import       *loc_imp; /* to use in RPC's: can be backward
-					   * pointing import
-					   */
+					     pointing import */
 	struct llog_operations  *loc_logops;
 	struct llog_handle      *loc_handle;
 	struct mutex		 loc_mutex; /* protect loc_imp */
@@ -256,7 +255,7 @@ struct llog_ctxt {
 static inline int llog_handle2ops(struct llog_handle *loghandle,
 				  struct llog_operations **lop)
 {
-	if (!loghandle || !loghandle->lgh_logops)
+	if (loghandle == NULL || loghandle->lgh_logops == NULL)
 		return -EINVAL;
 
 	*lop = loghandle->lgh_logops;
@@ -273,7 +272,7 @@ static inline struct llog_ctxt *llog_ctxt_get(struct llog_ctxt *ctxt)
 
 static inline void llog_ctxt_put(struct llog_ctxt *ctxt)
 {
-	if (!ctxt)
+	if (ctxt == NULL)
 		return;
 	LASSERT_ATOMIC_GT_LT(&ctxt->loc_refcount, 0, LI_POISON);
 	CDEBUG(D_INFO, "PUTting ctxt %p : new refcount %d\n", ctxt,
@@ -295,7 +294,7 @@ static inline int llog_group_set_ctxt(struct obd_llog_group *olg,
 	LASSERT(index >= 0 && index < LLOG_MAX_CTXTS);
 
 	spin_lock(&olg->olg_lock);
-	if (olg->olg_ctxts[index]) {
+	if (olg->olg_ctxts[index] != NULL) {
 		spin_unlock(&olg->olg_lock);
 		return -EEXIST;
 	}
@@ -312,7 +311,7 @@ static inline struct llog_ctxt *llog_group_get_ctxt(struct obd_llog_group *olg,
 	LASSERT(index >= 0 && index < LLOG_MAX_CTXTS);
 
 	spin_lock(&olg->olg_lock);
-	if (!olg->olg_ctxts[index])
+	if (olg->olg_ctxts[index] == NULL)
 		ctxt = NULL;
 	else
 		ctxt = llog_ctxt_get(olg->olg_ctxts[index]);
@@ -336,7 +335,7 @@ static inline struct llog_ctxt *llog_get_context(struct obd_device *obd,
 
 static inline int llog_group_ctxt_null(struct obd_llog_group *olg, int index)
 {
-	return (!olg->olg_ctxts[index]);
+	return (olg->olg_ctxts[index] == NULL);
 }
 
 static inline int llog_ctxt_null(struct obd_device *obd, int index)
@@ -355,7 +354,7 @@ static inline int llog_next_block(const struct lu_env *env,
 	rc = llog_handle2ops(loghandle, &lop);
 	if (rc)
 		return rc;
-	if (!lop->lop_next_block)
+	if (lop->lop_next_block == NULL)
 		return -EOPNOTSUPP;
 
 	rc = lop->lop_next_block(env, loghandle, cur_idx, next_idx,

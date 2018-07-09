@@ -75,13 +75,22 @@ static int smsc_phy_reset(struct phy_device *phydev)
 	 * in all capable mode before using it.
 	 */
 	if ((rc & MII_LAN83C185_MODE_MASK) == MII_LAN83C185_MODE_POWERDOWN) {
-		/* set "all capable" mode */
+		int timeout = 50000;
+
+		/* set "all capable" mode and reset the phy */
 		rc |= MII_LAN83C185_MODE_ALL;
 		phy_write(phydev, MII_LAN83C185_SPECIAL_MODES, rc);
-	}
+		phy_write(phydev, MII_BMCR, BMCR_RESET);
 
-	/* reset the phy */
-	return genphy_soft_reset(phydev);
+		/* wait end of reset (max 500 ms) */
+		do {
+			udelay(10);
+			if (timeout-- == 0)
+				return -1;
+			rc = phy_read(phydev, MII_BMCR);
+		} while (rc & BMCR_RESET);
+	}
+	return 0;
 }
 
 static int lan911x_config_init(struct phy_device *phydev)

@@ -1669,7 +1669,6 @@ static int __init nf_conntrack_sip_init(void)
 			if (ret) {
 				pr_err("failed to register helper for pf: %u port: %u\n",
 				       sip[i][j].tuple.src.l3num, ports[i]);
-				ports_c = i;
 				nf_conntrack_sip_fini();
 				return ret;
 			}

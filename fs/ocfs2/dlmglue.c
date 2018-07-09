@@ -54,7 +54,6 @@
 #include "uptodate.h"
 #include "quota.h"
 #include "refcounttree.h"
-#include "acl.h"
 
 #include "buffer_head_io.h"
 
@@ -3623,8 +3622,6 @@ static int ocfs2_data_convert_worker(struct ocfs2_lock_res *lockres,
 		 * them around in that case. */
 		filemap_fdatawait(mapping);
 	}
-
-	forget_all_cached_acls(inode);
 
 out:
 	return UNBLOCK_CONTINUE;

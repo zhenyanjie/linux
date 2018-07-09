@@ -1598,7 +1598,7 @@ static void *new_queue(unsigned long q_type)
 
 static void free_queue(void *p, unsigned long q_type)
 {
-	kmem_cache_free(queue_cache[q_type - 1], p);
+	return kmem_cache_free(queue_cache[q_type - 1], p);
 }
 
 static int queue_cache_init(void)

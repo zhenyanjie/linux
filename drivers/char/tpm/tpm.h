@@ -128,6 +128,13 @@ enum tpm2_startup_types {
 	TPM2_SU_STATE	= 0x0001,
 };
 
+enum tpm2_start_method {
+	TPM2_START_ACPI = 2,
+	TPM2_START_FIFO = 6,
+	TPM2_START_CRB = 7,
+	TPM2_START_CRB_WITH_ACPI = 8,
+};
+
 struct tpm_chip;
 
 struct tpm_vendor_specific {
@@ -494,15 +501,11 @@ extern struct class *tpm_class;
 extern dev_t tpm_devt;
 extern const struct file_operations tpm_fops;
 
-enum tpm_transmit_flags {
-	TPM_TRANSMIT_UNLOCKED	= BIT(0),
-};
-
-ssize_t tpm_transmit(struct tpm_chip *chip, const u8 *buf, size_t bufsiz,
-		     unsigned int flags);
-ssize_t tpm_transmit_cmd(struct tpm_chip *chip, const void *cmd, int len,
-			 unsigned int flags, const char *desc);
 ssize_t	tpm_getcap(struct device *, __be32, cap_t *, const char *);
+ssize_t tpm_transmit(struct tpm_chip *chip, const char *buf,
+		     size_t bufsiz);
+ssize_t tpm_transmit_cmd(struct tpm_chip *chip, void *cmd, int len,
+			 const char *desc);
 extern int tpm_get_timeouts(struct tpm_chip *);
 extern void tpm_gen_interrupt(struct tpm_chip *);
 extern int tpm_do_selftest(struct tpm_chip *);

@@ -16,6 +16,7 @@
 #include <linux/timer.h>
 #include <linux/workqueue.h>
 #include <linux/of.h>
+#include <linux/of_gpio.h>
 #include <linux/phy.h>
 #include <linux/phy_fixed.h>
 #include <linux/ethtool.h>
@@ -64,6 +65,13 @@ struct dsa_chip_data {
 	 * NULL if there is only one switch chip.
 	 */
 	s8		*rtable;
+
+	/*
+	 * A switch may have a GPIO line tied to its reset pin. Parse
+	 * this from the device tree, and use it before performing
+	 * switch soft reset.
+	 */
+	struct gpio_desc *reset;
 };
 
 struct dsa_platform_data {
@@ -103,11 +111,6 @@ struct dsa_switch_tree {
 	enum dsa_tag_protocol	tag_protocol;
 
 	/*
-	 * Original copy of the master netdev ethtool_ops
-	 */
-	struct ethtool_ops	master_ethtool_ops;
-
-	/*
 	 * The switch and port to which the CPU is attached.
 	 */
 	s8			cpu_switch;
@@ -120,8 +123,6 @@ struct dsa_switch_tree {
 };
 
 struct dsa_switch {
-	struct device *dev;
-
 	/*
 	 * Parent switch tree, and switch index.
 	 */
@@ -129,20 +130,24 @@ struct dsa_switch {
 	int			index;
 
 	/*
-	 * Give the switch driver somewhere to hang its private data
-	 * structure.
+	 * Tagging protocol understood by this switch
 	 */
-	void *priv;
+	enum dsa_tag_protocol	tag_protocol;
 
 	/*
 	 * Configuration data for this switch.
 	 */
-	struct dsa_chip_data	*cd;
+	struct dsa_chip_data	*pd;
 
 	/*
 	 * The used switch driver.
 	 */
 	struct dsa_switch_driver	*drv;
+
+	/*
+	 * Reference to host device to use.
+	 */
+	struct device		*master_dev;
 
 #ifdef CONFIG_NET_DSA_HWMON
 	/*
@@ -156,7 +161,7 @@ struct dsa_switch {
 	 * Slave mii_bus and devices for the individual ports.
 	 */
 	u32			dsa_port_mask;
-	u32			enabled_port_mask;
+	u32			phys_port_mask;
 	u32			phys_mii_mask;
 	struct mii_bus		*slave_mii_bus;
 	struct net_device	*ports[DSA_MAX_PORTS];
@@ -174,7 +179,7 @@ static inline bool dsa_is_dsa_port(struct dsa_switch *ds, int p)
 
 static inline bool dsa_is_port_initialized(struct dsa_switch *ds, int p)
 {
-	return ds->enabled_port_mask & (1 << p) && ds->ports[p];
+	return ds->phys_port_mask & (1 << p) && ds->ports[p];
 }
 
 static inline u8 dsa_upstream_port(struct dsa_switch *ds)
@@ -190,7 +195,7 @@ static inline u8 dsa_upstream_port(struct dsa_switch *ds)
 	if (dst->cpu_switch == ds->index)
 		return dst->cpu_port;
 	else
-		return ds->cd->rtable[dst->cpu_switch];
+		return ds->pd->rtable[dst->cpu_switch];
 }
 
 struct switchdev_trans;
@@ -202,13 +207,12 @@ struct dsa_switch_driver {
 	struct list_head	list;
 
 	enum dsa_tag_protocol	tag_protocol;
+	int			priv_size;
 
 	/*
 	 * Probing and setup.
 	 */
-	const char	*(*probe)(struct device *dsa_dev,
-				  struct device *host_dev, int sw_addr,
-				  void **priv);
+	char	*(*probe)(struct device *host_dev, int sw_addr);
 	int	(*setup)(struct dsa_switch *ds);
 	int	(*set_addr)(struct dsa_switch *ds, u8 *addr);
 	u32	(*get_phy_flags)(struct dsa_switch *ds, int port);
@@ -292,28 +296,27 @@ struct dsa_switch_driver {
 	/*
 	 * Bridge integration
 	 */
-	int	(*port_bridge_join)(struct dsa_switch *ds, int port,
-				    struct net_device *bridge);
-	void	(*port_bridge_leave)(struct dsa_switch *ds, int port);
-	void	(*port_stp_state_set)(struct dsa_switch *ds, int port,
-				      u8 state);
+	int	(*port_join_bridge)(struct dsa_switch *ds, int port,
+				    u32 br_port_mask);
+	int	(*port_leave_bridge)(struct dsa_switch *ds, int port,
+				     u32 br_port_mask);
+	int	(*port_stp_update)(struct dsa_switch *ds, int port,
+				   u8 state);
 
 	/*
 	 * VLAN support
 	 */
-	int	(*port_vlan_filtering)(struct dsa_switch *ds, int port,
-				       bool vlan_filtering);
 	int	(*port_vlan_prepare)(struct dsa_switch *ds, int port,
 				     const struct switchdev_obj_port_vlan *vlan,
 				     struct switchdev_trans *trans);
-	void	(*port_vlan_add)(struct dsa_switch *ds, int port,
+	int	(*port_vlan_add)(struct dsa_switch *ds, int port,
 				 const struct switchdev_obj_port_vlan *vlan,
 				 struct switchdev_trans *trans);
 	int	(*port_vlan_del)(struct dsa_switch *ds, int port,
 				 const struct switchdev_obj_port_vlan *vlan);
-	int	(*port_vlan_dump)(struct dsa_switch *ds, int port,
-				  struct switchdev_obj_port_vlan *vlan,
-				  int (*cb)(struct switchdev_obj *obj));
+	int	(*port_pvid_get)(struct dsa_switch *ds, int port, u16 *pvid);
+	int	(*vlan_getnext)(struct dsa_switch *ds, u16 *vid,
+				unsigned long *ports, unsigned long *untagged);
 
 	/*
 	 * Forwarding database
@@ -321,7 +324,7 @@ struct dsa_switch_driver {
 	int	(*port_fdb_prepare)(struct dsa_switch *ds, int port,
 				    const struct switchdev_obj_port_fdb *fdb,
 				    struct switchdev_trans *trans);
-	void	(*port_fdb_add)(struct dsa_switch *ds, int port,
+	int	(*port_fdb_add)(struct dsa_switch *ds, int port,
 				const struct switchdev_obj_port_fdb *fdb,
 				struct switchdev_trans *trans);
 	int	(*port_fdb_del)(struct dsa_switch *ds, int port,
@@ -337,7 +340,7 @@ struct mii_bus *dsa_host_dev_to_mii_bus(struct device *dev);
 
 static inline void *ds_to_priv(struct dsa_switch *ds)
 {
-	return ds->priv;
+	return (void *)(ds + 1);
 }
 
 static inline bool dsa_uses_tagged_protocol(struct dsa_switch_tree *dst)

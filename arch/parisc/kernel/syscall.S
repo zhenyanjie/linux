@@ -912,7 +912,6 @@ END(lws_table)
 
 	.align 8
 ENTRY(sys_call_table)
-	.export sys_call_table,data
 #include "syscall_table.S"
 END(sys_call_table)
 

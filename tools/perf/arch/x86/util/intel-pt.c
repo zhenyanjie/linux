@@ -89,7 +89,7 @@ static int intel_pt_parse_terms_with_default(struct list_head *formats,
 
 	*config = attr.config;
 out_free:
-	parse_events_terms__delete(terms);
+	parse_events__free_terms(terms);
 	return err;
 }
 
@@ -273,9 +273,7 @@ intel_pt_pmu_default_config(struct perf_pmu *intel_pt_pmu)
 	return attr;
 }
 
-static size_t
-intel_pt_info_priv_size(struct auxtrace_record *itr __maybe_unused,
-			struct perf_evlist *evlist __maybe_unused)
+static size_t intel_pt_info_priv_size(struct auxtrace_record *itr __maybe_unused)
 {
 	return INTEL_PT_AUXTRACE_PRIV_SIZE;
 }
@@ -501,7 +499,7 @@ static int intel_pt_recording_options(struct auxtrace_record *itr,
 	struct intel_pt_recording *ptr =
 			container_of(itr, struct intel_pt_recording, itr);
 	struct perf_pmu *intel_pt_pmu = ptr->intel_pt_pmu;
-	bool have_timing_info, need_immediate = false;
+	bool have_timing_info;
 	struct perf_evsel *evsel, *intel_pt_evsel = NULL;
 	const struct cpu_map *cpus = evlist->cpus;
 	bool privileged = geteuid() == 0 || perf_event_paranoid() < 0;
@@ -655,7 +653,6 @@ static int intel_pt_recording_options(struct auxtrace_record *itr,
 				ptr->have_sched_switch = 3;
 			} else {
 				opts->record_switch_events = true;
-				need_immediate = true;
 				if (cpu_wide)
 					ptr->have_sched_switch = 3;
 				else
@@ -700,9 +697,6 @@ static int intel_pt_recording_options(struct auxtrace_record *itr,
 
 		tracking_evsel->attr.freq = 0;
 		tracking_evsel->attr.sample_period = 1;
-
-		if (need_immediate)
-			tracking_evsel->immediate = true;
 
 		/* In per-cpu case, always need the time of mmap events etc */
 		if (!cpu_map__empty(cpus)) {
@@ -1030,11 +1024,6 @@ struct auxtrace_record *intel_pt_recording_init(int *err)
 
 	if (!intel_pt_pmu)
 		return NULL;
-
-	if (setenv("JITDUMP_USE_ARCH_TIMESTAMP", "1", 1)) {
-		*err = -errno;
-		return NULL;
-	}
 
 	ptr = zalloc(sizeof(struct intel_pt_recording));
 	if (!ptr) {

@@ -11,6 +11,11 @@
  * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
  * more details.
  *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110, USA
+ *
+ *
  ******************************************************************************/
 #define _RTW_MLME_C_
 
@@ -117,26 +122,31 @@ void rtw_free_mlme_priv(struct mlme_priv *pmlmepriv)
 {
 	rtw_free_mlme_priv_ie_data(pmlmepriv);
 
-	if (pmlmepriv)
-		vfree(pmlmepriv->free_bss_buf);
+	if (pmlmepriv) {
+		if (pmlmepriv->free_bss_buf)
+			vfree(pmlmepriv->free_bss_buf);
+	}
 }
 
-struct wlan_network *_rtw_alloc_network(struct mlme_priv *pmlmepriv)
-					/* _queue *free_queue) */
+struct	wlan_network *_rtw_alloc_network(struct	mlme_priv *pmlmepriv)/* _queue *free_queue) */
 {
-	struct wlan_network *pnetwork;
+	struct	wlan_network	*pnetwork;
 	struct __queue *free_queue = &pmlmepriv->free_bss_pool;
+	struct list_head *plist = NULL;
 
 	spin_lock_bh(&free_queue->lock);
-	pnetwork = list_first_entry_or_null(&free_queue->queue,
-					    struct wlan_network, list);
-	if (!pnetwork)
+
+	if (list_empty(&free_queue->queue)) {
+		pnetwork = NULL;
 		goto exit;
+	}
+	plist = free_queue->queue.next;
+
+	pnetwork = container_of(plist, struct wlan_network, list);
 
 	list_del_init(&pnetwork->list);
 
-	RT_TRACE(_module_rtl871x_mlme_c_, _drv_info_,
-		 ("_rtw_alloc_network: ptr=%p\n", &pnetwork->list));
+	RT_TRACE(_module_rtl871x_mlme_c_, _drv_info_, ("_rtw_alloc_network: ptr=%p\n", plist));
 	pnetwork->network_type = 0;
 	pnetwork->fixed = false;
 	pnetwork->last_scanned = jiffies;
@@ -1579,13 +1589,13 @@ int rtw_set_auth(struct adapter *adapter, struct security_priv *psecuritypriv)
 	int		res = _SUCCESS;
 
 	pcmd = kzalloc(sizeof(struct cmd_obj), GFP_KERNEL);
-	if (!pcmd) {
+	if (pcmd == NULL) {
 		res = _FAIL;  /* try again */
 		goto exit;
 	}
 
 	psetauthparm = kzalloc(sizeof(struct setauth_parm), GFP_KERNEL);
-	if (!psetauthparm) {
+	if (psetauthparm == NULL) {
 		kfree(pcmd);
 		res = _FAIL;
 		goto exit;
@@ -1616,11 +1626,11 @@ int rtw_set_key(struct adapter *adapter, struct security_priv *psecuritypriv, in
 	int	res = _SUCCESS;
 
 	pcmd = kzalloc(sizeof(struct cmd_obj), GFP_KERNEL);
-	if (!pcmd)
+	if (pcmd == NULL)
 		return _FAIL;  /* try again */
 
 	psetkeyparm = kzalloc(sizeof(struct setkey_parm), GFP_KERNEL);
-	if (!psetkeyparm) {
+	if (psetkeyparm == NULL) {
 		res = _FAIL;
 		goto err_free_cmd;
 	}

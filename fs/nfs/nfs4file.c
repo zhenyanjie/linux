@@ -128,29 +128,38 @@ nfs4_file_flush(struct file *file, fl_owner_t id)
 	return vfs_fsync(file, 0);
 }
 
-#ifdef CONFIG_NFS_V4_2
-static ssize_t nfs4_copy_file_range(struct file *file_in, loff_t pos_in,
-				    struct file *file_out, loff_t pos_out,
-				    size_t count, unsigned int flags)
+static int
+nfs4_file_fsync(struct file *file, loff_t start, loff_t end, int datasync)
 {
-	struct inode *in_inode = file_inode(file_in);
-	struct inode *out_inode = file_inode(file_out);
 	int ret;
+	struct inode *inode = file_inode(file);
 
-	if (in_inode == out_inode)
-		return -EINVAL;
+	trace_nfs_fsync_enter(inode);
 
-	/* flush any pending writes */
-	ret = nfs_sync_inode(in_inode);
-	if (ret)
-		return ret;
-	ret = nfs_sync_inode(out_inode);
-	if (ret)
-		return ret;
+	nfs_inode_dio_wait(inode);
+	do {
+		ret = filemap_write_and_wait_range(inode->i_mapping, start, end);
+		if (ret != 0)
+			break;
+		inode_lock(inode);
+		ret = nfs_file_fsync_commit(file, start, end, datasync);
+		if (!ret)
+			ret = pnfs_sync_inode(inode, !!datasync);
+		inode_unlock(inode);
+		/*
+		 * If nfs_file_fsync_commit detected a server reboot, then
+		 * resend all dirty pages that might have been covered by
+		 * the NFS_CONTEXT_RESEND_WRITES flag
+		 */
+		start = 0;
+		end = LLONG_MAX;
+	} while (ret == -EAGAIN);
 
-	return nfs42_proc_copy(file_in, pos_in, file_out, pos_out, count);
+	trace_nfs_fsync_exit(inode, ret);
+	return ret;
 }
 
+#ifdef CONFIG_NFS_V4_2
 static loff_t nfs4_file_llseek(struct file *filep, loff_t offset, int whence)
 {
 	loff_t ret;
@@ -257,7 +266,7 @@ const struct file_operations nfs4_file_operations = {
 	.open		= nfs4_file_open,
 	.flush		= nfs4_file_flush,
 	.release	= nfs_file_release,
-	.fsync		= nfs_file_fsync,
+	.fsync		= nfs4_file_fsync,
 	.lock		= nfs_lock,
 	.flock		= nfs_flock,
 	.splice_read	= nfs_file_splice_read,
@@ -265,7 +274,6 @@ const struct file_operations nfs4_file_operations = {
 	.check_flags	= nfs_check_flags,
 	.setlease	= simple_nosetlease,
 #ifdef CONFIG_NFS_V4_2
-	.copy_file_range = nfs4_copy_file_range,
 	.llseek		= nfs4_file_llseek,
 	.fallocate	= nfs42_fallocate,
 	.clone_file_range = nfs42_clone_file_range,

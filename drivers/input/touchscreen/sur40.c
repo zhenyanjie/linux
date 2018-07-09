@@ -126,7 +126,7 @@ struct sur40_image_header {
 #define VIDEO_PACKET_SIZE  16384
 
 /* polling interval (ms) */
-#define POLL_INTERVAL 1
+#define POLL_INTERVAL 4
 
 /* maximum number of contacts FIXME: this is a guess? */
 #define MAX_CONTACTS 64
@@ -197,34 +197,28 @@ static int sur40_command(struct sur40_state *dev,
 static int sur40_init(struct sur40_state *dev)
 {
 	int result;
-	u8 *buffer;
-
-	buffer = kmalloc(24, GFP_KERNEL);
-	if (!buffer) {
-		result = -ENOMEM;
-		goto error;
-	}
+	u8 buffer[24];
 
 	/* stupidly replay the original MS driver init sequence */
 	result = sur40_command(dev, SUR40_GET_VERSION, 0x00, buffer, 12);
 	if (result < 0)
-		goto error;
+		return result;
 
 	result = sur40_command(dev, SUR40_GET_VERSION, 0x01, buffer, 12);
 	if (result < 0)
-		goto error;
+		return result;
 
 	result = sur40_command(dev, SUR40_GET_VERSION, 0x02, buffer, 12);
 	if (result < 0)
-		goto error;
+		return result;
 
 	result = sur40_command(dev, SUR40_UNKNOWN2,    0x00, buffer, 24);
 	if (result < 0)
-		goto error;
+		return result;
 
 	result = sur40_command(dev, SUR40_UNKNOWN1,    0x00, buffer,  5);
 	if (result < 0)
-		goto error;
+		return result;
 
 	result = sur40_command(dev, SUR40_GET_VERSION, 0x03, buffer, 12);
 
@@ -232,8 +226,7 @@ static int sur40_init(struct sur40_state *dev)
 	 * Discard the result buffer - no known data inside except
 	 * some version strings, maybe extract these sometime...
 	 */
-error:
-	kfree(buffer);
+
 	return result;
 }
 
@@ -448,7 +441,7 @@ static void sur40_process_video(struct sur40_state *sur40)
 
 	/* return error if streaming was stopped in the meantime */
 	if (sur40->sequence == -1)
-		return;
+		goto err_poll;
 
 	/* mark as finished */
 	new_buf->vb.vb2_buf.timestamp = ktime_get_ns();
@@ -736,7 +729,6 @@ static int sur40_start_streaming(struct vb2_queue *vq, unsigned int count)
 static void sur40_stop_streaming(struct vb2_queue *vq)
 {
 	struct sur40_state *sur40 = vb2_get_drv_priv(vq);
-	vb2_wait_for_all_buffers(vq);
 	sur40->sequence = -1;
 
 	/* Release all active buffers */

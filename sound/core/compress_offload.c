@@ -69,14 +69,11 @@ struct snd_compr_file {
 
 /*
  * a note on stream states used:
- * we use following states in the compressed core
+ * we use follwing states in the compressed core
  * SNDRV_PCM_STATE_OPEN: When stream has been opened.
  * SNDRV_PCM_STATE_SETUP: When stream has been initialized. This is done by
- *	calling SNDRV_COMPRESS_SET_PARAMS. Running streams will come to this
+ *	calling SNDRV_COMPRESS_SET_PARAMS. running streams will come to this
  *	state at stop by calling SNDRV_COMPRESS_STOP, or at end of drain.
- * SNDRV_PCM_STATE_PREPARED: When a stream has been written to (for
- *	playback only). User after setting up stream writes the data buffer
- *	before starting the stream.
  * SNDRV_PCM_STATE_RUNNING: When stream has been started and is
  *	decoding/encoding and rendering/capturing data.
  * SNDRV_PCM_STATE_DRAINING: When stream is draining current data. This is done
@@ -288,12 +285,8 @@ static ssize_t snd_compr_write(struct file *f, const char __user *buf,
 	stream = &data->stream;
 	mutex_lock(&stream->device->lock);
 	/* write is allowed when stream is running or has been steup */
-	switch (stream->runtime->state) {
-	case SNDRV_PCM_STATE_SETUP:
-	case SNDRV_PCM_STATE_PREPARED:
-	case SNDRV_PCM_STATE_RUNNING:
-		break;
-	default:
+	if (stream->runtime->state != SNDRV_PCM_STATE_SETUP &&
+			stream->runtime->state != SNDRV_PCM_STATE_RUNNING) {
 		mutex_unlock(&stream->device->lock);
 		return -EBADFD;
 	}
@@ -394,13 +387,14 @@ static unsigned int snd_compr_poll(struct file *f, poll_table *wait)
 	int retval = 0;
 
 	if (snd_BUG_ON(!data))
-		return POLLERR;
-
+		return -EFAULT;
 	stream = &data->stream;
+	if (snd_BUG_ON(!stream))
+		return -EFAULT;
 
 	mutex_lock(&stream->device->lock);
 	if (stream->runtime->state == SNDRV_PCM_STATE_OPEN) {
-		retval = snd_compr_get_poll(stream) | POLLERR;
+		retval = -EBADFD;
 		goto out;
 	}
 	poll_wait(f, &stream->runtime->sleep, wait);
@@ -423,7 +417,10 @@ static unsigned int snd_compr_poll(struct file *f, poll_table *wait)
 			retval = snd_compr_get_poll(stream);
 		break;
 	default:
-		retval = snd_compr_get_poll(stream) | POLLERR;
+		if (stream->direction == SND_COMPRESS_PLAYBACK)
+			retval = POLLOUT | POLLWRNORM | POLLERR;
+		else
+			retval = POLLIN | POLLRDNORM | POLLERR;
 		break;
 	}
 out:
@@ -703,7 +700,7 @@ static int snd_compress_wait_for_drain(struct snd_compr_stream *stream)
 
 	/*
 	 * We are called with lock held. So drop the lock while we wait for
-	 * drain complete notification from the driver
+	 * drain complete notfication from the driver
 	 *
 	 * It is expected that driver will notify the drain completion and then
 	 * stream will be moved to SETUP state, even if draining resulted in an
@@ -758,7 +755,7 @@ static int snd_compr_next_track(struct snd_compr_stream *stream)
 	if (stream->runtime->state != SNDRV_PCM_STATE_RUNNING)
 		return -EPERM;
 
-	/* you can signal next track if this is intended to be a gapless stream
+	/* you can signal next track isf this is intended to be a gapless stream
 	 * and current track metadata is set
 	 */
 	if (stream->metadata_set == false)
@@ -801,9 +798,9 @@ static long snd_compr_ioctl(struct file *f, unsigned int cmd, unsigned long arg)
 
 	if (snd_BUG_ON(!data))
 		return -EFAULT;
-
 	stream = &data->stream;
-
+	if (snd_BUG_ON(!stream))
+		return -EFAULT;
 	mutex_lock(&stream->device->lock);
 	switch (_IOC_NR(cmd)) {
 	case _IOC_NR(SNDRV_COMPRESS_IOCTL_VERSION):

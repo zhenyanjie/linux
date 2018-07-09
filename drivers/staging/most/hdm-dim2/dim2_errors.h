@@ -15,6 +15,10 @@
 #ifndef _MOST_DIM_ERRORS_H
 #define _MOST_DIM_ERRORS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * MOST DIM errors.
  */
@@ -53,5 +57,9 @@ enum dim_errors_t {
 
 	DIM_ERR_OVERFLOW,
 };
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* _MOST_DIM_ERRORS_H */

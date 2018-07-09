@@ -479,8 +479,8 @@ int ib_ud_header_unpack(void                *buf,
 	buf += IB_LRH_BYTES;
 
 	if (header->lrh.link_version != 0) {
-		pr_warn("Invalid LRH.link_version %d\n",
-			header->lrh.link_version);
+		printk(KERN_WARNING "Invalid LRH.link_version %d\n",
+		       header->lrh.link_version);
 		return -EINVAL;
 	}
 
@@ -496,20 +496,20 @@ int ib_ud_header_unpack(void                *buf,
 		buf += IB_GRH_BYTES;
 
 		if (header->grh.ip_version != 6) {
-			pr_warn("Invalid GRH.ip_version %d\n",
-				header->grh.ip_version);
+			printk(KERN_WARNING "Invalid GRH.ip_version %d\n",
+			       header->grh.ip_version);
 			return -EINVAL;
 		}
 		if (header->grh.next_header != 0x1b) {
-			pr_warn("Invalid GRH.next_header 0x%02x\n",
-				header->grh.next_header);
+			printk(KERN_WARNING "Invalid GRH.next_header 0x%02x\n",
+			       header->grh.next_header);
 			return -EINVAL;
 		}
 		break;
 
 	default:
-		pr_warn("Invalid LRH.link_next_header %d\n",
-			header->lrh.link_next_header);
+		printk(KERN_WARNING "Invalid LRH.link_next_header %d\n",
+		       header->lrh.link_next_header);
 		return -EINVAL;
 	}
 
@@ -525,13 +525,14 @@ int ib_ud_header_unpack(void                *buf,
 		header->immediate_present = 1;
 		break;
 	default:
-		pr_warn("Invalid BTH.opcode 0x%02x\n", header->bth.opcode);
+		printk(KERN_WARNING "Invalid BTH.opcode 0x%02x\n",
+		       header->bth.opcode);
 		return -EINVAL;
 	}
 
 	if (header->bth.transport_header_version != 0) {
-		pr_warn("Invalid BTH.transport_header_version %d\n",
-			header->bth.transport_header_version);
+		printk(KERN_WARNING "Invalid BTH.transport_header_version %d\n",
+		       header->bth.transport_header_version);
 		return -EINVAL;
 	}
 

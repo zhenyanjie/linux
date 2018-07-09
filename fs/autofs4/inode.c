@@ -1,11 +1,15 @@
-/*
- * Copyright 1997-1998 Transmeta Corporation -- All Rights Reserved
- * Copyright 2005-2006 Ian Kent <raven@themaw.net>
+/* -*- c -*- --------------------------------------------------------------- *
+ *
+ * linux/fs/autofs/inode.c
+ *
+ *  Copyright 1997-1998 Transmeta Corporation -- All Rights Reserved
+ *  Copyright 2005-2006 Ian Kent <raven@themaw.net>
  *
  * This file is part of the Linux kernel and is made available under
  * the terms of the GNU General Public License, version 2, or at your
  * option, any later version, incorporated herein by reference.
- */
+ *
+ * ------------------------------------------------------------------------- */
 
 #include <linux/kernel.h>
 #include <linux/slab.h>
@@ -20,9 +24,7 @@
 
 struct autofs_info *autofs4_new_ino(struct autofs_sb_info *sbi)
 {
-	struct autofs_info *ino;
-
-	ino = kzalloc(sizeof(*ino), GFP_KERNEL);
+	struct autofs_info *ino = kzalloc(sizeof(*ino), GFP_KERNEL);
 	if (ino) {
 		INIT_LIST_HEAD(&ino->active);
 		INIT_LIST_HEAD(&ino->expiring);
@@ -60,7 +62,7 @@ void autofs4_kill_sb(struct super_block *sb)
 		put_pid(sbi->oz_pgrp);
 	}
 
-	pr_debug("shutting down\n");
+	DPRINTK("shutting down");
 	kill_litter_super(sb);
 	if (sbi)
 		kfree_rcu(sbi, rcu);
@@ -92,12 +94,7 @@ static int autofs4_show_options(struct seq_file *m, struct dentry *root)
 		seq_printf(m, ",direct");
 	else
 		seq_printf(m, ",indirect");
-#ifdef CONFIG_CHECKPOINT_RESTORE
-	if (sbi->pipe)
-		seq_printf(m, ",pipe_ino=%ld", sbi->pipe->f_inode->i_ino);
-	else
-		seq_printf(m, ",pipe_ino=-1");
-#endif
+
 	return 0;
 }
 
@@ -150,7 +147,6 @@ static int parse_options(char *options, int *pipefd, kuid_t *uid, kgid_t *gid,
 
 	while ((p = strsep(&options, ",")) != NULL) {
 		int token;
-
 		if (!*p)
 			continue;
 
@@ -208,9 +204,9 @@ static int parse_options(char *options, int *pipefd, kuid_t *uid, kgid_t *gid,
 
 int autofs4_fill_super(struct super_block *s, void *data, int silent)
 {
-	struct inode *root_inode;
-	struct dentry *root;
-	struct file *pipe;
+	struct inode * root_inode;
+	struct dentry * root;
+	struct file * pipe;
 	int pipefd;
 	struct autofs_sb_info *sbi;
 	struct autofs_info *ino;
@@ -221,7 +217,7 @@ int autofs4_fill_super(struct super_block *s, void *data, int silent)
 	sbi = kzalloc(sizeof(*sbi), GFP_KERNEL);
 	if (!sbi)
 		return -ENOMEM;
-	pr_debug("starting up, sbi = %p\n", sbi);
+	DPRINTK("starting up, sbi = %p",sbi);
 
 	s->s_fs_info = sbi;
 	sbi->magic = AUTOFS_SBI_MAGIC;
@@ -270,14 +266,14 @@ int autofs4_fill_super(struct super_block *s, void *data, int silent)
 	if (parse_options(data, &pipefd, &root_inode->i_uid, &root_inode->i_gid,
 			  &pgrp, &pgrp_set, &sbi->type, &sbi->min_proto,
 			  &sbi->max_proto)) {
-		pr_err("called with bogus options\n");
+		printk("autofs: called with bogus options\n");
 		goto fail_dput;
 	}
 
 	if (pgrp_set) {
 		sbi->oz_pgrp = find_get_pid(pgrp);
 		if (!sbi->oz_pgrp) {
-			pr_err("could not find process group %d\n",
+			pr_warn("autofs: could not find process group %d\n",
 				pgrp);
 			goto fail_dput;
 		}
@@ -294,10 +290,10 @@ int autofs4_fill_super(struct super_block *s, void *data, int silent)
 	/* Couldn't this be tested earlier? */
 	if (sbi->max_proto < AUTOFS_MIN_PROTO_VERSION ||
 	    sbi->min_proto > AUTOFS_MAX_PROTO_VERSION) {
-		pr_err("kernel does not match daemon version "
+		printk("autofs: kernel does not match daemon version "
 		       "daemon (%d, %d) kernel (%d, %d)\n",
-		       sbi->min_proto, sbi->max_proto,
-		       AUTOFS_MIN_PROTO_VERSION, AUTOFS_MAX_PROTO_VERSION);
+			sbi->min_proto, sbi->max_proto,
+			AUTOFS_MIN_PROTO_VERSION, AUTOFS_MAX_PROTO_VERSION);
 		goto fail_dput;
 	}
 
@@ -308,11 +304,11 @@ int autofs4_fill_super(struct super_block *s, void *data, int silent)
 		sbi->version = sbi->max_proto;
 	sbi->sub_version = AUTOFS_PROTO_SUBVERSION;
 
-	pr_debug("pipe fd = %d, pgrp = %u\n", pipefd, pid_nr(sbi->oz_pgrp));
+	DPRINTK("pipe fd = %d, pgrp = %u", pipefd, pid_nr(sbi->oz_pgrp));
 	pipe = fget(pipefd);
 
 	if (!pipe) {
-		pr_err("could not open pipe file descriptor\n");
+		printk("autofs: could not open pipe file descriptor\n");
 		goto fail_dput;
 	}
 	ret = autofs_prepare_pipe(pipe);
@@ -327,12 +323,12 @@ int autofs4_fill_super(struct super_block *s, void *data, int silent)
 	 */
 	s->s_root = root;
 	return 0;
-
+	
 	/*
 	 * Failure ... clean up.
 	 */
 fail_fput:
-	pr_err("pipe file descriptor does not contain proper ops\n");
+	printk("autofs: pipe file descriptor does not contain proper ops\n");
 	fput(pipe);
 	/* fall through */
 fail_dput:

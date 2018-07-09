@@ -191,6 +191,19 @@ struct acpi_video_device_cap {
 	u8 _DDC:1;		/* Return the EDID for this device */
 };
 
+struct acpi_video_brightness_flags {
+	u8 _BCL_no_ac_battery_levels:1;	/* no AC/Battery levels in _BCL */
+	u8 _BCL_reversed:1;		/* _BCL package is in a reversed order */
+	u8 _BQC_use_index:1;		/* _BQC returns an index value */
+};
+
+struct acpi_video_device_brightness {
+	int curr;
+	int count;
+	int *levels;
+	struct acpi_video_brightness_flags flags;
+};
+
 struct acpi_video_device {
 	unsigned long device_id;
 	struct acpi_video_device_flags flags;
@@ -203,6 +216,13 @@ struct acpi_video_device {
 	struct acpi_video_device_brightness *brightness;
 	struct backlight_device *backlight;
 	struct thermal_cooling_device *cooling_dev;
+};
+
+static const char device_decode[][30] = {
+	"motherboard VGA device",
+	"PCI VGA device",
+	"AGP VGA device",
+	"UNKNOWN",
 };
 
 static void acpi_video_device_notify(acpi_handle handle, u32 event, void *data);
@@ -312,7 +332,7 @@ static const struct thermal_cooling_device_ops video_cooling_ops = {
  */
 
 static int
-acpi_video_device_lcd_query_levels(acpi_handle handle,
+acpi_video_device_lcd_query_levels(struct acpi_video_device *device,
 				   union acpi_object **levels)
 {
 	int status;
@@ -322,7 +342,7 @@ acpi_video_device_lcd_query_levels(acpi_handle handle,
 
 	*levels = NULL;
 
-	status = acpi_evaluate_object(handle, "_BCL", NULL, &buffer);
+	status = acpi_evaluate_object(device->dev->handle, "_BCL", NULL, &buffer);
 	if (!ACPI_SUCCESS(status))
 		return status;
 	obj = (union acpi_object *)buffer.pointer;
@@ -753,29 +773,36 @@ static int acpi_video_bqc_quirk(struct acpi_video_device *device,
 	return 0;
 }
 
-int acpi_video_get_levels(struct acpi_device *device,
-			  struct acpi_video_device_brightness **dev_br,
-			  int *pmax_level)
+
+/*
+ *  Arg:
+ *	device	: video output device (LCD, CRT, ..)
+ *
+ *  Return Value:
+ *	Maximum brightness level
+ *
+ *  Allocate and initialize device->brightness.
+ */
+
+static int
+acpi_video_init_brightness(struct acpi_video_device *device)
 {
 	union acpi_object *obj = NULL;
 	int i, max_level = 0, count = 0, level_ac_battery = 0;
+	unsigned long long level, level_old;
 	union acpi_object *o;
 	struct acpi_video_device_brightness *br = NULL;
-	int result = 0;
+	int result = -EINVAL;
 	u32 value;
 
-	if (!ACPI_SUCCESS(acpi_video_device_lcd_query_levels(device->handle,
-								&obj))) {
+	if (!ACPI_SUCCESS(acpi_video_device_lcd_query_levels(device, &obj))) {
 		ACPI_DEBUG_PRINT((ACPI_DB_INFO, "Could not query available "
 						"LCD brightness level\n"));
-		result = -ENODEV;
 		goto out;
 	}
 
-	if (obj->package.count < 2) {
-		result = -EINVAL;
+	if (obj->package.count < 2)
 		goto out;
-	}
 
 	br = kzalloc(sizeof(*br), GFP_KERNEL);
 	if (!br) {
@@ -841,40 +868,6 @@ int acpi_video_get_levels(struct acpi_device *device,
 			    "Found unordered _BCL package"));
 
 	br->count = count;
-	*dev_br = br;
-	if (pmax_level)
-		*pmax_level = max_level;
-
-out:
-	kfree(obj);
-	return result;
-out_free:
-	kfree(br);
-	goto out;
-}
-EXPORT_SYMBOL(acpi_video_get_levels);
-
-/*
- *  Arg:
- *	device	: video output device (LCD, CRT, ..)
- *
- *  Return Value:
- *	Maximum brightness level
- *
- *  Allocate and initialize device->brightness.
- */
-
-static int
-acpi_video_init_brightness(struct acpi_video_device *device)
-{
-	int i, max_level = 0;
-	unsigned long long level, level_old;
-	struct acpi_video_device_brightness *br = NULL;
-	int result = -EINVAL;
-
-	result = acpi_video_get_levels(device->dev, &br, &max_level);
-	if (result)
-		return result;
 	device->brightness = br;
 
 	/* _BQC uses INDEX while _BCL uses VALUE in some laptops */
@@ -917,13 +910,17 @@ set_level:
 		goto out_free_levels;
 
 	ACPI_DEBUG_PRINT((ACPI_DB_INFO,
-			  "found %d brightness levels\n", br->count - 2));
-	return 0;
+			  "found %d brightness levels\n", count - 2));
+	kfree(obj);
+	return result;
 
 out_free_levels:
 	kfree(br->levels);
+out_free:
 	kfree(br);
+out:
 	device->brightness = NULL;
+	kfree(obj);
 	return result;
 }
 
@@ -1740,7 +1737,7 @@ static void acpi_video_run_bcl_for_osi(struct acpi_video_bus *video)
 
 	mutex_lock(&video->device_list_lock);
 	list_for_each_entry(dev, &video->video_device_list, entry) {
-		if (!acpi_video_device_lcd_query_levels(dev->dev->handle, &levels))
+		if (!acpi_video_device_lcd_query_levels(dev, &levels))
 			kfree(levels);
 	}
 	mutex_unlock(&video->device_list_lock);

@@ -56,7 +56,6 @@ struct kvm_stats_debugfs_item debugfs_entries[] = {
 	{ "flush_dcache", VCPU_STAT(flush_dcache_exits), KVM_STAT_VCPU },
 	{ "halt_successful_poll", VCPU_STAT(halt_successful_poll), KVM_STAT_VCPU },
 	{ "halt_attempted_poll", VCPU_STAT(halt_attempted_poll), KVM_STAT_VCPU },
-	{ "halt_poll_invalid", VCPU_STAT(halt_poll_invalid), KVM_STAT_VCPU },
 	{ "halt_wakeup",  VCPU_STAT(halt_wakeup),	 KVM_STAT_VCPU },
 	{NULL}
 };
@@ -315,15 +314,6 @@ struct kvm_vcpu *kvm_arch_vcpu_create(struct kvm *kvm, unsigned int id)
 	memcpy(gebase + offset, mips32_GuestException,
 	       mips32_GuestExceptionEnd - mips32_GuestException);
 
-#ifdef MODULE
-	offset += mips32_GuestExceptionEnd - mips32_GuestException;
-	memcpy(gebase + offset, (char *)__kvm_mips_vcpu_run,
-	       __kvm_mips_vcpu_run_end - (char *)__kvm_mips_vcpu_run);
-	vcpu->arch.vcpu_run = gebase + offset;
-#else
-	vcpu->arch.vcpu_run = __kvm_mips_vcpu_run;
-#endif
-
 	/* Invalidate the icache for these ranges */
 	local_flush_icache_range((unsigned long)gebase,
 				(unsigned long)gebase + ALIGN(size, PAGE_SIZE));
@@ -413,7 +403,7 @@ int kvm_arch_vcpu_ioctl_run(struct kvm_vcpu *vcpu, struct kvm_run *run)
 	/* Disable hardware page table walking while in guest */
 	htw_stop();
 
-	r = vcpu->arch.vcpu_run(run, vcpu);
+	r = __kvm_mips_vcpu_run(run, vcpu);
 
 	/* Re-enable HTW before enabling interrupts */
 	htw_start();
@@ -455,8 +445,8 @@ int kvm_vcpu_ioctl_interrupt(struct kvm_vcpu *vcpu,
 
 	dvcpu->arch.wait = 0;
 
-	if (swait_active(&dvcpu->wq))
-		swake_up(&dvcpu->wq);
+	if (waitqueue_active(&dvcpu->wq))
+		wake_up_interruptible(&dvcpu->wq);
 
 	return 0;
 }
@@ -1089,8 +1079,7 @@ int kvm_vm_ioctl_check_extension(struct kvm *kvm, long ext)
 		r = KVM_COALESCED_MMIO_PAGE_OFFSET;
 		break;
 	case KVM_CAP_MIPS_FPU:
-		/* We don't handle systems with inconsistent cpu_has_fpu */
-		r = !!raw_cpu_has_fpu;
+		r = !!cpu_has_fpu;
 		break;
 	case KVM_CAP_MIPS_MSA:
 		/*
@@ -1185,8 +1174,8 @@ static void kvm_mips_comparecount_func(unsigned long data)
 	kvm_mips_callbacks->queue_timer_int(vcpu);
 
 	vcpu->arch.wait = 0;
-	if (swait_active(&vcpu->wq))
-		swake_up(&vcpu->wq);
+	if (waitqueue_active(&vcpu->wq))
+		wake_up_interruptible(&vcpu->wq);
 }
 
 /* low level hrtimer wake routine */
@@ -1566,10 +1555,8 @@ void kvm_lose_fpu(struct kvm_vcpu *vcpu)
 
 		/* Disable MSA & FPU */
 		disable_msa();
-		if (vcpu->arch.fpu_inuse & KVM_MIPS_FPU_FPU) {
+		if (vcpu->arch.fpu_inuse & KVM_MIPS_FPU_FPU)
 			clear_c0_status(ST0_CU1 | ST0_FR);
-			disable_fpu_hazard();
-		}
 		vcpu->arch.fpu_inuse &= ~(KVM_MIPS_FPU_FPU | KVM_MIPS_FPU_MSA);
 	} else if (vcpu->arch.fpu_inuse & KVM_MIPS_FPU_FPU) {
 		set_c0_status(ST0_CU1);
@@ -1580,7 +1567,6 @@ void kvm_lose_fpu(struct kvm_vcpu *vcpu)
 
 		/* Disable FPU */
 		clear_c0_status(ST0_CU1 | ST0_FR);
-		disable_fpu_hazard();
 	}
 	preempt_enable();
 }

@@ -116,6 +116,8 @@ static irqreturn_t qcom_pcie_msi_irq_handler(int irq, void *arg)
 
 static int qcom_pcie_establish_link(struct qcom_pcie *pcie)
 {
+	struct device *dev = pcie->dev;
+	unsigned int retries = 0;
 	u32 val;
 
 	if (dw_pcie_link_up(&pcie->pp))
@@ -126,7 +128,15 @@ static int qcom_pcie_establish_link(struct qcom_pcie *pcie)
 	val |= PCIE20_ELBI_SYS_CTRL_LT_ENABLE;
 	writel(val, pcie->elbi + PCIE20_ELBI_SYS_CTRL);
 
-	return dw_pcie_wait_for_link(&pcie->pp);
+	do {
+		if (dw_pcie_link_up(&pcie->pp))
+			return 0;
+		usleep_range(250, 1000);
+	} while (retries < 200);
+
+	dev_warn(dev, "phy link never came up\n");
+
+	return -ETIMEDOUT;
 }
 
 static int qcom_pcie_get_resources_v0(struct qcom_pcie *pcie)

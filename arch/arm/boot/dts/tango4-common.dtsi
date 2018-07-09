@@ -3,12 +3,10 @@
  * https://github.com/mansr/linux-tangox
  */
 
-#include <dt-bindings/interrupt-controller/arm-gic.h>
+#define CPU_CLK 0
+#define SYS_CLK 1
 
-#define  CPU_CLK	0
-#define  SYS_CLK	1
-#define  USB_CLK	2
-#define SDIO_CLK	3
+#include <dt-bindings/interrupt-controller/arm-gic.h>
 
 / {
 	interrupt-parent = <&gic>;
@@ -72,7 +70,7 @@
 
 		clkgen: clkgen@10000 {
 			compatible = "sigma,tango4-clkgen";
-			reg = <0x10000 0x100>;
+			reg = <0x10000 0x40>;
 			clocks = <&xtal>;
 			#clock-cells = <1>;
 		};
@@ -89,12 +87,6 @@
 			interrupts = <1 IRQ_TYPE_LEVEL_HIGH>;
 			clock-frequency = <7372800>;
 			reg-shift = <2>;
-		};
-
-		watchdog@1fd00 {
-			compatible = "sigma,smp8759-wdt";
-			reg = <0x1fd00 8>;
-			clocks = <&xtal>;
 		};
 
 		eth0: ethernet@26000 {

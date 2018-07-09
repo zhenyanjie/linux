@@ -50,7 +50,7 @@ static void emac_rockchip_set_mac_speed(void *priv, unsigned int speed)
 	u32 data;
 	int err = 0;
 
-	switch (speed) {
+	switch(speed) {
 	case 10:
 		data = (1 << (speed_offset + 16)) | (0 << speed_offset);
 		break;
@@ -83,18 +83,9 @@ static const struct emac_rockchip_soc_data emac_rk3188_emac_data = {
 };
 
 static const struct of_device_id emac_rockchip_dt_ids[] = {
-	{
-		.compatible = "rockchip,rk3036-emac",
-		.data = &emac_rk3036_emac_data,
-	},
-	{
-		.compatible = "rockchip,rk3066-emac",
-		.data = &emac_rk3066_emac_data,
-	},
-	{
-		.compatible = "rockchip,rk3188-emac",
-		.data = &emac_rk3188_emac_data,
-	},
+	{ .compatible = "rockchip,rk3036-emac", .data = &emac_rk3036_emac_data },
+	{ .compatible = "rockchip,rk3066-emac", .data = &emac_rk3066_emac_data },
+	{ .compatible = "rockchip,rk3188-emac", .data = &emac_rk3188_emac_data },
 	{ /* Sentinel */ }
 };
 
@@ -132,11 +123,9 @@ static int emac_rockchip_probe(struct platform_device *pdev)
 		goto out_netdev;
 	}
 
-	priv->grf = syscon_regmap_lookup_by_phandle(dev->of_node,
-						    "rockchip,grf");
+	priv->grf = syscon_regmap_lookup_by_phandle(dev->of_node, "rockchip,grf");
 	if (IS_ERR(priv->grf)) {
-		dev_err(dev, "failed to retrieve global register file (%ld)\n",
-			PTR_ERR(priv->grf));
+		dev_err(dev, "failed to retrieve global register file (%ld)\n", PTR_ERR(priv->grf));
 		err = PTR_ERR(priv->grf);
 		goto out_netdev;
 	}
@@ -146,16 +135,14 @@ static int emac_rockchip_probe(struct platform_device *pdev)
 
 	priv->emac.clk = devm_clk_get(dev, "hclk");
 	if (IS_ERR(priv->emac.clk)) {
-		dev_err(dev, "failed to retrieve host clock (%ld)\n",
-			PTR_ERR(priv->emac.clk));
+		dev_err(dev, "failed to retrieve host clock (%ld)\n", PTR_ERR(priv->emac.clk));
 		err = PTR_ERR(priv->emac.clk);
 		goto out_netdev;
 	}
 
 	priv->refclk = devm_clk_get(dev, "macref");
 	if (IS_ERR(priv->refclk)) {
-		dev_err(dev, "failed to retrieve reference clock (%ld)\n",
-			PTR_ERR(priv->refclk));
+		dev_err(dev, "failed to retrieve reference clock (%ld)\n", PTR_ERR(priv->refclk));
 		err = PTR_ERR(priv->refclk);
 		goto out_netdev;
 	}
@@ -192,22 +179,19 @@ static int emac_rockchip_probe(struct platform_device *pdev)
 
 	err = regmap_write(priv->grf, priv->soc_data->grf_offset, data);
 	if (err) {
-		dev_err(dev, "unable to apply initial settings to grf (%d)\n",
-			err);
+		dev_err(dev, "unable to apply initial settings to grf (%d)\n", err);
 		goto out_regulator_disable;
 	}
 
 	/* RMII interface needs always a rate of 50MHz */
 	err = clk_set_rate(priv->refclk, 50000000);
 	if (err)
-		dev_err(dev,
-			"failed to change reference clock rate (%d)\n", err);
+		dev_err(dev, "failed to change reference clock rate (%d)\n", err);
 
 	if (priv->soc_data->need_div_macclk) {
 		priv->macclk = devm_clk_get(dev, "macclk");
 		if (IS_ERR(priv->macclk)) {
-			dev_err(dev, "failed to retrieve mac clock (%ld)\n",
-				PTR_ERR(priv->macclk));
+			dev_err(dev, "failed to retrieve mac clock (%ld)\n", PTR_ERR(priv->macclk));
 			err = PTR_ERR(priv->macclk);
 			goto out_regulator_disable;
 		}
@@ -221,8 +205,7 @@ static int emac_rockchip_probe(struct platform_device *pdev)
 		/* RMII TX/RX needs always a rate of 25MHz */
 		err = clk_set_rate(priv->macclk, 25000000);
 		if (err)
-			dev_err(dev,
-				"failed to change mac clock rate (%d)\n", err);
+			dev_err(dev, "failed to change mac clock rate (%d)\n", err);
 	}
 
 	err = arc_emac_probe(ndev, interface);

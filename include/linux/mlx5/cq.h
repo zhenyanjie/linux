@@ -53,11 +53,6 @@ struct mlx5_core_cq {
 	unsigned		arm_sn;
 	struct mlx5_rsc_debug	*dbg;
 	int			pid;
-	struct {
-		struct list_head list;
-		void (*comp)(struct mlx5_core_cq *);
-		void		*priv;
-	} tasklet_ctx;
 };
 
 

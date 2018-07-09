@@ -200,12 +200,27 @@ static int vidioc_querycap(struct file *file, void  *priv,
 					struct v4l2_capability *cap)
 {
 	struct vivid_dev *dev = video_drvdata(file);
+	struct video_device *vdev = video_devdata(file);
 
 	strcpy(cap->driver, "vivid");
 	strcpy(cap->card, "vivid");
 	snprintf(cap->bus_info, sizeof(cap->bus_info),
 			"platform:%s", dev->v4l2_dev.name);
 
+	if (vdev->vfl_type == VFL_TYPE_GRABBER && vdev->vfl_dir == VFL_DIR_RX)
+		cap->device_caps = dev->vid_cap_caps;
+	if (vdev->vfl_type == VFL_TYPE_GRABBER && vdev->vfl_dir == VFL_DIR_TX)
+		cap->device_caps = dev->vid_out_caps;
+	else if (vdev->vfl_type == VFL_TYPE_VBI && vdev->vfl_dir == VFL_DIR_RX)
+		cap->device_caps = dev->vbi_cap_caps;
+	else if (vdev->vfl_type == VFL_TYPE_VBI && vdev->vfl_dir == VFL_DIR_TX)
+		cap->device_caps = dev->vbi_out_caps;
+	else if (vdev->vfl_type == VFL_TYPE_SDR)
+		cap->device_caps = dev->sdr_cap_caps;
+	else if (vdev->vfl_type == VFL_TYPE_RADIO && vdev->vfl_dir == VFL_DIR_RX)
+		cap->device_caps = dev->radio_rx_caps;
+	else if (vdev->vfl_type == VFL_TYPE_RADIO && vdev->vfl_dir == VFL_DIR_TX)
+		cap->device_caps = dev->radio_tx_caps;
 	cap->capabilities = dev->vid_cap_caps | dev->vid_out_caps |
 		dev->vbi_cap_caps | dev->vbi_out_caps |
 		dev->radio_rx_caps | dev->radio_tx_caps |
@@ -1120,7 +1135,6 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		strlcpy(vfd->name, "vivid-vid-cap", sizeof(vfd->name));
 		vfd->fops = &vivid_fops;
 		vfd->ioctl_ops = &vivid_ioctl_ops;
-		vfd->device_caps = dev->vid_cap_caps;
 		vfd->release = video_device_release_empty;
 		vfd->v4l2_dev = &dev->v4l2_dev;
 		vfd->queue = &dev->vb_vid_cap_q;
@@ -1146,7 +1160,6 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		vfd->vfl_dir = VFL_DIR_TX;
 		vfd->fops = &vivid_fops;
 		vfd->ioctl_ops = &vivid_ioctl_ops;
-		vfd->device_caps = dev->vid_out_caps;
 		vfd->release = video_device_release_empty;
 		vfd->v4l2_dev = &dev->v4l2_dev;
 		vfd->queue = &dev->vb_vid_out_q;
@@ -1171,7 +1184,6 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		strlcpy(vfd->name, "vivid-vbi-cap", sizeof(vfd->name));
 		vfd->fops = &vivid_fops;
 		vfd->ioctl_ops = &vivid_ioctl_ops;
-		vfd->device_caps = dev->vbi_cap_caps;
 		vfd->release = video_device_release_empty;
 		vfd->v4l2_dev = &dev->v4l2_dev;
 		vfd->queue = &dev->vb_vbi_cap_q;
@@ -1195,7 +1207,6 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		vfd->vfl_dir = VFL_DIR_TX;
 		vfd->fops = &vivid_fops;
 		vfd->ioctl_ops = &vivid_ioctl_ops;
-		vfd->device_caps = dev->vbi_out_caps;
 		vfd->release = video_device_release_empty;
 		vfd->v4l2_dev = &dev->v4l2_dev;
 		vfd->queue = &dev->vb_vbi_out_q;
@@ -1218,7 +1229,6 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		strlcpy(vfd->name, "vivid-sdr-cap", sizeof(vfd->name));
 		vfd->fops = &vivid_fops;
 		vfd->ioctl_ops = &vivid_ioctl_ops;
-		vfd->device_caps = dev->sdr_cap_caps;
 		vfd->release = video_device_release_empty;
 		vfd->v4l2_dev = &dev->v4l2_dev;
 		vfd->queue = &dev->vb_sdr_cap_q;
@@ -1237,7 +1247,6 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		strlcpy(vfd->name, "vivid-rad-rx", sizeof(vfd->name));
 		vfd->fops = &vivid_radio_fops;
 		vfd->ioctl_ops = &vivid_ioctl_ops;
-		vfd->device_caps = dev->radio_rx_caps;
 		vfd->release = video_device_release_empty;
 		vfd->v4l2_dev = &dev->v4l2_dev;
 		vfd->lock = &dev->mutex;
@@ -1256,7 +1265,6 @@ static int vivid_create_instance(struct platform_device *pdev, int inst)
 		vfd->vfl_dir = VFL_DIR_TX;
 		vfd->fops = &vivid_radio_fops;
 		vfd->ioctl_ops = &vivid_ioctl_ops;
-		vfd->device_caps = dev->radio_tx_caps;
 		vfd->release = video_device_release_empty;
 		vfd->v4l2_dev = &dev->v4l2_dev;
 		vfd->lock = &dev->mutex;

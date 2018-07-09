@@ -301,7 +301,7 @@ static inline void emac_netif_stop(struct emac_instance *dev)
 	dev->no_mcast = 1;
 	netif_addr_unlock(dev->ndev);
 	netif_tx_unlock_bh(dev->ndev);
-	netif_trans_update(dev->ndev);	/* prevent tx timeout */
+	dev->ndev->trans_start = jiffies;	/* prevent tx timeout */
 	mal_poll_disable(dev->mal, &dev->commac);
 	netif_tx_disable(dev->ndev);
 }
@@ -1377,7 +1377,7 @@ static inline int emac_xmit_finish(struct emac_instance *dev, int len)
 		DBG2(dev, "stopped TX queue" NL);
 	}
 
-	netif_trans_update(ndev);
+	ndev->trans_start = jiffies;
 	++dev->stats.tx_packets;
 	dev->stats.tx_bytes += len;
 

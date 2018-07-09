@@ -13,7 +13,11 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * Written by Ryusuke Konishi.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * Written by Ryusuke Konishi <ryusuke@osrg.net>
  *
  */
 
@@ -108,8 +112,8 @@ static int nilfs_load_super_root(struct the_nilfs *nilfs,
 	struct nilfs_super_root *raw_sr;
 	struct nilfs_super_block **sbp = nilfs->ns_sbp;
 	struct nilfs_inode *rawi;
-	unsigned int dat_entry_size, segment_usage_size, checkpoint_size;
-	unsigned int inode_size;
+	unsigned dat_entry_size, segment_usage_size, checkpoint_size;
+	unsigned inode_size;
 	int err;
 
 	err = nilfs_read_super_root_block(nilfs, sr_block, &bh_sr, 1);
@@ -439,7 +443,7 @@ static int nilfs_valid_sb(struct nilfs_super_block *sbp)
 	if (!sbp || le16_to_cpu(sbp->s_magic) != NILFS_SUPER_MAGIC)
 		return 0;
 	bytes = le16_to_cpu(sbp->s_bytes);
-	if (bytes < sumoff + 4 || bytes > BLOCK_SIZE)
+	if (bytes > BLOCK_SIZE)
 		return 0;
 	crc = crc32_le(le32_to_cpu(sbp->s_crc_seed), (unsigned char *)sbp,
 		       sumoff);
@@ -617,10 +621,8 @@ int init_nilfs(struct the_nilfs *nilfs, struct super_block *sb, char *data)
 		err = nilfs_load_super_block(nilfs, sb, blocksize, &sbp);
 		if (err)
 			goto out;
-			/*
-			 * Not to failed_sbh; sbh is released automatically
-			 * when reloading fails.
-			 */
+			/* not failed_sbh; sbh is released automatically
+			   when reloading fails. */
 	}
 	nilfs->ns_blocksize_bits = sb->s_blocksize_bits;
 	nilfs->ns_blocksize = blocksize;

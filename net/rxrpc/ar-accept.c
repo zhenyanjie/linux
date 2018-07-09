@@ -27,7 +27,7 @@
  * generate a connection-level abort
  */
 static int rxrpc_busy(struct rxrpc_local *local, struct sockaddr_rxrpc *srx,
-		      struct rxrpc_wire_header *whdr)
+		      struct rxrpc_header *hdr)
 {
 	struct msghdr msg;
 	struct kvec iov[1];
@@ -36,21 +36,25 @@ static int rxrpc_busy(struct rxrpc_local *local, struct sockaddr_rxrpc *srx,
 
 	_enter("%d,,", local->debug_id);
 
-	whdr->type	= RXRPC_PACKET_TYPE_BUSY;
-	whdr->serial	= htonl(1);
-
 	msg.msg_name	= &srx->transport.sin;
 	msg.msg_namelen	= sizeof(srx->transport.sin);
 	msg.msg_control	= NULL;
 	msg.msg_controllen = 0;
 	msg.msg_flags	= 0;
 
-	iov[0].iov_base	= whdr;
-	iov[0].iov_len	= sizeof(*whdr);
+	hdr->seq	= 0;
+	hdr->type	= RXRPC_PACKET_TYPE_BUSY;
+	hdr->flags	= 0;
+	hdr->userStatus	= 0;
+	hdr->_rsvd	= 0;
+
+	iov[0].iov_base	= hdr;
+	iov[0].iov_len	= sizeof(*hdr);
 
 	len = iov[0].iov_len;
 
-	_proto("Tx BUSY %%1");
+	hdr->serial = htonl(1);
+	_proto("Tx BUSY %%%u", ntohl(hdr->serial));
 
 	ret = kernel_sendmsg(local->socket, &msg, iov, 1, len);
 	if (ret < 0) {
@@ -108,7 +112,7 @@ static int rxrpc_accept_incoming_call(struct rxrpc_local *local,
 		goto error;
 	}
 
-	conn = rxrpc_incoming_connection(trans, &sp->hdr);
+	conn = rxrpc_incoming_connection(trans, &sp->hdr, GFP_NOIO);
 	rxrpc_put_transport(trans);
 	if (IS_ERR(conn)) {
 		_debug("no conn");
@@ -116,7 +120,7 @@ static int rxrpc_accept_incoming_call(struct rxrpc_local *local,
 		goto error;
 	}
 
-	call = rxrpc_incoming_call(rx, conn, &sp->hdr);
+	call = rxrpc_incoming_call(rx, conn, &sp->hdr, GFP_NOIO);
 	rxrpc_put_connection(conn);
 	if (IS_ERR(call)) {
 		_debug("no call");
@@ -181,8 +185,8 @@ invalid_service:
 	read_unlock_bh(&local->services_lock);
 
 	read_lock_bh(&call->state_lock);
-	if (!test_bit(RXRPC_CALL_RELEASED, &call->flags) &&
-	    !test_and_set_bit(RXRPC_CALL_EV_RELEASE, &call->events)) {
+	if (!test_bit(RXRPC_CALL_RELEASE, &call->flags) &&
+	    !test_and_set_bit(RXRPC_CALL_RELEASE, &call->events)) {
 		rxrpc_get_call(call);
 		rxrpc_queue_call(call);
 	}
@@ -207,8 +211,8 @@ void rxrpc_accept_incoming_calls(struct work_struct *work)
 	struct rxrpc_skb_priv *sp;
 	struct sockaddr_rxrpc srx;
 	struct rxrpc_sock *rx;
-	struct rxrpc_wire_header whdr;
 	struct sk_buff *skb;
+	__be16 service_id;
 	int ret;
 
 	_enter("%d", local->debug_id);
@@ -236,19 +240,6 @@ process_next_packet:
 
 	sp = rxrpc_skb(skb);
 
-	/* Set up a response packet header in case we need it */
-	whdr.epoch	= htonl(sp->hdr.epoch);
-	whdr.cid	= htonl(sp->hdr.cid);
-	whdr.callNumber	= htonl(sp->hdr.callNumber);
-	whdr.seq	= htonl(sp->hdr.seq);
-	whdr.serial	= 0;
-	whdr.flags	= 0;
-	whdr.type	= 0;
-	whdr.userStatus	= 0;
-	whdr.securityIndex = sp->hdr.securityIndex;
-	whdr._rsvd	= 0;
-	whdr.serviceId	= htons(sp->hdr.serviceId);
-
 	/* determine the remote address */
 	memset(&srx, 0, sizeof(srx));
 	srx.srx_family = AF_RXRPC;
@@ -265,9 +256,10 @@ process_next_packet:
 	}
 
 	/* get the socket providing the service */
+	service_id = sp->hdr.serviceId;
 	read_lock_bh(&local->services_lock);
 	list_for_each_entry(rx, &local->services, listen_link) {
-		if (rx->srx.srx_service == sp->hdr.serviceId &&
+		if (rx->service_id == service_id &&
 		    rx->sk.sk_state != RXRPC_CLOSE)
 			goto found_service;
 	}
@@ -275,7 +267,7 @@ process_next_packet:
 	goto invalid_service;
 
 found_service:
-	_debug("found service %hd", rx->srx.srx_service);
+	_debug("found service %hd", ntohs(rx->service_id));
 	if (sk_acceptq_is_full(&rx->sk))
 		goto backlog_full;
 	sk_acceptq_added(&rx->sk);
@@ -304,7 +296,7 @@ found_service:
 backlog_full:
 	read_unlock_bh(&local->services_lock);
 busy:
-	rxrpc_busy(local, &srx, &whdr);
+	rxrpc_busy(local, &srx, &sp->hdr);
 	rxrpc_free_skb(skb);
 	goto process_next_packet;
 
@@ -387,7 +379,7 @@ struct rxrpc_call *rxrpc_accept_call(struct rxrpc_sock *rx,
 	rb_insert_color(&call->sock_node, &rx->calls);
 	if (test_and_set_bit(RXRPC_CALL_HAS_USERID, &call->flags))
 		BUG();
-	if (test_and_set_bit(RXRPC_CALL_EV_ACCEPTED, &call->events))
+	if (test_and_set_bit(RXRPC_CALL_ACCEPTED, &call->events))
 		BUG();
 	rxrpc_queue_call(call);
 
@@ -403,7 +395,7 @@ struct rxrpc_call *rxrpc_accept_call(struct rxrpc_sock *rx,
 out_release:
 	_debug("release %p", call);
 	if (!test_bit(RXRPC_CALL_RELEASED, &call->flags) &&
-	    !test_and_set_bit(RXRPC_CALL_EV_RELEASE, &call->events))
+	    !test_and_set_bit(RXRPC_CALL_RELEASE, &call->events))
 		rxrpc_queue_call(call);
 out_discard:
 	write_unlock_bh(&call->state_lock);
@@ -415,7 +407,7 @@ out:
 }
 
 /*
- * Handle rejection of a call by userspace
+ * handle rejectance of a call by userspace
  * - reject the call at the front of the queue
  */
 int rxrpc_reject_call(struct rxrpc_sock *rx)
@@ -442,7 +434,7 @@ int rxrpc_reject_call(struct rxrpc_sock *rx)
 	switch (call->state) {
 	case RXRPC_CALL_SERVER_ACCEPTING:
 		call->state = RXRPC_CALL_SERVER_BUSY;
-		if (test_and_set_bit(RXRPC_CALL_EV_REJECT_BUSY, &call->events))
+		if (test_and_set_bit(RXRPC_CALL_REJECT_BUSY, &call->events))
 			rxrpc_queue_call(call);
 		ret = 0;
 		goto out_release;
@@ -466,7 +458,7 @@ int rxrpc_reject_call(struct rxrpc_sock *rx)
 out_release:
 	_debug("release %p", call);
 	if (!test_bit(RXRPC_CALL_RELEASED, &call->flags) &&
-	    !test_and_set_bit(RXRPC_CALL_EV_RELEASE, &call->events))
+	    !test_and_set_bit(RXRPC_CALL_RELEASE, &call->events))
 		rxrpc_queue_call(call);
 out_discard:
 	write_unlock_bh(&call->state_lock);
@@ -495,6 +487,7 @@ struct rxrpc_call *rxrpc_kernel_accept_call(struct socket *sock,
 	_leave(" = %p", call);
 	return call;
 }
+
 EXPORT_SYMBOL(rxrpc_kernel_accept_call);
 
 /**
@@ -513,4 +506,5 @@ int rxrpc_kernel_reject_call(struct socket *sock)
 	_leave(" = %d", ret);
 	return ret;
 }
+
 EXPORT_SYMBOL(rxrpc_kernel_reject_call);

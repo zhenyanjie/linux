@@ -78,7 +78,7 @@ int sptlrpc_parse_flavor(const char *str, struct sptlrpc_flavor *flvr)
 
 	memset(flvr, 0, sizeof(*flvr));
 
-	if (!str || str[0] == '\0') {
+	if (str == NULL || str[0] == '\0') {
 		flvr->sf_rpc = SPTLRPC_FLVR_INVALID;
 		return 0;
 	}
@@ -103,7 +103,7 @@ int sptlrpc_parse_flavor(const char *str, struct sptlrpc_flavor *flvr)
 			 * format: plain-hash:<hash_alg>
 			 */
 			alg = strchr(bulk, ':');
-			if (!alg)
+			if (alg == NULL)
 				goto err_out;
 			*alg++ = '\0';
 
@@ -166,7 +166,7 @@ static int sptlrpc_parse_rule(char *param, struct sptlrpc_rule *rule)
 	sptlrpc_rule_init(rule);
 
 	flavor = strchr(param, '=');
-	if (!flavor) {
+	if (flavor == NULL) {
 		CERROR("invalid param, no '='\n");
 		return -EINVAL;
 	}
@@ -216,7 +216,7 @@ static int sptlrpc_parse_rule(char *param, struct sptlrpc_rule *rule)
 static void sptlrpc_rule_set_free(struct sptlrpc_rule_set *rset)
 {
 	LASSERT(rset->srs_nslot ||
-		(rset->srs_nrule == 0 && !rset->srs_rules));
+		(rset->srs_nrule == 0 && rset->srs_rules == NULL));
 
 	if (rset->srs_nslot) {
 		kfree(rset->srs_rules);
@@ -241,7 +241,7 @@ static int sptlrpc_rule_set_expand(struct sptlrpc_rule_set *rset)
 
 	/* better use realloc() if available */
 	rules = kcalloc(nslot, sizeof(*rset->srs_rules), GFP_NOFS);
-	if (!rules)
+	if (rules == NULL)
 		return -ENOMEM;
 
 	if (rset->srs_nrule) {
@@ -450,7 +450,7 @@ static void target2fsname(const char *tgt, char *fsname, int buflen)
 	}
 
 	/* if we didn't find the pattern, treat the whole string as fsname */
-	if (!ptr)
+	if (ptr == NULL)
 		len = strlen(tgt);
 	else
 		len = ptr - tgt;
@@ -467,7 +467,7 @@ static void sptlrpc_conf_free_rsets(struct sptlrpc_conf *conf)
 	sptlrpc_rule_set_free(&conf->sc_rset);
 
 	list_for_each_entry_safe(conf_tgt, conf_tgt_next,
-				 &conf->sc_tgts, sct_list) {
+				     &conf->sc_tgts, sct_list) {
 		sptlrpc_rule_set_free(&conf_tgt->sct_rset);
 		list_del(&conf_tgt->sct_list);
 		kfree(conf_tgt);
@@ -517,7 +517,6 @@ struct sptlrpc_conf *sptlrpc_conf_get(const char *fsname,
 				      int create)
 {
 	struct sptlrpc_conf *conf;
-	size_t len;
 
 	list_for_each_entry(conf, &sptlrpc_confs, sc_list) {
 		if (strcmp(conf->sc_fsname, fsname) == 0)
@@ -531,11 +530,7 @@ struct sptlrpc_conf *sptlrpc_conf_get(const char *fsname,
 	if (!conf)
 		return NULL;
 
-	len = strlcpy(conf->sc_fsname, fsname, sizeof(conf->sc_fsname));
-	if (len >= sizeof(conf->sc_fsname)) {
-		kfree(conf);
-		return NULL;
-	}
+	strcpy(conf->sc_fsname, fsname);
 	sptlrpc_rule_set_init(&conf->sc_rset);
 	INIT_LIST_HEAD(&conf->sc_tgts);
 	list_add(&conf->sc_list, &sptlrpc_confs);
@@ -584,13 +579,13 @@ static int __sptlrpc_process_config(struct lustre_cfg *lcfg,
 	int rc;
 
 	target = lustre_cfg_string(lcfg, 1);
-	if (!target) {
+	if (target == NULL) {
 		CERROR("missing target name\n");
 		return -EINVAL;
 	}
 
 	param = lustre_cfg_string(lcfg, 2);
-	if (!param) {
+	if (param == NULL) {
 		CERROR("missing parameter\n");
 		return -EINVAL;
 	}
@@ -608,12 +603,12 @@ static int __sptlrpc_process_config(struct lustre_cfg *lcfg,
 	if (rc)
 		return -EINVAL;
 
-	if (!conf) {
+	if (conf == NULL) {
 		target2fsname(target, fsname, sizeof(fsname));
 
 		mutex_lock(&sptlrpc_conf_lock);
 		conf = sptlrpc_conf_get(fsname, 0);
-		if (!conf) {
+		if (conf == NULL) {
 			CERROR("can't find conf\n");
 			rc = -ENOMEM;
 		} else {
@@ -643,7 +638,7 @@ static int logname2fsname(const char *logname, char *buf, int buflen)
 	int len;
 
 	ptr = strrchr(logname, '-');
-	if (!ptr || strcmp(ptr, "-sptlrpc")) {
+	if (ptr == NULL || strcmp(ptr, "-sptlrpc")) {
 		CERROR("%s is not a sptlrpc config log\n", logname);
 		return -EINVAL;
 	}
@@ -777,7 +772,7 @@ void sptlrpc_conf_choose_flavor(enum lustre_sec_part from,
 	mutex_lock(&sptlrpc_conf_lock);
 
 	conf = sptlrpc_conf_get(name, 0);
-	if (!conf)
+	if (conf == NULL)
 		goto out;
 
 	/* convert uuid name (supposed end with _UUID) to target name */

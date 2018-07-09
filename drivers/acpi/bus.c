@@ -479,38 +479,24 @@ static void acpi_device_remove_notify_handler(struct acpi_device *device)
                              Device Matching
    -------------------------------------------------------------------------- */
 
-/**
- * acpi_get_first_physical_node - Get first physical node of an ACPI device
- * @adev:	ACPI device in question
- *
- * Return: First physical node of ACPI device @adev
- */
-struct device *acpi_get_first_physical_node(struct acpi_device *adev)
+static struct acpi_device *acpi_primary_dev_companion(struct acpi_device *adev,
+						      const struct device *dev)
 {
 	struct mutex *physical_node_lock = &adev->physical_node_lock;
-	struct device *phys_dev;
 
 	mutex_lock(physical_node_lock);
 	if (list_empty(&adev->physical_node_list)) {
-		phys_dev = NULL;
+		adev = NULL;
 	} else {
 		const struct acpi_device_physical_node *node;
 
 		node = list_first_entry(&adev->physical_node_list,
 					struct acpi_device_physical_node, node);
-
-		phys_dev = node->dev;
+		if (node->dev != dev)
+			adev = NULL;
 	}
 	mutex_unlock(physical_node_lock);
-	return phys_dev;
-}
-
-static struct acpi_device *acpi_primary_dev_companion(struct acpi_device *adev,
-						      const struct device *dev)
-{
-	const struct device *phys_dev = acpi_get_first_physical_node(adev);
-
-	return phys_dev && phys_dev == dev ? adev : NULL;
+	return adev;
 }
 
 /**
@@ -925,13 +911,11 @@ void __init acpi_early_init(void)
 		goto error0;
 	}
 
-	if (acpi_gbl_group_module_level_code) {
-		status = acpi_load_tables();
-		if (ACPI_FAILURE(status)) {
-			printk(KERN_ERR PREFIX
-			       "Unable to load the System Description Tables\n");
-			goto error0;
-		}
+	status = acpi_load_tables();
+	if (ACPI_FAILURE(status)) {
+		printk(KERN_ERR PREFIX
+		       "Unable to load the System Description Tables\n");
+		goto error0;
 	}
 
 #ifdef CONFIG_X86
@@ -997,32 +981,23 @@ static int __init acpi_bus_init(void)
 
 	acpi_os_initialize1();
 
-	/*
-	 * ACPI 2.0 requires the EC driver to be loaded and work before
-	 * the EC device is found in the namespace (i.e. before
-	 * acpi_load_tables() is called).
-	 *
-	 * This is accomplished by looking for the ECDT table, and getting
-	 * the EC parameters out of that.
-	 */
-	status = acpi_ec_ecdt_probe();
-	/* Ignore result. Not having an ECDT is not fatal. */
-
-	if (!acpi_gbl_group_module_level_code) {
-		status = acpi_load_tables();
-		if (ACPI_FAILURE(status)) {
-			printk(KERN_ERR PREFIX
-			       "Unable to load the System Description Tables\n");
-			goto error1;
-		}
-	}
-
 	status = acpi_enable_subsystem(ACPI_NO_ACPI_ENABLE);
 	if (ACPI_FAILURE(status)) {
 		printk(KERN_ERR PREFIX
 		       "Unable to start the ACPI Interpreter\n");
 		goto error1;
 	}
+
+	/*
+	 * ACPI 2.0 requires the EC driver to be loaded and work before
+	 * the EC device is found in the namespace (i.e. before acpi_initialize_objects()
+	 * is called).
+	 *
+	 * This is accomplished by looking for the ECDT table, and getting
+	 * the EC parameters out of that.
+	 */
+	status = acpi_ec_ecdt_probe();
+	/* Ignore result. Not having an ECDT is not fatal. */
 
 	status = acpi_initialize_objects(ACPI_FULL_INITIALIZATION);
 	if (ACPI_FAILURE(status)) {
@@ -1051,7 +1026,7 @@ static int __init acpi_bus_init(void)
 	 * Maybe EC region is required at bus_scan/acpi_get_devices. So it
 	 * is necessary to enable it as early as possible.
 	 */
-	acpi_ec_dsdt_probe();
+	acpi_boot_ec_enable();
 
 	printk(KERN_INFO PREFIX "Interpreter enabled\n");
 

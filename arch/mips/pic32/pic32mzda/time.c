@@ -11,12 +11,13 @@
  *  FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License
  *  for more details.
  */
+#include <linux/clk.h>
 #include <linux/clk-provider.h>
 #include <linux/clocksource.h>
 #include <linux/init.h>
-#include <linux/irqdomain.h>
 #include <linux/of.h>
 #include <linux/of_irq.h>
+#include <linux/irqdomain.h>
 
 #include <asm/time.h>
 
@@ -57,12 +58,16 @@ unsigned int get_c0_compare_int(void)
 
 void __init plat_time_init(void)
 {
-	unsigned long rate = pic32_get_pbclk(7);
+	struct clk *clk;
 
 	of_clk_init(NULL);
+	clk = clk_get_sys("cpu_clk", NULL);
+	if (IS_ERR(clk))
+		panic("unable to get CPU clock, err=%ld", PTR_ERR(clk));
 
-	pr_info("CPU Clock: %ldMHz\n", rate / 1000000);
-	mips_hpt_frequency = rate / 2;
+	clk_prepare_enable(clk);
+	pr_info("CPU Clock: %ldMHz\n", clk_get_rate(clk) / 1000000);
+	mips_hpt_frequency = clk_get_rate(clk) / 2;
 
 	clocksource_probe();
 }

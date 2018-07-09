@@ -23,7 +23,6 @@
 
 #include <linux/rwsem.h>
 #include <linux/interrupt.h>
-#include <linux/idr.h>
 
 #define MAX_TOPO_LEVEL		6
 
@@ -181,7 +180,6 @@ struct usb_hcd {
 	 * bandwidth_mutex should be dropped after a successful control message
 	 * to the device, or resetting the bandwidth after a failed attempt.
 	 */
-	struct mutex		*address0_mutex;
 	struct mutex		*bandwidth_mutex;
 	struct usb_hcd		*shared_hcd;
 	struct usb_hcd		*primary_hcd;
@@ -632,8 +630,8 @@ extern void usb_set_device_state(struct usb_device *udev,
 
 /* exported only within usbcore */
 
-extern struct idr usb_bus_idr;
-extern struct mutex usb_bus_idr_lock;
+extern struct list_head usb_bus_list;
+extern struct mutex usb_bus_list_lock;
 extern wait_queue_head_t usb_kill_urb_queue;
 
 

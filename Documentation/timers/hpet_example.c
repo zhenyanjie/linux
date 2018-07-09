@@ -49,7 +49,7 @@ struct hpet_command {
 int
 main(int argc, const char ** argv)
 {
-	unsigned int	i;
+	int	i;
 
 	argc--;
 	argv++;

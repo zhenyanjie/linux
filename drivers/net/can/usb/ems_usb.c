@@ -281,9 +281,11 @@ static void ems_usb_read_interrupt_callback(struct urb *urb)
 	switch (urb->status) {
 	case 0:
 		dev->free_slots = dev->intr_in_buffer[1];
-		if (dev->free_slots > CPC_TX_QUEUE_TRIGGER_HIGH &&
-		    netif_queue_stopped(netdev))
-			netif_wake_queue(netdev);
+		if(dev->free_slots > CPC_TX_QUEUE_TRIGGER_HIGH){
+			if (netif_queue_stopped(netdev)){
+				netif_wake_queue(netdev);
+			}
+		}
 		break;
 
 	case -ECONNRESET: /* unlink */
@@ -521,7 +523,7 @@ static void ems_usb_write_bulk_callback(struct urb *urb)
 	if (urb->status)
 		netdev_info(netdev, "Tx URB aborted (%d)\n", urb->status);
 
-	netif_trans_update(netdev);
+	netdev->trans_start = jiffies;
 
 	/* transmission complete interrupt */
 	netdev->stats.tx_packets++;
@@ -835,7 +837,7 @@ static netdev_tx_t ems_usb_start_xmit(struct sk_buff *skb, struct net_device *ne
 			stats->tx_dropped++;
 		}
 	} else {
-		netif_trans_update(netdev);
+		netdev->trans_start = jiffies;
 
 		/* Slow down tx path */
 		if (atomic_read(&dev->active_tx_urbs) >= MAX_TX_URBS ||

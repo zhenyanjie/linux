@@ -24,3 +24,5 @@ net_prio.txt
 	- Network priority cgroups details and usages.
 pids.txt
 	- Process number cgroups details and usages.
+unified-hierarchy.txt
+	- Description the new/next cgroup interface.

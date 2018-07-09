@@ -25,7 +25,6 @@
 #include <linux/kthread.h>
 
 #include <media/videobuf2-core.h>
-#include <media/v4l2-mc.h>
 
 #include <trace/events/vb2.h>
 
@@ -1228,7 +1227,6 @@ static int __qbuf_dmabuf(struct vb2_buffer *vb, const void *pb)
 		if (planes[plane].length < vb->planes[plane].min_length) {
 			dprintk(1, "invalid dmabuf length for plane %d\n",
 				plane);
-			dma_buf_put(dbuf);
 			ret = -EINVAL;
 			goto err;
 		}
@@ -1648,7 +1646,7 @@ static int __vb2_get_done_vb(struct vb2_queue *q, struct vb2_buffer **vb,
 			     void *pb, int nonblocking)
 {
 	unsigned long flags;
-	int ret = 0;
+	int ret;
 
 	/*
 	 * Wait for at least one buffer to become available on the done_list.
@@ -1664,12 +1662,10 @@ static int __vb2_get_done_vb(struct vb2_queue *q, struct vb2_buffer **vb,
 	spin_lock_irqsave(&q->done_lock, flags);
 	*vb = list_first_entry(&q->done_list, struct vb2_buffer, done_entry);
 	/*
-	 * Only remove the buffer from done_list if all planes can be
-	 * handled. Some cases such as V4L2 file I/O and DVB have pb
-	 * == NULL; skip the check then as there's nothing to verify.
+	 * Only remove the buffer from done_list if v4l2_buffer can handle all
+	 * the planes.
 	 */
-	if (pb)
-		ret = call_bufop(q, verify_planes_array, *vb, pb);
+	ret = call_bufop(q, verify_planes_array, *vb, pb);
 	if (!ret)
 		list_del(&(*vb)->done_entry);
 	spin_unlock_irqrestore(&q->done_lock, flags);
@@ -1890,9 +1886,6 @@ int vb2_core_streamon(struct vb2_queue *q, unsigned int type)
 	 * are available.
 	 */
 	if (q->queued_count >= q->min_buffers_needed) {
-		ret = v4l_vb2q_enable_media_source(q);
-		if (ret)
-			return ret;
 		ret = vb2_start_streaming(q);
 		if (ret) {
 			__vb2_queue_cancel(q);

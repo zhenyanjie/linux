@@ -38,13 +38,6 @@ struct rpc_cred *rpc_lookup_cred(void)
 }
 EXPORT_SYMBOL_GPL(rpc_lookup_cred);
 
-struct rpc_cred *
-rpc_lookup_generic_cred(struct auth_cred *acred, int flags, gfp_t gfp)
-{
-	return rpcauth_lookup_credcache(&generic_auth, acred, flags, gfp);
-}
-EXPORT_SYMBOL_GPL(rpc_lookup_generic_cred);
-
 struct rpc_cred *rpc_lookup_cred_nonblock(void)
 {
 	return rpcauth_lookupcred(&generic_auth, RPCAUTH_LOOKUP_RCU);
@@ -84,15 +77,15 @@ static struct rpc_cred *generic_bind_cred(struct rpc_task *task,
 static struct rpc_cred *
 generic_lookup_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags)
 {
-	return rpcauth_lookup_credcache(&generic_auth, acred, flags, GFP_KERNEL);
+	return rpcauth_lookup_credcache(&generic_auth, acred, flags);
 }
 
 static struct rpc_cred *
-generic_create_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags, gfp_t gfp)
+generic_create_cred(struct rpc_auth *auth, struct auth_cred *acred, int flags)
 {
 	struct generic_cred *gcred;
 
-	gcred = kmalloc(sizeof(*gcred), gfp);
+	gcred = kmalloc(sizeof(*gcred), GFP_KERNEL);
 	if (gcred == NULL)
 		return ERR_PTR(-ENOMEM);
 

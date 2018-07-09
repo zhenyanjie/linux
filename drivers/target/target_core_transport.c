@@ -239,6 +239,7 @@ struct se_session *transport_init_session(enum target_prot_op sup_prot_ops)
 	INIT_LIST_HEAD(&se_sess->sess_cmd_list);
 	INIT_LIST_HEAD(&se_sess->sess_wait_list);
 	spin_lock_init(&se_sess->sess_cmd_lock);
+	kref_init(&se_sess->sess_kref);
 	se_sess->sup_prot_ops = sup_prot_ops;
 
 	return se_sess;
@@ -279,17 +280,6 @@ struct se_session *transport_init_session_tags(unsigned int tag_num,
 {
 	struct se_session *se_sess;
 	int rc;
-
-	if (tag_num != 0 && !tag_size) {
-		pr_err("init_session_tags called with percpu-ida tag_num:"
-		       " %u, but zero tag_size\n", tag_num);
-		return ERR_PTR(-EINVAL);
-	}
-	if (!tag_num && tag_size) {
-		pr_err("init_session_tags called with percpu-ida tag_size:"
-		       " %u, but zero tag_num\n", tag_size);
-		return ERR_PTR(-EINVAL);
-	}
 
 	se_sess = transport_init_session(sup_prot_ops);
 	if (IS_ERR(se_sess))
@@ -384,50 +374,26 @@ void transport_register_session(
 }
 EXPORT_SYMBOL(transport_register_session);
 
-struct se_session *
-target_alloc_session(struct se_portal_group *tpg,
-		     unsigned int tag_num, unsigned int tag_size,
-		     enum target_prot_op prot_op,
-		     const char *initiatorname, void *private,
-		     int (*callback)(struct se_portal_group *,
-				     struct se_session *, void *))
+static void target_release_session(struct kref *kref)
 {
-	struct se_session *sess;
+	struct se_session *se_sess = container_of(kref,
+			struct se_session, sess_kref);
+	struct se_portal_group *se_tpg = se_sess->se_tpg;
 
-	/*
-	 * If the fabric driver is using percpu-ida based pre allocation
-	 * of I/O descriptor tags, go ahead and perform that setup now..
-	 */
-	if (tag_num != 0)
-		sess = transport_init_session_tags(tag_num, tag_size, prot_op);
-	else
-		sess = transport_init_session(prot_op);
-
-	if (IS_ERR(sess))
-		return sess;
-
-	sess->se_node_acl = core_tpg_check_initiator_node_acl(tpg,
-					(unsigned char *)initiatorname);
-	if (!sess->se_node_acl) {
-		transport_free_session(sess);
-		return ERR_PTR(-EACCES);
-	}
-	/*
-	 * Go ahead and perform any remaining fabric setup that is
-	 * required before transport_register_session().
-	 */
-	if (callback != NULL) {
-		int rc = callback(tpg, sess, private);
-		if (rc) {
-			transport_free_session(sess);
-			return ERR_PTR(rc);
-		}
-	}
-
-	transport_register_session(tpg, sess->se_node_acl, sess, private);
-	return sess;
+	se_tpg->se_tpg_tfo->close_session(se_sess);
 }
-EXPORT_SYMBOL(target_alloc_session);
+
+int target_get_session(struct se_session *se_sess)
+{
+	return kref_get_unless_zero(&se_sess->sess_kref);
+}
+EXPORT_SYMBOL(target_get_session);
+
+void target_put_session(struct se_session *se_sess)
+{
+	kref_put(&se_sess->sess_kref, target_release_session);
+}
+EXPORT_SYMBOL(target_put_session);
 
 ssize_t target_show_dynamic_sessions(struct se_portal_group *se_tpg, char *page)
 {
@@ -477,8 +443,8 @@ void transport_deregister_session_configfs(struct se_session *se_sess)
 	se_nacl = se_sess->se_node_acl;
 	if (se_nacl) {
 		spin_lock_irqsave(&se_nacl->nacl_sess_lock, flags);
-		if (!list_empty(&se_sess->sess_acl_list))
-			list_del_init(&se_sess->sess_acl_list);
+		if (se_nacl->acl_stop == 0)
+			list_del(&se_sess->sess_acl_list);
 		/*
 		 * If the session list is empty, then clear the pointer.
 		 * Otherwise, set the struct se_session pointer from the tail
@@ -1303,6 +1269,23 @@ target_setup_cmd_from_cdb(struct se_cmd *cmd, unsigned char *cdb)
 
 	trace_target_sequencer_start(cmd);
 
+	/*
+	 * Check for an existing UNIT ATTENTION condition
+	 */
+	ret = target_scsi3_ua_check(cmd);
+	if (ret)
+		return ret;
+
+	ret = target_alua_state_check(cmd);
+	if (ret)
+		return ret;
+
+	ret = target_check_reservation(cmd);
+	if (ret) {
+		cmd->scsi_status = SAM_STAT_RESERVATION_CONFLICT;
+		return ret;
+	}
+
 	ret = dev->transport->parse_cdb(cmd);
 	if (ret == TCM_UNSUPPORTED_SCSI_OPCODE)
 		pr_warn_ratelimited("%s/%s: Unsupported SCSI Opcode 0x%02x, sending CHECK_CONDITION.\n",
@@ -1744,45 +1727,20 @@ queue_full:
 }
 EXPORT_SYMBOL(transport_generic_request_failure);
 
-void __target_execute_cmd(struct se_cmd *cmd, bool do_checks)
+void __target_execute_cmd(struct se_cmd *cmd)
 {
 	sense_reason_t ret;
 
-	if (!cmd->execute_cmd) {
-		ret = TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
-		goto err;
-	}
-	if (do_checks) {
-		/*
-		 * Check for an existing UNIT ATTENTION condition after
-		 * target_handle_task_attr() has done SAM task attr
-		 * checking, and possibly have already defered execution
-		 * out to target_restart_delayed_cmds() context.
-		 */
-		ret = target_scsi3_ua_check(cmd);
-		if (ret)
-			goto err;
-
-		ret = target_alua_state_check(cmd);
-		if (ret)
-			goto err;
-
-		ret = target_check_reservation(cmd);
+	if (cmd->execute_cmd) {
+		ret = cmd->execute_cmd(cmd);
 		if (ret) {
-			cmd->scsi_status = SAM_STAT_RESERVATION_CONFLICT;
-			goto err;
+			spin_lock_irq(&cmd->t_state_lock);
+			cmd->transport_state &= ~(CMD_T_BUSY|CMD_T_SENT);
+			spin_unlock_irq(&cmd->t_state_lock);
+
+			transport_generic_request_failure(cmd, ret);
 		}
 	}
-
-	ret = cmd->execute_cmd(cmd);
-	if (!ret)
-		return;
-err:
-	spin_lock_irq(&cmd->t_state_lock);
-	cmd->transport_state &= ~(CMD_T_BUSY|CMD_T_SENT);
-	spin_unlock_irq(&cmd->t_state_lock);
-
-	transport_generic_request_failure(cmd, ret);
 }
 
 static int target_write_prot_action(struct se_cmd *cmd)
@@ -1826,8 +1784,6 @@ static bool target_handle_task_attr(struct se_cmd *cmd)
 
 	if (dev->transport->transport_flags & TRANSPORT_FLAG_PASSTHROUGH)
 		return false;
-
-	cmd->se_cmd_flags |= SCF_TASK_ATTR_SET;
 
 	/*
 	 * Check for the existence of HEAD_OF_QUEUE, and if true return 1
@@ -1909,7 +1865,7 @@ void target_execute_cmd(struct se_cmd *cmd)
 		return;
 	}
 
-	__target_execute_cmd(cmd, true);
+	__target_execute_cmd(cmd);
 }
 EXPORT_SYMBOL(target_execute_cmd);
 
@@ -1933,7 +1889,7 @@ static void target_restart_delayed_cmds(struct se_device *dev)
 		list_del(&cmd->se_delayed_node);
 		spin_unlock(&dev->delayed_cmd_lock);
 
-		__target_execute_cmd(cmd, true);
+		__target_execute_cmd(cmd);
 
 		if (cmd->sam_task_attr == TCM_ORDERED_TAG)
 			break;
@@ -1951,9 +1907,6 @@ static void transport_complete_task_attr(struct se_cmd *cmd)
 	if (dev->transport->transport_flags & TRANSPORT_FLAG_PASSTHROUGH)
 		return;
 
-	if (!(cmd->se_cmd_flags & SCF_TASK_ATTR_SET))
-		goto restart;
-
 	if (cmd->sam_task_attr == TCM_SIMPLE_TAG) {
 		atomic_dec_mb(&dev->simple_cmds);
 		dev->dev_cur_ordered_id++;
@@ -1970,7 +1923,7 @@ static void transport_complete_task_attr(struct se_cmd *cmd)
 		pr_debug("Incremented dev_cur_ordered_id: %u for ORDERED\n",
 			 dev->dev_cur_ordered_id);
 	}
-restart:
+
 	target_restart_delayed_cmds(dev);
 }
 
@@ -1988,9 +1941,6 @@ static void transport_complete_qf(struct se_cmd *cmd)
 
 	switch (cmd->data_direction) {
 	case DMA_FROM_DEVICE:
-		if (cmd->scsi_status)
-			goto queue_status;
-
 		trace_target_cmd_complete(cmd);
 		ret = cmd->se_tfo->queue_data_in(cmd);
 		break;
@@ -2001,7 +1951,6 @@ static void transport_complete_qf(struct se_cmd *cmd)
 		}
 		/* Fall through for DMA_TO_DEVICE */
 	case DMA_NONE:
-queue_status:
 		trace_target_cmd_complete(cmd);
 		ret = cmd->se_tfo->queue_status(cmd);
 		break;
@@ -2123,9 +2072,6 @@ static void target_complete_ok_work(struct work_struct *work)
 queue_rsp:
 	switch (cmd->data_direction) {
 	case DMA_FROM_DEVICE:
-		if (cmd->scsi_status)
-			goto queue_status;
-
 		atomic_long_add(cmd->data_length,
 				&cmd->se_lun->lun_stats.tx_data_octets);
 		/*
@@ -2165,7 +2111,6 @@ queue_rsp:
 		}
 		/* Fall through for DMA_TO_DEVICE */
 	case DMA_NONE:
-queue_status:
 		trace_target_cmd_complete(cmd);
 		ret = cmd->se_tfo->queue_status(cmd);
 		if (ret == -EAGAIN || ret == -ENOMEM)
@@ -2186,7 +2131,7 @@ queue_full:
 	transport_handle_queue_full(cmd, cmd->se_dev);
 }
 
-void target_free_sgl(struct scatterlist *sgl, int nents)
+static inline void transport_free_sgl(struct scatterlist *sgl, int nents)
 {
 	struct scatterlist *sg;
 	int count;
@@ -2196,7 +2141,6 @@ void target_free_sgl(struct scatterlist *sgl, int nents)
 
 	kfree(sgl);
 }
-EXPORT_SYMBOL(target_free_sgl);
 
 static inline void transport_reset_sgl_orig(struct se_cmd *cmd)
 {
@@ -2217,7 +2161,7 @@ static inline void transport_reset_sgl_orig(struct se_cmd *cmd)
 static inline void transport_free_pages(struct se_cmd *cmd)
 {
 	if (!(cmd->se_cmd_flags & SCF_PASSTHROUGH_PROT_SG_TO_MEM_NOALLOC)) {
-		target_free_sgl(cmd->t_prot_sg, cmd->t_prot_nents);
+		transport_free_sgl(cmd->t_prot_sg, cmd->t_prot_nents);
 		cmd->t_prot_sg = NULL;
 		cmd->t_prot_nents = 0;
 	}
@@ -2228,7 +2172,7 @@ static inline void transport_free_pages(struct se_cmd *cmd)
 		 * SG_TO_MEM_NOALLOC to function with COMPARE_AND_WRITE
 		 */
 		if (cmd->se_cmd_flags & SCF_COMPARE_AND_WRITE) {
-			target_free_sgl(cmd->t_bidi_data_sg,
+			transport_free_sgl(cmd->t_bidi_data_sg,
 					   cmd->t_bidi_data_nents);
 			cmd->t_bidi_data_sg = NULL;
 			cmd->t_bidi_data_nents = 0;
@@ -2238,11 +2182,11 @@ static inline void transport_free_pages(struct se_cmd *cmd)
 	}
 	transport_reset_sgl_orig(cmd);
 
-	target_free_sgl(cmd->t_data_sg, cmd->t_data_nents);
+	transport_free_sgl(cmd->t_data_sg, cmd->t_data_nents);
 	cmd->t_data_sg = NULL;
 	cmd->t_data_nents = 0;
 
-	target_free_sgl(cmd->t_bidi_data_sg, cmd->t_bidi_data_nents);
+	transport_free_sgl(cmd->t_bidi_data_sg, cmd->t_bidi_data_nents);
 	cmd->t_bidi_data_sg = NULL;
 	cmd->t_bidi_data_nents = 0;
 }
@@ -2316,22 +2260,20 @@ EXPORT_SYMBOL(transport_kunmap_data_sg);
 
 int
 target_alloc_sgl(struct scatterlist **sgl, unsigned int *nents, u32 length,
-		 bool zero_page, bool chainable)
+		 bool zero_page)
 {
 	struct scatterlist *sg;
 	struct page *page;
 	gfp_t zero_flag = (zero_page) ? __GFP_ZERO : 0;
-	unsigned int nalloc, nent;
+	unsigned int nent;
 	int i = 0;
 
-	nalloc = nent = DIV_ROUND_UP(length, PAGE_SIZE);
-	if (chainable)
-		nalloc++;
-	sg = kmalloc_array(nalloc, sizeof(struct scatterlist), GFP_KERNEL);
+	nent = DIV_ROUND_UP(length, PAGE_SIZE);
+	sg = kmalloc(sizeof(struct scatterlist) * nent, GFP_KERNEL);
 	if (!sg)
 		return -ENOMEM;
 
-	sg_init_table(sg, nalloc);
+	sg_init_table(sg, nent);
 
 	while (length) {
 		u32 page_len = min_t(u32, length, PAGE_SIZE);
@@ -2355,7 +2297,6 @@ out:
 	kfree(sg);
 	return -ENOMEM;
 }
-EXPORT_SYMBOL(target_alloc_sgl);
 
 /*
  * Allocate any required resources to execute the command.  For writes we
@@ -2371,7 +2312,7 @@ transport_generic_new_cmd(struct se_cmd *cmd)
 	if (cmd->prot_op != TARGET_PROT_NORMAL &&
 	    !(cmd->se_cmd_flags & SCF_PASSTHROUGH_PROT_SG_TO_MEM_NOALLOC)) {
 		ret = target_alloc_sgl(&cmd->t_prot_sg, &cmd->t_prot_nents,
-				       cmd->prot_length, true, false);
+				       cmd->prot_length, true);
 		if (ret < 0)
 			return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 	}
@@ -2396,13 +2337,13 @@ transport_generic_new_cmd(struct se_cmd *cmd)
 
 			ret = target_alloc_sgl(&cmd->t_bidi_data_sg,
 					       &cmd->t_bidi_data_nents,
-					       bidi_length, zero_flag, false);
+					       bidi_length, zero_flag);
 			if (ret < 0)
 				return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 		}
 
 		ret = target_alloc_sgl(&cmd->t_data_sg, &cmd->t_data_nents,
-				       cmd->data_length, zero_flag, false);
+				       cmd->data_length, zero_flag);
 		if (ret < 0)
 			return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 	} else if ((cmd->se_cmd_flags & SCF_COMPARE_AND_WRITE) &&
@@ -2416,7 +2357,7 @@ transport_generic_new_cmd(struct se_cmd *cmd)
 
 		ret = target_alloc_sgl(&cmd->t_bidi_data_sg,
 				       &cmd->t_bidi_data_nents,
-				       caw_length, zero_flag, false);
+				       caw_length, zero_flag);
 		if (ret < 0)
 			return TCM_LOGICAL_UNIT_COMMUNICATION_FAILURE;
 	}
@@ -2570,10 +2511,15 @@ static void target_release_cmd_kref(struct kref *kref)
 	bool fabric_stop;
 
 	spin_lock_irqsave(&se_sess->sess_cmd_lock, flags);
+	if (list_empty(&se_cmd->se_cmd_list)) {
+		spin_unlock_irqrestore(&se_sess->sess_cmd_lock, flags);
+		target_free_cmd_mem(se_cmd);
+		se_cmd->se_tfo->release_cmd(se_cmd);
+		return;
+	}
 
 	spin_lock(&se_cmd->t_state_lock);
-	fabric_stop = (se_cmd->transport_state & CMD_T_FABRIC_STOP) &&
-		      (se_cmd->transport_state & CMD_T_ABORTED);
+	fabric_stop = (se_cmd->transport_state & CMD_T_FABRIC_STOP);
 	spin_unlock(&se_cmd->t_state_lock);
 
 	if (se_cmd->cmd_wait_set || fabric_stop) {

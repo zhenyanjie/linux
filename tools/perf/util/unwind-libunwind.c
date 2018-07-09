@@ -32,7 +32,6 @@
 #include "symbol.h"
 #include "util.h"
 #include "debug.h"
-#include "asm/bug.h"
 
 extern int
 UNW_OBJ(dwarf_search_unwind_table) (unw_addr_space_t as,
@@ -581,33 +580,43 @@ static unw_accessors_t accessors = {
 
 int unwind__prepare_access(struct thread *thread)
 {
+	unw_addr_space_t addr_space;
+
 	if (callchain_param.record_mode != CALLCHAIN_DWARF)
 		return 0;
 
-	thread->addr_space = unw_create_addr_space(&accessors, 0);
-	if (!thread->addr_space) {
+	addr_space = unw_create_addr_space(&accessors, 0);
+	if (!addr_space) {
 		pr_err("unwind: Can't create unwind address space.\n");
 		return -ENOMEM;
 	}
 
-	unw_set_caching_policy(thread->addr_space, UNW_CACHE_GLOBAL);
+	unw_set_caching_policy(addr_space, UNW_CACHE_GLOBAL);
+	thread__set_priv(thread, addr_space);
+
 	return 0;
 }
 
 void unwind__flush_access(struct thread *thread)
 {
+	unw_addr_space_t addr_space;
+
 	if (callchain_param.record_mode != CALLCHAIN_DWARF)
 		return;
 
-	unw_flush_cache(thread->addr_space, 0, 0);
+	addr_space = thread__priv(thread);
+	unw_flush_cache(addr_space, 0, 0);
 }
 
 void unwind__finish_access(struct thread *thread)
 {
+	unw_addr_space_t addr_space;
+
 	if (callchain_param.record_mode != CALLCHAIN_DWARF)
 		return;
 
-	unw_destroy_addr_space(thread->addr_space);
+	addr_space = thread__priv(thread);
+	unw_destroy_addr_space(addr_space);
 }
 
 static int get_entries(struct unwind_info *ui, unwind_entry_cb_t cb,
@@ -630,9 +639,7 @@ static int get_entries(struct unwind_info *ui, unwind_entry_cb_t cb,
 	 * unwind itself.
 	 */
 	if (max_stack - 1 > 0) {
-		WARN_ONCE(!ui->thread, "WARNING: ui->thread is NULL");
-		addr_space = ui->thread->addr_space;
-
+		addr_space = thread__priv(ui->thread);
 		if (addr_space == NULL)
 			return -1;
 

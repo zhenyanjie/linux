@@ -65,7 +65,6 @@ struct coredump_params {
 	unsigned long limit;
 	unsigned long mm_flags;
 	loff_t written;
-	loff_t pos;
 };
 
 /*

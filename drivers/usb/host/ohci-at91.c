@@ -24,6 +24,8 @@
 #include <linux/usb.h>
 #include <linux/usb/hcd.h>
 
+#include <asm/gpio.h>
+
 #include "ohci.h"
 
 #define valid_port(index)	((index) >= 0 && (index) < AT91_MAX_USBH_PORTS)
@@ -581,7 +583,9 @@ static int ohci_hcd_at91_drv_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int __maybe_unused
+#ifdef CONFIG_PM
+
+static int
 ohci_hcd_at91_drv_suspend(struct device *dev)
 {
 	struct usb_hcd	*hcd = dev_get_drvdata(dev);
@@ -626,8 +630,7 @@ ohci_hcd_at91_drv_suspend(struct device *dev)
 	return ret;
 }
 
-static int __maybe_unused
-ohci_hcd_at91_drv_resume(struct device *dev)
+static int ohci_hcd_at91_drv_resume(struct device *dev)
 {
 	struct usb_hcd	*hcd = dev_get_drvdata(dev);
 	struct ohci_at91_priv *ohci_at91 = hcd_to_ohci_at91_priv(hcd);
@@ -640,6 +643,7 @@ ohci_hcd_at91_drv_resume(struct device *dev)
 	ohci_resume(hcd, false);
 	return 0;
 }
+#endif
 
 static SIMPLE_DEV_PM_OPS(ohci_hcd_at91_pm_ops, ohci_hcd_at91_drv_suspend,
 					ohci_hcd_at91_drv_resume);

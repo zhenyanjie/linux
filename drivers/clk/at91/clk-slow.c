@@ -12,11 +12,17 @@
 
 #include <linux/clk-provider.h>
 #include <linux/clkdev.h>
+#include <linux/slab.h>
 #include <linux/clk/at91_pmc.h>
 #include <linux/delay.h>
 #include <linux/of.h>
-#include <linux/mfd/syscon.h>
-#include <linux/regmap.h>
+#include <linux/of_address.h>
+#include <linux/of_irq.h>
+#include <linux/io.h>
+#include <linux/interrupt.h>
+#include <linux/irq.h>
+#include <linux/sched.h>
+#include <linux/wait.h>
 
 #include "pmc.h"
 #include "sckc.h"
@@ -52,7 +58,7 @@ struct clk_slow_rc_osc {
 
 struct clk_sam9260_slow {
 	struct clk_hw hw;
-	struct regmap *regmap;
+	struct at91_pmc *pmc;
 };
 
 #define to_clk_sam9260_slow(hw) container_of(hw, struct clk_sam9260_slow, hw)
@@ -245,7 +251,7 @@ at91_clk_register_slow_rc_osc(void __iomem *sckcr,
 	init.ops = &slow_rc_osc_ops;
 	init.parent_names = NULL;
 	init.num_parents = 0;
-	init.flags = CLK_IGNORE_UNUSED;
+	init.flags = CLK_IS_ROOT | CLK_IGNORE_UNUSED;
 
 	osc->hw.init = &init;
 	osc->sckcr = sckcr;
@@ -360,11 +366,11 @@ void __init of_at91sam9x5_clk_slow_setup(struct device_node *np,
 {
 	struct clk *clk;
 	const char *parent_names[2];
-	unsigned int num_parents;
+	int num_parents;
 	const char *name = np->name;
 
 	num_parents = of_clk_get_parent_count(np);
-	if (num_parents == 0 || num_parents > 2)
+	if (num_parents <= 0 || num_parents > 2)
 		return;
 
 	of_clk_parent_fill(np, parent_names, num_parents);
@@ -382,11 +388,8 @@ void __init of_at91sam9x5_clk_slow_setup(struct device_node *np,
 static u8 clk_sam9260_slow_get_parent(struct clk_hw *hw)
 {
 	struct clk_sam9260_slow *slowck = to_clk_sam9260_slow(hw);
-	unsigned int status;
 
-	regmap_read(slowck->regmap, AT91_PMC_SR, &status);
-
-	return status & AT91_PMC_OSCSEL ? 1 : 0;
+	return !!(pmc_read(slowck->pmc, AT91_PMC_SR) & AT91_PMC_OSCSEL);
 }
 
 static const struct clk_ops sam9260_slow_ops = {
@@ -394,7 +397,7 @@ static const struct clk_ops sam9260_slow_ops = {
 };
 
 static struct clk * __init
-at91_clk_register_sam9260_slow(struct regmap *regmap,
+at91_clk_register_sam9260_slow(struct at91_pmc *pmc,
 			       const char *name,
 			       const char **parent_names,
 			       int num_parents)
@@ -403,7 +406,7 @@ at91_clk_register_sam9260_slow(struct regmap *regmap,
 	struct clk *clk = NULL;
 	struct clk_init_data init;
 
-	if (!name)
+	if (!pmc || !name)
 		return ERR_PTR(-EINVAL);
 
 	if (!parent_names || !num_parents)
@@ -420,7 +423,7 @@ at91_clk_register_sam9260_slow(struct regmap *regmap,
 	init.flags = 0;
 
 	slowck->hw.init = &init;
-	slowck->regmap = regmap;
+	slowck->pmc = pmc;
 
 	clk = clk_register(NULL, &slowck->hw);
 	if (IS_ERR(clk))
@@ -429,32 +432,26 @@ at91_clk_register_sam9260_slow(struct regmap *regmap,
 	return clk;
 }
 
-static void __init of_at91sam9260_clk_slow_setup(struct device_node *np)
+void __init of_at91sam9260_clk_slow_setup(struct device_node *np,
+					  struct at91_pmc *pmc)
 {
 	struct clk *clk;
 	const char *parent_names[2];
-	unsigned int num_parents;
+	int num_parents;
 	const char *name = np->name;
-	struct regmap *regmap;
 
 	num_parents = of_clk_get_parent_count(np);
 	if (num_parents != 2)
 		return;
 
 	of_clk_parent_fill(np, parent_names, num_parents);
-	regmap = syscon_node_to_regmap(of_get_parent(np));
-	if (IS_ERR(regmap))
-		return;
 
 	of_property_read_string(np, "clock-output-names", &name);
 
-	clk = at91_clk_register_sam9260_slow(regmap, name, parent_names,
+	clk = at91_clk_register_sam9260_slow(pmc, name, parent_names,
 					     num_parents);
 	if (IS_ERR(clk))
 		return;
 
 	of_clk_add_provider(np, of_clk_src_simple_get, clk);
 }
-
-CLK_OF_DECLARE(at91sam9260_clk_slow, "atmel,at91sam9260-clk-slow",
-	       of_at91sam9260_clk_slow_setup);

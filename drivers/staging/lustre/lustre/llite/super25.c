@@ -53,8 +53,8 @@ static struct inode *ll_alloc_inode(struct super_block *sb)
 	struct ll_inode_info *lli;
 
 	ll_stats_ops_tally(ll_s2sbi(sb), LPROC_LL_ALLOC_INODE, 1);
-	lli = kmem_cache_zalloc(ll_inode_cachep, GFP_NOFS);
-	if (!lli)
+	lli = kmem_cache_alloc(ll_inode_cachep, GFP_NOFS | __GFP_ZERO);
+	if (lli == NULL)
 		return NULL;
 
 	inode_init_once(&lli->lli_vfs_inode);
@@ -89,7 +89,7 @@ MODULE_ALIAS_FS("lustre");
 
 void lustre_register_client_process_config(int (*cpc)(struct lustre_cfg *lcfg));
 
-static int __init lustre_init(void)
+static int __init init_lustre_lite(void)
 {
 	lnet_process_id_t lnet_id;
 	struct timespec64 ts;
@@ -99,8 +99,7 @@ static int __init lustre_init(void)
 
 	/* print an address of _any_ initialized kernel symbol from this
 	 * module, to allow debugging with gdb that doesn't support data
-	 * symbols from modules.
-	 */
+	 * symbols from modules.*/
 	CDEBUG(D_INFO, "Lustre client module (%p).\n",
 	       &lustre_super_operations);
 
@@ -109,26 +108,26 @@ static int __init lustre_init(void)
 					    sizeof(struct ll_inode_info),
 					    0, SLAB_HWCACHE_ALIGN|SLAB_ACCOUNT,
 					    NULL);
-	if (!ll_inode_cachep)
+	if (ll_inode_cachep == NULL)
 		goto out_cache;
 
 	ll_file_data_slab = kmem_cache_create("ll_file_data",
-					      sizeof(struct ll_file_data), 0,
-					      SLAB_HWCACHE_ALIGN, NULL);
-	if (!ll_file_data_slab)
+						 sizeof(struct ll_file_data), 0,
+						 SLAB_HWCACHE_ALIGN, NULL);
+	if (ll_file_data_slab == NULL)
 		goto out_cache;
 
 	ll_remote_perm_cachep = kmem_cache_create("ll_remote_perm_cache",
 						  sizeof(struct ll_remote_perm),
 						      0, 0, NULL);
-	if (!ll_remote_perm_cachep)
+	if (ll_remote_perm_cachep == NULL)
 		goto out_cache;
 
 	ll_rmtperm_hash_cachep = kmem_cache_create("ll_rmtperm_hash_cache",
 						   REMOTE_PERM_HASHSIZE *
 						   sizeof(struct list_head),
 						   0, 0, NULL);
-	if (!ll_rmtperm_hash_cachep)
+	if (ll_rmtperm_hash_cachep == NULL)
 		goto out_cache;
 
 	llite_root = debugfs_create_dir("llite", debugfs_lustre_root);
@@ -147,8 +146,7 @@ static int __init lustre_init(void)
 	cfs_get_random_bytes(seed, sizeof(seed));
 
 	/* Nodes with small feet have little entropy. The NID for this
-	 * node gives the most entropy in the low bits
-	 */
+	 * node gives the most entropy in the low bits */
 	for (i = 0;; i++) {
 		if (LNetGetId(i, &lnet_id) == -ENOENT)
 			break;
@@ -164,18 +162,9 @@ static int __init lustre_init(void)
 	if (rc != 0)
 		goto out_sysfs;
 
-	cl_inode_fini_env = cl_env_alloc(&cl_inode_fini_refcheck,
-					 LCT_REMEMBER | LCT_NOREF);
-	if (IS_ERR(cl_inode_fini_env)) {
-		rc = PTR_ERR(cl_inode_fini_env);
-		goto out_vvp;
-	}
-
-	cl_inode_fini_env->le_ctx.lc_cookie = 0x4;
-
 	rc = ll_xattr_init();
 	if (rc != 0)
-		goto out_inode_fini_env;
+		goto out_vvp;
 
 	lustre_register_client_fill_super(ll_fill_super);
 	lustre_register_kill_super_cb(ll_kill_super);
@@ -183,8 +172,6 @@ static int __init lustre_init(void)
 
 	return 0;
 
-out_inode_fini_env:
-	cl_env_put(cl_inode_fini_env, &cl_inode_fini_refcheck);
 out_vvp:
 	vvp_global_fini();
 out_sysfs:
@@ -199,7 +186,7 @@ out_cache:
 	return rc;
 }
 
-static void __exit lustre_exit(void)
+static void __exit exit_lustre_lite(void)
 {
 	lustre_register_client_fill_super(NULL);
 	lustre_register_kill_super_cb(NULL);
@@ -209,7 +196,6 @@ static void __exit lustre_exit(void)
 	kset_unregister(llite_kset);
 
 	ll_xattr_fini();
-	cl_env_put(cl_inode_fini_env, &cl_inode_fini_refcheck);
 	vvp_global_fini();
 
 	kmem_cache_destroy(ll_inode_cachep);
@@ -221,9 +207,8 @@ static void __exit lustre_exit(void)
 }
 
 MODULE_AUTHOR("OpenSFS, Inc. <http://www.lustre.org/>");
-MODULE_DESCRIPTION("Lustre Client File System");
-MODULE_VERSION(LUSTRE_VERSION_STRING);
+MODULE_DESCRIPTION("Lustre Lite Client File System");
 MODULE_LICENSE("GPL");
 
-module_init(lustre_init);
-module_exit(lustre_exit);
+module_init(init_lustre_lite);
+module_exit(exit_lustre_lite);

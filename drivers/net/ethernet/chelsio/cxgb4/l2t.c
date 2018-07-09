@@ -48,6 +48,8 @@
 #include "t4_regs.h"
 #include "t4_values.h"
 
+#define VLAN_NONE 0xfff
+
 /* identifies sync vs async L2T_WRITE_REQs */
 #define SYNC_WR_S    12
 #define SYNC_WR_V(x) ((x) << SYNC_WR_S)

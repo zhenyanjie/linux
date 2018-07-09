@@ -21,7 +21,6 @@
  */
 
 #include <linux/delay.h>
-#include <linux/dma-iommu.h>
 #include <linux/err.h>
 #include <linux/interrupt.h>
 #include <linux/iommu.h>
@@ -590,7 +589,6 @@ struct arm_smmu_device {
 
 	unsigned long			ias; /* IPA */
 	unsigned long			oas; /* PA */
-	unsigned long			pgsize_bitmap;
 
 #define ARM_SMMU_MAX_ASIDS		(1 << 16)
 	unsigned int			asid_bits;
@@ -879,7 +877,7 @@ static void arm_smmu_cmdq_skip_err(struct arm_smmu_device *smmu)
 	 * We may have concurrent producers, so we need to be careful
 	 * not to touch any of the shadow cmdq state.
 	 */
-	queue_read(cmd, Q_ENT(q, cons), q->ent_dwords);
+	queue_read(cmd, Q_ENT(q, idx), q->ent_dwords);
 	dev_err(smmu->dev, "skipping command in error state:\n");
 	for (i = 0; i < ARRAY_SIZE(cmd); ++i)
 		dev_err(smmu->dev, "\t0x%016llx\n", (unsigned long long)cmd[i]);
@@ -890,7 +888,7 @@ static void arm_smmu_cmdq_skip_err(struct arm_smmu_device *smmu)
 		return;
 	}
 
-	queue_write(Q_ENT(q, cons), cmd, q->ent_dwords);
+	queue_write(cmd, Q_ENT(q, idx), q->ent_dwords);
 }
 
 static void arm_smmu_cmdq_issue_cmd(struct arm_smmu_device *smmu,
@@ -1034,9 +1032,6 @@ static void arm_smmu_write_strtab_ent(struct arm_smmu_device *smmu, u32 sid,
 		case STRTAB_STE_0_CFG_S2_TRANS:
 			ste_live = true;
 			break;
-		case STRTAB_STE_0_CFG_ABORT:
-			if (disable_bypass)
-				break;
 		default:
 			BUG(); /* STE corruption */
 		}
@@ -1401,7 +1396,7 @@ static struct iommu_domain *arm_smmu_domain_alloc(unsigned type)
 {
 	struct arm_smmu_domain *smmu_domain;
 
-	if (type != IOMMU_DOMAIN_UNMANAGED && type != IOMMU_DOMAIN_DMA)
+	if (type != IOMMU_DOMAIN_UNMANAGED)
 		return NULL;
 
 	/*
@@ -1412,12 +1407,6 @@ static struct iommu_domain *arm_smmu_domain_alloc(unsigned type)
 	smmu_domain = kzalloc(sizeof(*smmu_domain), GFP_KERNEL);
 	if (!smmu_domain)
 		return NULL;
-
-	if (type == IOMMU_DOMAIN_DMA &&
-	    iommu_get_dma_cookie(&smmu_domain->domain)) {
-		kfree(smmu_domain);
-		return NULL;
-	}
 
 	mutex_init(&smmu_domain->init_mutex);
 	spin_lock_init(&smmu_domain->pgtbl_lock);
@@ -1447,7 +1436,6 @@ static void arm_smmu_domain_free(struct iommu_domain *domain)
 	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
 	struct arm_smmu_device *smmu = smmu_domain->smmu;
 
-	iommu_put_dma_cookie(domain);
 	free_io_pgtable_ops(smmu_domain->pgtbl_ops);
 
 	/* Free the CD and ASID, if we allocated them */
@@ -1480,7 +1468,7 @@ static int arm_smmu_domain_finalise_s1(struct arm_smmu_domain *smmu_domain,
 	struct arm_smmu_s1_cfg *cfg = &smmu_domain->s1_cfg;
 
 	asid = arm_smmu_bitmap_alloc(smmu->asid_map, smmu->asid_bits);
-	if (asid < 0)
+	if (IS_ERR_VALUE(asid))
 		return asid;
 
 	cfg->cdptr = dmam_alloc_coherent(smmu->dev, CTXDESC_CD_DWORDS << 3,
@@ -1511,7 +1499,7 @@ static int arm_smmu_domain_finalise_s2(struct arm_smmu_domain *smmu_domain,
 	struct arm_smmu_s2_cfg *cfg = &smmu_domain->s2_cfg;
 
 	vmid = arm_smmu_bitmap_alloc(smmu->vmid_map, smmu->vmid_bits);
-	if (vmid < 0)
+	if (IS_ERR_VALUE(vmid))
 		return vmid;
 
 	cfg->vmid	= (u16)vmid;
@@ -1519,6 +1507,8 @@ static int arm_smmu_domain_finalise_s2(struct arm_smmu_domain *smmu_domain,
 	cfg->vtcr	= pgtbl_cfg->arm_lpae_s2_cfg.vtcr;
 	return 0;
 }
+
+static struct iommu_ops arm_smmu_ops;
 
 static int arm_smmu_domain_finalise(struct iommu_domain *domain)
 {
@@ -1557,7 +1547,7 @@ static int arm_smmu_domain_finalise(struct iommu_domain *domain)
 	}
 
 	pgtbl_cfg = (struct io_pgtable_cfg) {
-		.pgsize_bitmap	= smmu->pgsize_bitmap,
+		.pgsize_bitmap	= arm_smmu_ops.pgsize_bitmap,
 		.ias		= ias,
 		.oas		= oas,
 		.tlb		= &arm_smmu_gather_ops,
@@ -1568,11 +1558,11 @@ static int arm_smmu_domain_finalise(struct iommu_domain *domain)
 	if (!pgtbl_ops)
 		return -ENOMEM;
 
-	domain->pgsize_bitmap = pgtbl_cfg.pgsize_bitmap;
+	arm_smmu_ops.pgsize_bitmap = pgtbl_cfg.pgsize_bitmap;
 	smmu_domain->pgtbl_ops = pgtbl_ops;
 
 	ret = finalise_stage_fn(smmu_domain, &pgtbl_cfg);
-	if (ret < 0)
+	if (IS_ERR_VALUE(ret))
 		free_io_pgtable_ops(pgtbl_ops);
 
 	return ret;
@@ -1640,17 +1630,6 @@ static int arm_smmu_install_ste_for_group(struct arm_smmu_group *smmu_group)
 	return 0;
 }
 
-static void arm_smmu_detach_dev(struct device *dev)
-{
-	struct arm_smmu_group *smmu_group = arm_smmu_group_get(dev);
-
-	smmu_group->ste.bypass = true;
-	if (arm_smmu_install_ste_for_group(smmu_group) < 0)
-		dev_warn(dev, "failed to install bypass STE\n");
-
-	smmu_group->domain = NULL;
-}
-
 static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 {
 	int ret = 0;
@@ -1663,7 +1642,7 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 
 	/* Already attached to a different domain? */
 	if (smmu_group->domain && smmu_group->domain != smmu_domain)
-		arm_smmu_detach_dev(dev);
+		return -EEXIST;
 
 	smmu = smmu_group->smmu;
 	mutex_lock(&smmu_domain->init_mutex);
@@ -1689,20 +1668,34 @@ static int arm_smmu_attach_dev(struct iommu_domain *domain, struct device *dev)
 		goto out_unlock;
 
 	smmu_group->domain	= smmu_domain;
-
-	/*
-	 * FIXME: This should always be "false" once we have IOMMU-backed
-	 * DMA ops for all devices behind the SMMU.
-	 */
-	smmu_group->ste.bypass	= domain->type == IOMMU_DOMAIN_DMA;
+	smmu_group->ste.bypass	= false;
 
 	ret = arm_smmu_install_ste_for_group(smmu_group);
-	if (ret < 0)
+	if (IS_ERR_VALUE(ret))
 		smmu_group->domain = NULL;
 
 out_unlock:
 	mutex_unlock(&smmu_domain->init_mutex);
 	return ret;
+}
+
+static void arm_smmu_detach_dev(struct iommu_domain *domain, struct device *dev)
+{
+	struct arm_smmu_domain *smmu_domain = to_smmu_domain(domain);
+	struct arm_smmu_group *smmu_group = arm_smmu_group_get(dev);
+
+	BUG_ON(!smmu_domain);
+	BUG_ON(!smmu_group);
+
+	mutex_lock(&smmu_domain->init_mutex);
+	BUG_ON(smmu_group->domain != smmu_domain);
+
+	smmu_group->ste.bypass = true;
+	if (IS_ERR_VALUE(arm_smmu_install_ste_for_group(smmu_group)))
+		dev_warn(dev, "failed to install bypass STE\n");
+
+	smmu_group->domain = NULL;
+	mutex_unlock(&smmu_domain->init_mutex);
 }
 
 static int arm_smmu_map(struct iommu_domain *domain, unsigned long iova,
@@ -1942,9 +1935,9 @@ static struct iommu_ops arm_smmu_ops = {
 	.domain_alloc		= arm_smmu_domain_alloc,
 	.domain_free		= arm_smmu_domain_free,
 	.attach_dev		= arm_smmu_attach_dev,
+	.detach_dev		= arm_smmu_detach_dev,
 	.map			= arm_smmu_map,
 	.unmap			= arm_smmu_unmap,
-	.map_sg			= default_iommu_map_sg,
 	.iova_to_phys		= arm_smmu_iova_to_phys,
 	.add_device		= arm_smmu_add_device,
 	.remove_device		= arm_smmu_remove_device,
@@ -2239,7 +2232,7 @@ static int arm_smmu_setup_irqs(struct arm_smmu_device *smmu)
 						arm_smmu_evtq_handler,
 						arm_smmu_evtq_thread,
 						0, "arm-smmu-v3-evtq", smmu);
-		if (ret < 0)
+		if (IS_ERR_VALUE(ret))
 			dev_warn(smmu->dev, "failed to enable evtq irq\n");
 	}
 
@@ -2248,7 +2241,7 @@ static int arm_smmu_setup_irqs(struct arm_smmu_device *smmu)
 		ret = devm_request_irq(smmu->dev, irq,
 				       arm_smmu_cmdq_sync_handler, 0,
 				       "arm-smmu-v3-cmdq-sync", smmu);
-		if (ret < 0)
+		if (IS_ERR_VALUE(ret))
 			dev_warn(smmu->dev, "failed to enable cmdq-sync irq\n");
 	}
 
@@ -2256,7 +2249,7 @@ static int arm_smmu_setup_irqs(struct arm_smmu_device *smmu)
 	if (irq) {
 		ret = devm_request_irq(smmu->dev, irq, arm_smmu_gerror_handler,
 				       0, "arm-smmu-v3-gerror", smmu);
-		if (ret < 0)
+		if (IS_ERR_VALUE(ret))
 			dev_warn(smmu->dev, "failed to enable gerror irq\n");
 	}
 
@@ -2268,7 +2261,7 @@ static int arm_smmu_setup_irqs(struct arm_smmu_device *smmu)
 							arm_smmu_priq_thread,
 							0, "arm-smmu-v3-priq",
 							smmu);
-			if (ret < 0)
+			if (IS_ERR_VALUE(ret))
 				dev_warn(smmu->dev,
 					 "failed to enable priq irq\n");
 			else
@@ -2413,6 +2406,7 @@ static int arm_smmu_device_probe(struct arm_smmu_device *smmu)
 {
 	u32 reg;
 	bool coherent;
+	unsigned long pgsize_bitmap = 0;
 
 	/* IDR0 */
 	reg = readl_relaxed(smmu->base + ARM_SMMU_IDR0);
@@ -2543,16 +2537,13 @@ static int arm_smmu_device_probe(struct arm_smmu_device *smmu)
 
 	/* Page sizes */
 	if (reg & IDR5_GRAN64K)
-		smmu->pgsize_bitmap |= SZ_64K | SZ_512M;
+		pgsize_bitmap |= SZ_64K | SZ_512M;
 	if (reg & IDR5_GRAN16K)
-		smmu->pgsize_bitmap |= SZ_16K | SZ_32M;
+		pgsize_bitmap |= SZ_16K | SZ_32M;
 	if (reg & IDR5_GRAN4K)
-		smmu->pgsize_bitmap |= SZ_4K | SZ_2M | SZ_1G;
+		pgsize_bitmap |= SZ_4K | SZ_2M | SZ_1G;
 
-	if (arm_smmu_ops.pgsize_bitmap == -1UL)
-		arm_smmu_ops.pgsize_bitmap = smmu->pgsize_bitmap;
-	else
-		arm_smmu_ops.pgsize_bitmap |= smmu->pgsize_bitmap;
+	arm_smmu_ops.pgsize_bitmap &= pgsize_bitmap;
 
 	/* Output address size */
 	switch (reg & IDR5_OAS_MASK << IDR5_OAS_SHIFT) {

@@ -106,6 +106,12 @@ static inline unsigned long highmap_end_pfn(void)
 
 #endif
 
+#ifdef CONFIG_DEBUG_PAGEALLOC
+# define debug_pagealloc 1
+#else
+# define debug_pagealloc 0
+#endif
+
 static inline int
 within(unsigned long addr, unsigned long start, unsigned long end)
 {
@@ -277,7 +283,7 @@ static inline pgprot_t static_protections(pgprot_t prot, unsigned long address,
 		   __pa_symbol(__end_rodata) >> PAGE_SHIFT))
 		pgprot_val(forbidden) |= _PAGE_RW;
 
-#if defined(CONFIG_X86_64)
+#if defined(CONFIG_X86_64) && defined(CONFIG_DEBUG_RODATA)
 	/*
 	 * Once the kernel maps the text as RO (kernel_set_to_readonly is set),
 	 * kernel text mappings for the large page aligned text, rodata sections
@@ -708,10 +714,10 @@ static int split_large_page(struct cpa_data *cpa, pte_t *kpte,
 {
 	struct page *base;
 
-	if (!debug_pagealloc_enabled())
+	if (!debug_pagealloc)
 		spin_unlock(&cpa_lock);
 	base = alloc_pages(GFP_KERNEL | __GFP_NOTRACK, 0);
-	if (!debug_pagealloc_enabled())
+	if (!debug_pagealloc)
 		spin_lock(&cpa_lock);
 	if (!base)
 		return -ENOMEM;
@@ -909,34 +915,25 @@ static void populate_pte(struct cpa_data *cpa,
 
 	pte = pte_offset_kernel(pmd, start);
 
-	/*
-	 * Set the GLOBAL flags only if the PRESENT flag is
-	 * set otherwise pte_present will return true even on
-	 * a non present pte. The canon_pgprot will clear
-	 * _PAGE_GLOBAL for the ancient hardware that doesn't
-	 * support it.
-	 */
-	if (pgprot_val(pgprot) & _PAGE_PRESENT)
-		pgprot_val(pgprot) |= _PAGE_GLOBAL;
-	else
-		pgprot_val(pgprot) &= ~_PAGE_GLOBAL;
-
-	pgprot = canon_pgprot(pgprot);
-
 	while (num_pages-- && start < end) {
-		set_pte(pte, pfn_pte(cpa->pfn, pgprot));
+
+		/* deal with the NX bit */
+		if (!(pgprot_val(pgprot) & _PAGE_NX))
+			cpa->pfn &= ~_PAGE_NX;
+
+		set_pte(pte, pfn_pte(cpa->pfn >> PAGE_SHIFT, pgprot));
 
 		start	 += PAGE_SIZE;
-		cpa->pfn++;
+		cpa->pfn += PAGE_SIZE;
 		pte++;
 	}
 }
 
-static long populate_pmd(struct cpa_data *cpa,
-			 unsigned long start, unsigned long end,
-			 unsigned num_pages, pud_t *pud, pgprot_t pgprot)
+static int populate_pmd(struct cpa_data *cpa,
+			unsigned long start, unsigned long end,
+			unsigned num_pages, pud_t *pud, pgprot_t pgprot)
 {
-	long cur_pages = 0;
+	unsigned int cur_pages = 0;
 	pmd_t *pmd;
 	pgprot_t pmd_pgprot;
 
@@ -983,11 +980,11 @@ static long populate_pmd(struct cpa_data *cpa,
 
 		pmd = pmd_offset(pud, start);
 
-		set_pmd(pmd, __pmd(cpa->pfn << PAGE_SHIFT | _PAGE_PSE |
+		set_pmd(pmd, __pmd(cpa->pfn | _PAGE_PSE |
 				   massage_pgprot(pmd_pgprot)));
 
 		start	  += PMD_SIZE;
-		cpa->pfn  += PMD_SIZE >> PAGE_SHIFT;
+		cpa->pfn  += PMD_SIZE;
 		cur_pages += PMD_SIZE >> PAGE_SHIFT;
 	}
 
@@ -1006,12 +1003,12 @@ static long populate_pmd(struct cpa_data *cpa,
 	return num_pages;
 }
 
-static long populate_pud(struct cpa_data *cpa, unsigned long start, pgd_t *pgd,
-			 pgprot_t pgprot)
+static int populate_pud(struct cpa_data *cpa, unsigned long start, pgd_t *pgd,
+			pgprot_t pgprot)
 {
 	pud_t *pud;
 	unsigned long end;
-	long cur_pages = 0;
+	int cur_pages = 0;
 	pgprot_t pud_pgprot;
 
 	end = start + (cpa->numpages << PAGE_SHIFT);
@@ -1055,19 +1052,19 @@ static long populate_pud(struct cpa_data *cpa, unsigned long start, pgd_t *pgd,
 	/*
 	 * Map everything starting from the Gb boundary, possibly with 1G pages
 	 */
-	while (boot_cpu_has(X86_FEATURE_GBPAGES) && end - start >= PUD_SIZE) {
-		set_pud(pud, __pud(cpa->pfn << PAGE_SHIFT | _PAGE_PSE |
+	while (end - start >= PUD_SIZE) {
+		set_pud(pud, __pud(cpa->pfn | _PAGE_PSE |
 				   massage_pgprot(pud_pgprot)));
 
 		start	  += PUD_SIZE;
-		cpa->pfn  += PUD_SIZE >> PAGE_SHIFT;
+		cpa->pfn  += PUD_SIZE;
 		cur_pages += PUD_SIZE >> PAGE_SHIFT;
 		pud++;
 	}
 
 	/* Map trailing leftover */
 	if (start < end) {
-		long tmp;
+		int tmp;
 
 		pud = pud_offset(pgd, start);
 		if (pud_none(*pud))
@@ -1093,7 +1090,7 @@ static int populate_pgd(struct cpa_data *cpa, unsigned long addr)
 	pgprot_t pgprot = __pgprot(_KERNPG_TABLE);
 	pud_t *pud = NULL;	/* shut up gcc */
 	pgd_t *pgd_entry;
-	long ret;
+	int ret;
 
 	pgd_entry = cpa->pgd + pgd_index(addr);
 
@@ -1125,22 +1122,14 @@ static int populate_pgd(struct cpa_data *cpa, unsigned long addr)
 static int __cpa_process_fault(struct cpa_data *cpa, unsigned long vaddr,
 			       int primary)
 {
-	if (cpa->pgd) {
-		/*
-		 * Right now, we only execute this code path when mapping
-		 * the EFI virtual memory map regions, no other users
-		 * provide a ->pgd value. This may change in the future.
-		 */
+	if (cpa->pgd)
 		return populate_pgd(cpa, vaddr);
-	}
 
 	/*
 	 * Ignore all non primary paths.
 	 */
-	if (!primary) {
-		cpa->numpages = 1;
+	if (!primary)
 		return 0;
-	}
 
 	/*
 	 * Ignore the NULL PTE for kernel identity mapping, as it is expected
@@ -1336,8 +1325,7 @@ static int cpa_process_alias(struct cpa_data *cpa)
 
 static int __change_page_attr_set_clr(struct cpa_data *cpa, int checkalias)
 {
-	unsigned long numpages = cpa->numpages;
-	int ret;
+	int ret, numpages = cpa->numpages;
 
 	while (numpages) {
 		/*
@@ -1349,10 +1337,10 @@ static int __change_page_attr_set_clr(struct cpa_data *cpa, int checkalias)
 		if (cpa->flags & (CPA_ARRAY | CPA_PAGES_ARRAY))
 			cpa->numpages = 1;
 
-		if (!debug_pagealloc_enabled())
+		if (!debug_pagealloc)
 			spin_lock(&cpa_lock);
 		ret = __change_page_attr(cpa, checkalias);
-		if (!debug_pagealloc_enabled())
+		if (!debug_pagealloc)
 			spin_unlock(&cpa_lock);
 		if (ret)
 			return ret;
@@ -1467,7 +1455,7 @@ static int change_page_attr_set_clr(unsigned long *addr, int numpages,
 	 * error case we fall back to cpa_flush_all (which uses
 	 * WBINVD):
 	 */
-	if (!ret && boot_cpu_has(X86_FEATURE_CLFLUSH)) {
+	if (!ret && cpu_has_clflush) {
 		if (cpa.flags & (CPA_PAGES_ARRAY | CPA_ARRAY)) {
 			cpa_flush_array(addr, numpages, cache,
 					cpa.flags, pages);
@@ -1979,9 +1967,6 @@ int kernel_map_pages_in_pgd(pgd_t *pgd, u64 pfn, unsigned long address,
 
 	if (!(page_flags & _PAGE_NX))
 		cpa.mask_clr = __pgprot(_PAGE_NX);
-
-	if (!(page_flags & _PAGE_RW))
-		cpa.mask_clr = __pgprot(_PAGE_RW);
 
 	cpa.mask_set = __pgprot(_PAGE_PRESENT | page_flags);
 

@@ -685,28 +685,12 @@ out:
 	return ev_file;
 }
 
-static int verify_command_mask(struct ib_device *ib_dev, __u32 command)
-{
-	u64 mask;
-
-	if (command <= IB_USER_VERBS_CMD_OPEN_QP)
-		mask = ib_dev->uverbs_cmd_mask;
-	else
-		mask = ib_dev->uverbs_ex_cmd_mask;
-
-	if (mask & ((u64)1 << command))
-		return 0;
-
-	return -1;
-}
-
 static ssize_t ib_uverbs_write(struct file *filp, const char __user *buf,
 			     size_t count, loff_t *pos)
 {
 	struct ib_uverbs_file *file = filp->private_data;
 	struct ib_device *ib_dev;
 	struct ib_uverbs_cmd_hdr hdr;
-	__u32 command;
 	__u32 flags;
 	int srcu_key;
 	ssize_t ret;
@@ -728,31 +712,34 @@ static ssize_t ib_uverbs_write(struct file *filp, const char __user *buf,
 		goto out;
 	}
 
-	if (hdr.command & ~(__u32)(IB_USER_VERBS_CMD_FLAGS_MASK |
-				   IB_USER_VERBS_CMD_COMMAND_MASK)) {
-		ret = -EINVAL;
-		goto out;
-	}
-
-	command = hdr.command & IB_USER_VERBS_CMD_COMMAND_MASK;
-	if (verify_command_mask(ib_dev, command)) {
-		ret = -EOPNOTSUPP;
-		goto out;
-	}
-
-	if (!file->ucontext &&
-	    command != IB_USER_VERBS_CMD_GET_CONTEXT) {
-		ret = -EINVAL;
-		goto out;
-	}
-
 	flags = (hdr.command &
 		 IB_USER_VERBS_CMD_FLAGS_MASK) >> IB_USER_VERBS_CMD_FLAGS_SHIFT;
 
 	if (!flags) {
+		__u32 command;
+
+		if (hdr.command & ~(__u32)(IB_USER_VERBS_CMD_FLAGS_MASK |
+					   IB_USER_VERBS_CMD_COMMAND_MASK)) {
+			ret = -EINVAL;
+			goto out;
+		}
+
+		command = hdr.command & IB_USER_VERBS_CMD_COMMAND_MASK;
+
 		if (command >= ARRAY_SIZE(uverbs_cmd_table) ||
 		    !uverbs_cmd_table[command]) {
 			ret = -EINVAL;
+			goto out;
+		}
+
+		if (!file->ucontext &&
+		    command != IB_USER_VERBS_CMD_GET_CONTEXT) {
+			ret = -EINVAL;
+			goto out;
+		}
+
+		if (!(ib_dev->uverbs_cmd_mask & (1ull << command))) {
+			ret = -ENOSYS;
 			goto out;
 		}
 
@@ -767,10 +754,20 @@ static ssize_t ib_uverbs_write(struct file *filp, const char __user *buf,
 						 hdr.out_words * 4);
 
 	} else if (flags == IB_USER_VERBS_CMD_FLAG_EXTENDED) {
+		__u32 command;
+
 		struct ib_uverbs_ex_cmd_hdr ex_hdr;
 		struct ib_udata ucore;
 		struct ib_udata uhw;
 		size_t written_count = count;
+
+		if (hdr.command & ~(__u32)(IB_USER_VERBS_CMD_FLAGS_MASK |
+					   IB_USER_VERBS_CMD_COMMAND_MASK)) {
+			ret = -EINVAL;
+			goto out;
+		}
+
+		command = hdr.command & IB_USER_VERBS_CMD_COMMAND_MASK;
 
 		if (command >= ARRAY_SIZE(uverbs_ex_cmd_table) ||
 		    !uverbs_ex_cmd_table[command]) {
@@ -780,6 +777,11 @@ static ssize_t ib_uverbs_write(struct file *filp, const char __user *buf,
 
 		if (!file->ucontext) {
 			ret = -EINVAL;
+			goto out;
+		}
+
+		if (!(ib_dev->uverbs_ex_cmd_mask & (1ull << command))) {
+			ret = -ENOSYS;
 			goto out;
 		}
 
@@ -931,7 +933,6 @@ static int ib_uverbs_open(struct inode *inode, struct file *filp)
 	file->async_file = NULL;
 	kref_init(&file->ref);
 	mutex_init(&file->mutex);
-	mutex_init(&file->cleanup_mutex);
 
 	filp->private_data = file;
 	kobject_get(&dev->kobj);
@@ -957,20 +958,18 @@ static int ib_uverbs_close(struct inode *inode, struct file *filp)
 {
 	struct ib_uverbs_file *file = filp->private_data;
 	struct ib_uverbs_device *dev = file->device;
-
-	mutex_lock(&file->cleanup_mutex);
-	if (file->ucontext) {
-		ib_uverbs_cleanup_ucontext(file, file->ucontext);
-		file->ucontext = NULL;
-	}
-	mutex_unlock(&file->cleanup_mutex);
+	struct ib_ucontext *ucontext = NULL;
 
 	mutex_lock(&file->device->lists_mutex);
+	ucontext = file->ucontext;
+	file->ucontext = NULL;
 	if (!file->is_closed) {
 		list_del(&file->list);
 		file->is_closed = 1;
 	}
 	mutex_unlock(&file->device->lists_mutex);
+	if (ucontext)
+		ib_uverbs_cleanup_ucontext(file, ucontext);
 
 	if (file->async_file)
 		kref_put(&file->async_file->ref, ib_uverbs_release_event_file);
@@ -1064,7 +1063,7 @@ static int find_overflow_devnum(void)
 		ret = alloc_chrdev_region(&overflow_maj, 0, IB_UVERBS_MAX_DEVICES,
 					  "infiniband_verbs");
 		if (ret) {
-			pr_err("user_verbs: couldn't register dynamic device number\n");
+			printk(KERN_ERR "user_verbs: couldn't register dynamic device number\n");
 			return ret;
 		}
 	}
@@ -1184,30 +1183,22 @@ static void ib_uverbs_free_hw_resources(struct ib_uverbs_device *uverbs_dev,
 	mutex_lock(&uverbs_dev->lists_mutex);
 	while (!list_empty(&uverbs_dev->uverbs_file_list)) {
 		struct ib_ucontext *ucontext;
+
 		file = list_first_entry(&uverbs_dev->uverbs_file_list,
 					struct ib_uverbs_file, list);
 		file->is_closed = 1;
+		ucontext = file->ucontext;
 		list_del(&file->list);
+		file->ucontext = NULL;
 		kref_get(&file->ref);
 		mutex_unlock(&uverbs_dev->lists_mutex);
-
-		ib_uverbs_event_handler(&file->event_handler, &event);
-
-		mutex_lock(&file->cleanup_mutex);
-		ucontext = file->ucontext;
-		file->ucontext = NULL;
-		mutex_unlock(&file->cleanup_mutex);
-
-		/* At this point ib_uverbs_close cannot be running
-		 * ib_uverbs_cleanup_ucontext
+		/* We must release the mutex before going ahead and calling
+		 * disassociate_ucontext. disassociate_ucontext might end up
+		 * indirectly calling uverbs_close, for example due to freeing
+		 * the resources (e.g mmput).
 		 */
+		ib_uverbs_event_handler(&file->event_handler, &event);
 		if (ucontext) {
-			/* We must release the mutex before going ahead and
-			 * calling disassociate_ucontext. disassociate_ucontext
-			 * might end up indirectly calling uverbs_close,
-			 * for example due to freeing the resources
-			 * (e.g mmput).
-			 */
 			ib_dev->disassociate_ucontext(ucontext);
 			ib_uverbs_cleanup_ucontext(file, ucontext);
 		}
@@ -1293,14 +1284,14 @@ static int __init ib_uverbs_init(void)
 	ret = register_chrdev_region(IB_UVERBS_BASE_DEV, IB_UVERBS_MAX_DEVICES,
 				     "infiniband_verbs");
 	if (ret) {
-		pr_err("user_verbs: couldn't register device number\n");
+		printk(KERN_ERR "user_verbs: couldn't register device number\n");
 		goto out;
 	}
 
 	uverbs_class = class_create(THIS_MODULE, "infiniband_verbs");
 	if (IS_ERR(uverbs_class)) {
 		ret = PTR_ERR(uverbs_class);
-		pr_err("user_verbs: couldn't create class infiniband_verbs\n");
+		printk(KERN_ERR "user_verbs: couldn't create class infiniband_verbs\n");
 		goto out_chrdev;
 	}
 
@@ -1308,13 +1299,13 @@ static int __init ib_uverbs_init(void)
 
 	ret = class_create_file(uverbs_class, &class_attr_abi_version.attr);
 	if (ret) {
-		pr_err("user_verbs: couldn't create abi_version attribute\n");
+		printk(KERN_ERR "user_verbs: couldn't create abi_version attribute\n");
 		goto out_class;
 	}
 
 	ret = ib_register_client(&uverbs_client);
 	if (ret) {
-		pr_err("user_verbs: couldn't register client\n");
+		printk(KERN_ERR "user_verbs: couldn't register client\n");
 		goto out_class;
 	}
 

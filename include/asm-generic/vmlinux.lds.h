@@ -157,7 +157,7 @@
 #define EARLYCON_TABLE() STRUCT_ALIGN();			\
 			 VMLINUX_SYMBOL(__earlycon_table) = .;	\
 			 *(__earlycon_table)			\
-			 VMLINUX_SYMBOL(__earlycon_table_end) = .;
+			 *(__earlycon_table_end)
 #else
 #define EARLYCON_TABLE()
 #endif
@@ -179,6 +179,7 @@
 #define RESERVEDMEM_OF_TABLES()	OF_TABLE(CONFIG_OF_RESERVED_MEM, reservedmem)
 #define CPU_METHOD_OF_TABLES()	OF_TABLE(CONFIG_SMP, cpu_method)
 #define CPUIDLE_METHOD_OF_TABLES() OF_TABLE(CONFIG_CPU_IDLE, cpuidle_method)
+#define EARLYCON_OF_TABLES()	OF_TABLE(CONFIG_SERIAL_EARLYCON, earlycon)
 
 #ifdef CONFIG_ACPI
 #define ACPI_PROBE_TABLE(name)						\
@@ -245,9 +246,7 @@
 
 #define INIT_TASK_DATA(align)						\
 	. = ALIGN(align);						\
-	VMLINUX_SYMBOL(__start_init_task) = .;				\
-	*(.data..init_task)						\
-	VMLINUX_SYMBOL(__end_init_task) = .;
+	*(.data..init_task)
 
 /*
  * Read only Data
@@ -257,7 +256,6 @@
 	.rodata           : AT(ADDR(.rodata) - LOAD_OFFSET) {		\
 		VMLINUX_SYMBOL(__start_rodata) = .;			\
 		*(.rodata) *(.rodata.*)					\
-		*(.data..ro_after_init)	/* Read only after init */	\
 		*(__vermagic)		/* Kernel version magic */	\
 		. = ALIGN(8);						\
 		VMLINUX_SYMBOL(__start___tracepoints_ptrs) = .;		\
@@ -458,7 +456,7 @@
 		*(.entry.text)						\
 		VMLINUX_SYMBOL(__entry_text_end) = .;
 
-#if defined(CONFIG_FUNCTION_GRAPH_TRACER) || defined(CONFIG_KASAN)
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
 #define IRQENTRY_TEXT							\
 		ALIGN_FUNCTION();					\
 		VMLINUX_SYMBOL(__irqentry_text_start) = .;		\
@@ -466,16 +464,6 @@
 		VMLINUX_SYMBOL(__irqentry_text_end) = .;
 #else
 #define IRQENTRY_TEXT
-#endif
-
-#if defined(CONFIG_FUNCTION_GRAPH_TRACER) || defined(CONFIG_KASAN)
-#define SOFTIRQENTRY_TEXT						\
-		ALIGN_FUNCTION();					\
-		VMLINUX_SYMBOL(__softirqentry_text_start) = .;		\
-		*(.softirqentry.text)					\
-		VMLINUX_SYMBOL(__softirqentry_text_end) = .;
-#else
-#define SOFTIRQENTRY_TEXT
 #endif
 
 /* Section used for early init (in .S files) */
@@ -538,23 +526,20 @@
 	IRQCHIP_OF_MATCH_TABLE()					\
 	ACPI_PROBE_TABLE(irqchip)					\
 	ACPI_PROBE_TABLE(clksrc)					\
-	EARLYCON_TABLE()
+	EARLYCON_TABLE()						\
+	EARLYCON_OF_TABLES()
 
 #define INIT_TEXT							\
 	*(.init.text)							\
-	*(.text.startup)						\
 	MEM_DISCARD(init.text)
 
 #define EXIT_DATA							\
 	*(.exit.data)							\
-	*(.fini_array)							\
-	*(.dtors)							\
 	MEM_DISCARD(exit.data)						\
 	MEM_DISCARD(exit.rodata)
 
 #define EXIT_TEXT							\
 	*(.exit.text)							\
-	*(.text.exit)							\
 	MEM_DISCARD(exit.text)
 
 #define EXIT_CALL							\

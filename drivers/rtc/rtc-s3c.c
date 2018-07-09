@@ -149,14 +149,12 @@ static int s3c_rtc_setfreq(struct s3c_rtc *info, int freq)
 	if (!is_power_of_2(freq))
 		return -EINVAL;
 
-	s3c_rtc_enable_clk(info);
 	spin_lock_irq(&info->pie_lock);
 
 	if (info->data->set_freq)
 		info->data->set_freq(info, freq);
 
 	spin_unlock_irq(&info->pie_lock);
-	s3c_rtc_disable_clk(info);
 
 	return 0;
 }
@@ -503,27 +501,18 @@ static int s3c_rtc_probe(struct platform_device *pdev)
 
 	info->rtc_clk = devm_clk_get(&pdev->dev, "rtc");
 	if (IS_ERR(info->rtc_clk)) {
-		ret = PTR_ERR(info->rtc_clk);
-		if (ret != -EPROBE_DEFER)
-			dev_err(&pdev->dev, "failed to find rtc clock\n");
-		else
-			dev_dbg(&pdev->dev, "probe deferred due to missing rtc clk\n");
-		return ret;
+		dev_err(&pdev->dev, "failed to find rtc clock\n");
+		return PTR_ERR(info->rtc_clk);
 	}
 	clk_prepare_enable(info->rtc_clk);
 
 	if (info->data->needs_src_clk) {
 		info->rtc_src_clk = devm_clk_get(&pdev->dev, "rtc_src");
 		if (IS_ERR(info->rtc_src_clk)) {
-			ret = PTR_ERR(info->rtc_src_clk);
-			if (ret != -EPROBE_DEFER)
-				dev_err(&pdev->dev,
-					"failed to find rtc source clock\n");
-			else
-				dev_dbg(&pdev->dev,
-					"probe deferred due to missing rtc src clk\n");
+			dev_err(&pdev->dev,
+				"failed to find rtc source clock\n");
 			clk_disable_unprepare(info->rtc_clk);
-			return ret;
+			return PTR_ERR(info->rtc_src_clk);
 		}
 		clk_prepare_enable(info->rtc_src_clk);
 	}

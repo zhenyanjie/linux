@@ -2168,21 +2168,26 @@ static int ab8500_fg_get_property(struct power_supply *psy,
 static int ab8500_fg_get_ext_psy_data(struct device *dev, void *data)
 {
 	struct power_supply *psy;
-	struct power_supply *ext = dev_get_drvdata(dev);
-	const char **supplicants = (const char **)ext->supplied_to;
+	struct power_supply *ext;
 	struct ab8500_fg *di;
 	union power_supply_propval ret;
-	int j;
+	int i, j;
+	bool psy_found = false;
 
 	psy = (struct power_supply *)data;
+	ext = dev_get_drvdata(dev);
 	di = power_supply_get_drvdata(psy);
 
 	/*
 	 * For all psy where the name of your driver
 	 * appears in any supplied_to
 	 */
-	j = match_string(supplicants, ext->num_supplicants, psy->desc->name);
-	if (j < 0)
+	for (i = 0; i < ext->num_supplicants; i++) {
+		if (!strcmp(ext->supplied_to[i], psy->desc->name))
+			psy_found = true;
+	}
+
+	if (!psy_found)
 		return 0;
 
 	/* Go through all properties for the psy */

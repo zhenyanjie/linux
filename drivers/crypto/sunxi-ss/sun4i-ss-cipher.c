@@ -253,10 +253,11 @@ static int sun4i_ss_cipher_poll(struct ablkcipher_request *areq)
 		spaces = readl(ss->base + SS_FCSR);
 		rx_cnt = SS_RXFIFO_SPACES(spaces);
 		tx_cnt = SS_TXFIFO_SPACES(spaces);
-		dev_dbg(ss->dev, "%x %u/%u %u/%u cnt=%u %u/%u %u/%u cnt=%u %u\n",
+		dev_dbg(ss->dev, "%x %u/%u %u/%u cnt=%u %u/%u %u/%u cnt=%u %u %u\n",
 			mode,
 			oi, mi.length, ileft, areq->nbytes, rx_cnt,
-			oo, mo.length, oleft, areq->nbytes, tx_cnt, ob);
+			oo, mo.length, oleft, areq->nbytes, tx_cnt,
+			todo, ob);
 
 		if (tx_cnt == 0)
 			continue;

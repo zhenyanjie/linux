@@ -10,7 +10,6 @@
 #include <linux/slab.h>
 #include <linux/acpi.h>
 #include <linux/pci.h>
-#include <linux/delay.h>
 
 #include "amd_acpi.h"
 
@@ -145,10 +144,7 @@ static int amdgpu_atpx_validate(struct amdgpu_atpx *atpx)
 {
 	/* make sure required functions are enabled */
 	/* dGPU power control is required */
-	if (atpx->functions.power_cntl == false) {
-		printk("ATPX dGPU power cntl not present, forcing\n");
-		atpx->functions.power_cntl = true;
-	}
+	atpx->functions.power_cntl = true;
 
 	if (atpx->functions.px_params) {
 		union acpi_object *info;
@@ -260,10 +256,6 @@ static int amdgpu_atpx_set_discrete_state(struct amdgpu_atpx *atpx, u8 state)
 		if (!info)
 			return -EIO;
 		kfree(info);
-
-		/* 200ms delay is required after off */
-		if (state == 0)
-			msleep(200);
 	}
 	return 0;
 }
@@ -560,14 +552,13 @@ static bool amdgpu_atpx_detect(void)
 void amdgpu_register_atpx_handler(void)
 {
 	bool r;
-	enum vga_switcheroo_handler_flags_t handler_flags = 0;
 
 	/* detect if we have any ATPX + 2 VGA in the system */
 	r = amdgpu_atpx_detect();
 	if (!r)
 		return;
 
-	vga_switcheroo_register_handler(&amdgpu_atpx_handler, handler_flags);
+	vga_switcheroo_register_handler(&amdgpu_atpx_handler);
 }
 
 /**

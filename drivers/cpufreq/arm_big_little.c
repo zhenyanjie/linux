@@ -298,8 +298,7 @@ static int merge_cluster_tables(void)
 	return 0;
 }
 
-static void _put_cluster_clk_and_freq_table(struct device *cpu_dev,
-					    const struct cpumask *cpumask)
+static void _put_cluster_clk_and_freq_table(struct device *cpu_dev)
 {
 	u32 cluster = raw_cpu_to_cluster(cpu_dev->id);
 
@@ -309,12 +308,11 @@ static void _put_cluster_clk_and_freq_table(struct device *cpu_dev,
 	clk_put(clk[cluster]);
 	dev_pm_opp_free_cpufreq_table(cpu_dev, &freq_table[cluster]);
 	if (arm_bL_ops->free_opp_table)
-		arm_bL_ops->free_opp_table(cpumask);
+		arm_bL_ops->free_opp_table(cpu_dev);
 	dev_dbg(cpu_dev, "%s: cluster: %d\n", __func__, cluster);
 }
 
-static void put_cluster_clk_and_freq_table(struct device *cpu_dev,
-					   const struct cpumask *cpumask)
+static void put_cluster_clk_and_freq_table(struct device *cpu_dev)
 {
 	u32 cluster = cpu_to_cluster(cpu_dev->id);
 	int i;
@@ -323,7 +321,7 @@ static void put_cluster_clk_and_freq_table(struct device *cpu_dev,
 		return;
 
 	if (cluster < MAX_CLUSTERS)
-		return _put_cluster_clk_and_freq_table(cpu_dev, cpumask);
+		return _put_cluster_clk_and_freq_table(cpu_dev);
 
 	for_each_present_cpu(i) {
 		struct device *cdev = get_cpu_device(i);
@@ -332,15 +330,14 @@ static void put_cluster_clk_and_freq_table(struct device *cpu_dev,
 			return;
 		}
 
-		_put_cluster_clk_and_freq_table(cdev, cpumask);
+		_put_cluster_clk_and_freq_table(cdev);
 	}
 
 	/* free virtual table */
 	kfree(freq_table[cluster]);
 }
 
-static int _get_cluster_clk_and_freq_table(struct device *cpu_dev,
-					   const struct cpumask *cpumask)
+static int _get_cluster_clk_and_freq_table(struct device *cpu_dev)
 {
 	u32 cluster = raw_cpu_to_cluster(cpu_dev->id);
 	int ret;
@@ -348,7 +345,7 @@ static int _get_cluster_clk_and_freq_table(struct device *cpu_dev,
 	if (freq_table[cluster])
 		return 0;
 
-	ret = arm_bL_ops->init_opp_table(cpumask);
+	ret = arm_bL_ops->init_opp_table(cpu_dev);
 	if (ret) {
 		dev_err(cpu_dev, "%s: init_opp_table failed, cpu: %d, err: %d\n",
 				__func__, cpu_dev->id, ret);
@@ -377,15 +374,14 @@ static int _get_cluster_clk_and_freq_table(struct device *cpu_dev,
 
 free_opp_table:
 	if (arm_bL_ops->free_opp_table)
-		arm_bL_ops->free_opp_table(cpumask);
+		arm_bL_ops->free_opp_table(cpu_dev);
 out:
 	dev_err(cpu_dev, "%s: Failed to get data for cluster: %d\n", __func__,
 			cluster);
 	return ret;
 }
 
-static int get_cluster_clk_and_freq_table(struct device *cpu_dev,
-					  const struct cpumask *cpumask)
+static int get_cluster_clk_and_freq_table(struct device *cpu_dev)
 {
 	u32 cluster = cpu_to_cluster(cpu_dev->id);
 	int i, ret;
@@ -394,7 +390,7 @@ static int get_cluster_clk_and_freq_table(struct device *cpu_dev,
 		return 0;
 
 	if (cluster < MAX_CLUSTERS) {
-		ret = _get_cluster_clk_and_freq_table(cpu_dev, cpumask);
+		ret = _get_cluster_clk_and_freq_table(cpu_dev);
 		if (ret)
 			atomic_dec(&cluster_usage[cluster]);
 		return ret;
@@ -411,7 +407,7 @@ static int get_cluster_clk_and_freq_table(struct device *cpu_dev,
 			return -ENODEV;
 		}
 
-		ret = _get_cluster_clk_and_freq_table(cdev, cpumask);
+		ret = _get_cluster_clk_and_freq_table(cdev);
 		if (ret)
 			goto put_clusters;
 	}
@@ -437,7 +433,7 @@ put_clusters:
 			return -ENODEV;
 		}
 
-		_put_cluster_clk_and_freq_table(cdev, cpumask);
+		_put_cluster_clk_and_freq_table(cdev);
 	}
 
 	atomic_dec(&cluster_usage[cluster]);
@@ -459,6 +455,18 @@ static int bL_cpufreq_init(struct cpufreq_policy *policy)
 		return -ENODEV;
 	}
 
+	ret = get_cluster_clk_and_freq_table(cpu_dev);
+	if (ret)
+		return ret;
+
+	ret = cpufreq_table_validate_and_show(policy, freq_table[cur_cluster]);
+	if (ret) {
+		dev_err(cpu_dev, "CPU %d, cluster: %d invalid freq table\n",
+				policy->cpu, cur_cluster);
+		put_cluster_clk_and_freq_table(cpu_dev);
+		return ret;
+	}
+
 	if (cur_cluster < MAX_CLUSTERS) {
 		int cpu;
 
@@ -469,18 +477,6 @@ static int bL_cpufreq_init(struct cpufreq_policy *policy)
 	} else {
 		/* Assumption: during init, we are always running on A15 */
 		per_cpu(physical_cluster, policy->cpu) = A15_CLUSTER;
-	}
-
-	ret = get_cluster_clk_and_freq_table(cpu_dev, policy->cpus);
-	if (ret)
-		return ret;
-
-	ret = cpufreq_table_validate_and_show(policy, freq_table[cur_cluster]);
-	if (ret) {
-		dev_err(cpu_dev, "CPU %d, cluster: %d invalid freq table\n",
-			policy->cpu, cur_cluster);
-		put_cluster_clk_and_freq_table(cpu_dev, policy->cpus);
-		return ret;
 	}
 
 	if (arm_bL_ops->get_transition_latency)
@@ -513,7 +509,7 @@ static int bL_cpufreq_exit(struct cpufreq_policy *policy)
 		return -ENODEV;
 	}
 
-	put_cluster_clk_and_freq_table(cpu_dev, policy->related_cpus);
+	put_cluster_clk_and_freq_table(cpu_dev);
 	dev_dbg(cpu_dev, "%s: Exited, cpu: %d\n", __func__, policy->cpu);
 
 	return 0;

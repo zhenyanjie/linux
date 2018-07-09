@@ -148,7 +148,7 @@ static int lowpan_newlink(struct net *src_net, struct net_device *ldev,
 		return -EBUSY;
 	}
 
-	lowpan_802154_dev(ldev)->wdev = wdev;
+	lowpan_dev_info(ldev)->wdev = wdev;
 	/* Set the lowpan hardware address to the wpan hardware address. */
 	memcpy(ldev->dev_addr, wdev->dev_addr, IEEE802154_ADDR_LEN);
 	/* We need headroom for possible wpan_dev_hard_header call and tailroom
@@ -173,7 +173,7 @@ static int lowpan_newlink(struct net *src_net, struct net_device *ldev,
 
 static void lowpan_dellink(struct net_device *ldev, struct list_head *head)
 {
-	struct net_device *wdev = lowpan_802154_dev(ldev)->wdev;
+	struct net_device *wdev = lowpan_dev_info(ldev)->wdev;
 
 	ASSERT_RTNL();
 
@@ -184,7 +184,7 @@ static void lowpan_dellink(struct net_device *ldev, struct list_head *head)
 
 static struct rtnl_link_ops lowpan_link_ops __read_mostly = {
 	.kind		= "lowpan",
-	.priv_size	= LOWPAN_PRIV_SIZE(sizeof(struct lowpan_802154_dev)),
+	.priv_size	= LOWPAN_PRIV_SIZE(sizeof(struct lowpan_dev_info)),
 	.setup		= lowpan_setup,
 	.newlink	= lowpan_newlink,
 	.dellink	= lowpan_dellink,
@@ -207,7 +207,7 @@ static int lowpan_device_event(struct notifier_block *unused,
 	struct net_device *wdev = netdev_notifier_info_to_dev(ptr);
 
 	if (wdev->type != ARPHRD_IEEE802154)
-		return NOTIFY_DONE;
+		goto out;
 
 	switch (event) {
 	case NETDEV_UNREGISTER:
@@ -219,10 +219,11 @@ static int lowpan_device_event(struct notifier_block *unused,
 			lowpan_dellink(wdev->ieee802154_ptr->lowpan_dev, NULL);
 		break;
 	default:
-		return NOTIFY_DONE;
+		break;
 	}
 
-	return NOTIFY_OK;
+out:
+	return NOTIFY_DONE;
 }
 
 static struct notifier_block lowpan_dev_notifier = {

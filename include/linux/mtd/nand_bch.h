@@ -32,7 +32,9 @@ int nand_bch_correct_data(struct mtd_info *mtd, u_char *dat, u_char *read_ecc,
 /*
  * Initialize BCH encoder/decoder
  */
-struct nand_bch_control *nand_bch_init(struct mtd_info *mtd);
+struct nand_bch_control *
+nand_bch_init(struct mtd_info *mtd, unsigned int eccsize,
+	      unsigned int eccbytes, struct nand_ecclayout **ecclayout);
 /*
  * Release BCH encoder/decoder resources
  */
@@ -56,7 +58,9 @@ nand_bch_correct_data(struct mtd_info *mtd, unsigned char *buf,
 	return -ENOTSUPP;
 }
 
-static inline struct nand_bch_control *nand_bch_init(struct mtd_info *mtd)
+static inline struct nand_bch_control *
+nand_bch_init(struct mtd_info *mtd, unsigned int eccsize,
+	      unsigned int eccbytes, struct nand_ecclayout **ecclayout)
 {
 	return NULL;
 }

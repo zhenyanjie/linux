@@ -92,7 +92,7 @@
 			linux,code = <171>;
 			label = "config";
 			debounce-interval = <1>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 
 		camera-key {
@@ -107,7 +107,7 @@
 			linux,code = <116>;
 			label = "power";
 			debounce-interval = <1>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 
 		ok-key {

@@ -316,15 +316,11 @@ static u32 rsnd_dmapp_get_id(struct rsnd_dai_stream *io,
 		size = ARRAY_SIZE(gen2_id_table_cmd);
 	}
 
-	if ((!entry) || (size <= id)) {
-		struct device *dev = rsnd_priv_to_dev(rsnd_io_to_priv(io));
+	if (!entry)
+		return 0xFF;
 
-		dev_err(dev, "unknown connection (%s[%d])\n",
-			rsnd_mod_name(mod), rsnd_mod_id(mod));
-
-		/* use non-prohibited SRS number as error */
-		return 0x00; /* SSI00 */
-	}
+	if (size <= id)
+		return 0xFF;
 
 	return entry[id];
 }
@@ -626,13 +622,15 @@ static void rsnd_dma_of_path(struct rsnd_mod *this,
 	}
 }
 
-int rsnd_dma_attach(struct rsnd_dai_stream *io, struct rsnd_mod *mod,
-		    struct rsnd_mod **dma_mod, int id)
+struct rsnd_mod *rsnd_dma_attach(struct rsnd_dai_stream *io,
+				 struct rsnd_mod *mod, int id)
 {
+	struct rsnd_mod *dma_mod;
 	struct rsnd_mod *mod_from = NULL;
 	struct rsnd_mod *mod_to = NULL;
 	struct rsnd_priv *priv = rsnd_io_to_priv(io);
 	struct rsnd_dma_ctrl *dmac = rsnd_priv_to_dmac(priv);
+	struct rsnd_dma *dma;
 	struct device *dev = rsnd_priv_to_dev(priv);
 	struct rsnd_mod_ops *ops;
 	enum rsnd_mod_type type;
@@ -648,9 +646,16 @@ int rsnd_dma_attach(struct rsnd_dai_stream *io, struct rsnd_mod *mod,
 	 *	rsnd_rdai_continuance_probe()
 	 */
 	if (!dmac)
-		return -EAGAIN;
+		return ERR_PTR(-EAGAIN);
+
+	dma = devm_kzalloc(dev, sizeof(*dma), GFP_KERNEL);
+	if (!dma)
+		return ERR_PTR(-ENOMEM);
 
 	rsnd_dma_of_path(mod, io, is_play, &mod_from, &mod_to);
+
+	dma->src_addr = rsnd_dma_addr(io, mod_from, is_play, 1);
+	dma->dst_addr = rsnd_dma_addr(io, mod_to,   is_play, 0);
 
 	/* for Gen2 */
 	if (mod_from && mod_to) {
@@ -673,38 +678,27 @@ int rsnd_dma_attach(struct rsnd_dai_stream *io, struct rsnd_mod *mod,
 		type	= RSND_MOD_AUDMA;
 	}
 
-	if (!(*dma_mod)) {
-		struct rsnd_dma *dma;
+	dma_mod = rsnd_mod_get(dma);
 
-		dma = devm_kzalloc(dev, sizeof(*dma), GFP_KERNEL);
-		if (!dma)
-			return -ENOMEM;
-
-		*dma_mod = rsnd_mod_get(dma);
-
-		dma->src_addr = rsnd_dma_addr(io, mod_from, is_play, 1);
-		dma->dst_addr = rsnd_dma_addr(io, mod_to,   is_play, 0);
-
-		ret = rsnd_mod_init(priv, *dma_mod, ops, NULL,
-				    rsnd_mod_get_status, type, dma_id);
-		if (ret < 0)
-			return ret;
-
-		dev_dbg(dev, "%s[%d] %s[%d] -> %s[%d]\n",
-			rsnd_mod_name(*dma_mod), rsnd_mod_id(*dma_mod),
-			rsnd_mod_name(mod_from), rsnd_mod_id(mod_from),
-			rsnd_mod_name(mod_to),   rsnd_mod_id(mod_to));
-
-		ret = attach(io, dma, id, mod_from, mod_to);
-		if (ret < 0)
-			return ret;
-	}
-
-	ret = rsnd_dai_connect(*dma_mod, io, type);
+	ret = rsnd_mod_init(priv, dma_mod,
+			    ops, NULL, type, dma_id);
 	if (ret < 0)
-		return ret;
+		return ERR_PTR(ret);
 
-	return 0;
+	dev_dbg(dev, "%s[%d] %s[%d] -> %s[%d]\n",
+		rsnd_mod_name(dma_mod), rsnd_mod_id(dma_mod),
+		rsnd_mod_name(mod_from), rsnd_mod_id(mod_from),
+		rsnd_mod_name(mod_to),   rsnd_mod_id(mod_to));
+
+	ret = attach(io, dma, id, mod_from, mod_to);
+	if (ret < 0)
+		return ERR_PTR(ret);
+
+	ret = rsnd_dai_connect(dma_mod, io, type);
+	if (ret < 0)
+		return ERR_PTR(ret);
+
+	return rsnd_mod_get(dma);
 }
 
 int rsnd_dma_probe(struct rsnd_priv *priv)

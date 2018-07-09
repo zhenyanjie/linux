@@ -12,7 +12,6 @@
 #include <linux/pm.h>
 #include <linux/io.h>
 
-#include <asm/cpufeature.h>
 #include <asm/irqdomain.h>
 #include <asm/fixmap.h>
 #include <asm/hpet.h>
@@ -54,7 +53,7 @@ struct hpet_dev {
 	char				name[10];
 };
 
-static inline struct hpet_dev *EVT_TO_HPET_DEV(struct clock_event_device *evtdev)
+inline struct hpet_dev *EVT_TO_HPET_DEV(struct clock_event_device *evtdev)
 {
 	return container_of(evtdev, struct hpet_dev, evt);
 }
@@ -717,7 +716,7 @@ static int hpet_cpuhp_notify(struct notifier_block *n,
 	struct hpet_work_struct work;
 	struct hpet_dev *hdev = per_cpu(cpu_hpet_dev, cpu);
 
-	switch (action & ~CPU_TASKS_FROZEN) {
+	switch (action & 0xf) {
 	case CPU_ONLINE:
 		INIT_DELAYED_WORK_ONSTACK(&work.work, hpet_work);
 		init_completion(&work.complete);
@@ -773,6 +772,7 @@ static struct clocksource clocksource_hpet = {
 	.mask		= HPET_MASK,
 	.flags		= CLOCK_SOURCE_IS_CONTINUOUS,
 	.resume		= hpet_resume_counter,
+	.archdata	= { .vclock_mode = VCLOCK_HPET },
 };
 
 static int hpet_clocksource_register(void)

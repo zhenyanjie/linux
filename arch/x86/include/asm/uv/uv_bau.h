@@ -598,7 +598,7 @@ struct bau_control {
 	int			timeout_tries;
 	int			ipi_attempts;
 	int			conseccompletes;
-	bool			nobau;
+	short			nobau;
 	short			baudisabled;
 	short			cpu;
 	short			osnode;

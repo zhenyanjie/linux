@@ -861,7 +861,7 @@ rqbiocnt(struct request *r)
  * discussion.
  *
  * We cannot use get_page in the workaround, because it insists on a
- * positive page count as a precondition.  So we use _refcount directly.
+ * positive page count as a precondition.  So we use _count directly.
  */
 static void
 bio_pageinc(struct bio *bio)
@@ -875,7 +875,7 @@ bio_pageinc(struct bio *bio)
 		 * compound pages is no longer allowed by the kernel.
 		 */
 		page = compound_head(bv.bv_page);
-		page_ref_inc(page);
+		atomic_inc(&page->_count);
 	}
 }
 
@@ -888,7 +888,7 @@ bio_pagedec(struct bio *bio)
 
 	bio_for_each_segment(bv, bio, iter) {
 		page = compound_head(bv.bv_page);
-		page_ref_dec(page);
+		atomic_dec(&page->_count);
 	}
 }
 
@@ -1750,7 +1750,7 @@ aoecmd_init(void)
 	int ret;
 
 	/* get_zeroed_page returns page with ref count 1 */
-	p = (void *) get_zeroed_page(GFP_KERNEL);
+	p = (void *) get_zeroed_page(GFP_KERNEL | __GFP_REPEAT);
 	if (!p)
 		return -ENOMEM;
 	empty_page = virt_to_page(p);

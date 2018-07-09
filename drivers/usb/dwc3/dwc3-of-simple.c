@@ -42,7 +42,6 @@ static int dwc3_of_simple_probe(struct platform_device *pdev)
 	struct device		*dev = &pdev->dev;
 	struct device_node	*np = dev->of_node;
 
-	unsigned int		count;
 	int			ret;
 	int			i;
 
@@ -50,11 +49,11 @@ static int dwc3_of_simple_probe(struct platform_device *pdev)
 	if (!simple)
 		return -ENOMEM;
 
-	count = of_clk_get_parent_count(np);
-	if (!count)
-		return -ENOENT;
+	ret = of_clk_get_parent_count(np);
+	if (ret < 0)
+		return ret;
 
-	simple->num_clocks = count;
+	simple->num_clocks = ret;
 
 	simple->clks = devm_kcalloc(dev, simple->num_clocks,
 			sizeof(struct clk *), GFP_KERNEL);

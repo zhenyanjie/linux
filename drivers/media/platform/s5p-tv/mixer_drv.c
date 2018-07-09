@@ -146,7 +146,7 @@ int mxr_power_get(struct mxr_device *mdev)
 
 	/* returning 1 means that power is already enabled,
 	 * so zero success be returned */
-	if (ret < 0)
+	if (IS_ERR_VALUE(ret))
 		return ret;
 	return 0;
 }

@@ -44,7 +44,6 @@ struct clk_pllv3 {
 	u32		powerdown;
 	u32		div_mask;
 	u32		div_shift;
-	unsigned long	ref_clock;
 };
 
 #define to_clk_pllv3(_hw) container_of(_hw, struct clk_pllv3, hw)
@@ -287,9 +286,7 @@ static const struct clk_ops clk_pllv3_av_ops = {
 static unsigned long clk_pllv3_enet_recalc_rate(struct clk_hw *hw,
 						unsigned long parent_rate)
 {
-	struct clk_pllv3 *pll = to_clk_pllv3(hw);
-
-	return pll->ref_clock;
+	return 500000000;
 }
 
 static const struct clk_ops clk_pllv3_enet_ops = {
@@ -329,11 +326,7 @@ struct clk *imx_clk_pllv3(enum imx_pllv3_type type, const char *name,
 		break;
 	case IMX_PLLV3_ENET_IMX7:
 		pll->powerdown = IMX7_ENET_PLL_POWER;
-		pll->ref_clock = 1000000000;
-		ops = &clk_pllv3_enet_ops;
-		break;
 	case IMX_PLLV3_ENET:
-		pll->ref_clock = 500000000;
 		ops = &clk_pllv3_enet_ops;
 		break;
 	default:

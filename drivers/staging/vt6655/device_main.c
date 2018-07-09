@@ -211,11 +211,11 @@ static void device_init_registers(struct vnt_private *priv)
 	unsigned char byCCKPwrdBm = 0;
 	unsigned char byOFDMPwrdBm = 0;
 
-	MACbShutdown(priv);
+	MACbShutdown(priv->PortOffset);
 	BBvSoftwareReset(priv);
 
 	/* Do MACbSoftwareReset in MACvInitialize */
-	MACbSoftwareReset(priv);
+	MACbSoftwareReset(priv->PortOffset);
 
 	priv->bAES = false;
 
@@ -229,7 +229,7 @@ static void device_init_registers(struct vnt_private *priv)
 	priv->byTopCCKBasicRate = RATE_1M;
 
 	/* init MAC */
-	MACvInitialize(priv);
+	MACvInitialize(priv->PortOffset);
 
 	/* Get Local ID */
 	VNSvInPortB(priv->PortOffset + MAC_REG_LOCALID, &priv->byLocalID);
@@ -357,8 +357,8 @@ static void device_init_registers(struct vnt_private *priv)
 			  MAC_REG_CFG, (CFG_TKIPOPT | CFG_NOTXTIMEOUT));
 
 	/* set performance parameter by registry */
-	MACvSetShortRetryLimit(priv, priv->byShortRetryLimit);
-	MACvSetLongRetryLimit(priv, priv->byLongRetryLimit);
+	MACvSetShortRetryLimit(priv->PortOffset, priv->byShortRetryLimit);
+	MACvSetLongRetryLimit(priv->PortOffset, priv->byLongRetryLimit);
 
 	/* reset TSF counter */
 	VNSvOutPortB(priv->PortOffset + MAC_REG_TFTCTL, TFTCTL_TSFCNTRST);
@@ -742,11 +742,6 @@ static bool device_alloc_rx_buf(struct vnt_private *priv,
 		dma_map_single(&priv->pcid->dev,
 			       skb_put(rd_info->skb, skb_tailroom(rd_info->skb)),
 			       priv->rx_buf_sz, DMA_FROM_DEVICE);
-	if (dma_mapping_error(&priv->pcid->dev, rd_info->skb_dma)) {
-		dev_kfree_skb(rd_info->skb);
-		rd_info->skb = NULL;
-		return false;
-	}
 
 	*((unsigned int *)&rd->rd0) = 0; /* FIX cast */
 
@@ -812,7 +807,7 @@ static int vnt_int_report_rate(struct vnt_private *priv,
 		else if (fb_option & FIFOCTL_AUTO_FB_1)
 			tx_rate = fallback_rate1[tx_rate][retry];
 
-		if (info->band == NL80211_BAND_5GHZ)
+		if (info->band == IEEE80211_BAND_5GHZ)
 			idx = tx_rate - RATE_6M;
 		else
 			idx = tx_rate;
@@ -889,7 +884,7 @@ static void device_error(struct vnt_private *priv, unsigned short status)
 	if (status & ISR_FETALERR) {
 		dev_err(&priv->pcid->dev, "Hardware fatal error\n");
 
-		MACbShutdown(priv);
+		MACbShutdown(priv->PortOffset);
 		return;
 	}
 }
@@ -1017,7 +1012,7 @@ static void vnt_interrupt_process(struct vnt_private *priv)
 			if ((priv->op_mode == NL80211_IFTYPE_AP ||
 			    priv->op_mode == NL80211_IFTYPE_ADHOC) &&
 			    priv->vif->bss_conf.enable_beacon) {
-				MACvOneShotTimer1MicroSec(priv,
+				MACvOneShotTimer1MicroSec(priv->PortOffset,
 							  (priv->vif->bss_conf.beacon_int - MAKE_BEACON_RESERVED) << 10);
 			}
 
@@ -1171,7 +1166,7 @@ static int vnt_start(struct ieee80211_hw *hw)
 	if (!device_init_rings(priv))
 		return -ENOMEM;
 
-	ret = request_irq(priv->pcid->irq, vnt_interrupt,
+	ret = request_irq(priv->pcid->irq, &vnt_interrupt,
 			  IRQF_SHARED, "vt6655", priv);
 	if (ret) {
 		dev_dbg(&priv->pcid->dev, "failed to start irq\n");
@@ -1202,8 +1197,8 @@ static void vnt_stop(struct ieee80211_hw *hw)
 
 	cancel_work_sync(&priv->interrupt_work);
 
-	MACbShutdown(priv);
-	MACbSoftwareReset(priv);
+	MACbShutdown(priv->PortOffset);
+	MACbSoftwareReset(priv->PortOffset);
 	CARDbRadioPowerOff(priv);
 
 	device_free_td0_ring(priv);
@@ -1290,7 +1285,7 @@ static int vnt_config(struct ieee80211_hw *hw, u32 changed)
 	    (conf->flags & IEEE80211_CONF_OFFCHANNEL)) {
 		set_channel(priv, conf->chandef.chan);
 
-		if (conf->chandef.chan->band == NL80211_BAND_5GHZ)
+		if (conf->chandef.chan->band == IEEE80211_BAND_5GHZ)
 			bb_type = BB_TYPE_11A;
 		else
 			bb_type = BB_TYPE_11G;
@@ -1641,13 +1636,13 @@ vt6655_probe(struct pci_dev *pcid, const struct pci_device_id *ent)
 	INIT_WORK(&priv->interrupt_work, vnt_interrupt_work);
 
 	/* do reset */
-	if (!MACbSoftwareReset(priv)) {
+	if (!MACbSoftwareReset(priv->PortOffset)) {
 		dev_err(&pcid->dev, ": Failed to access MAC hardware..\n");
 		device_free_info(priv);
 		return -ENODEV;
 	}
 	/* initial to reload eeprom */
-	MACvInitialize(priv);
+	MACvInitialize(priv->PortOffset);
 	MACvReadEtherAddress(priv->PortOffset, priv->abyCurrentNetAddr);
 
 	/* Get RFType */
@@ -1695,7 +1690,7 @@ static int vt6655_suspend(struct pci_dev *pcid, pm_message_t state)
 
 	pci_save_state(pcid);
 
-	MACbShutdown(priv);
+	MACbShutdown(priv->PortOffset);
 
 	pci_disable_device(pcid);
 	pci_set_power_state(pcid, pci_choose_state(pcid, state));

@@ -192,7 +192,6 @@ struct perf_sample {
 	u64 data_src;
 	u32 flags;
 	u16 insn_len;
-	u8  cpumode;
 	void *raw_data;
 	struct ip_callchain *callchain;
 	struct branch_stack *branch_stack;
@@ -233,7 +232,6 @@ enum perf_user_event_type { /* above any possible kernel type */
 	PERF_RECORD_STAT			= 76,
 	PERF_RECORD_STAT_ROUND			= 77,
 	PERF_RECORD_EVENT_UPDATE		= 78,
-	PERF_RECORD_TIME_CONV			= 79,
 	PERF_RECORD_HEADER_MAX
 };
 
@@ -470,13 +468,6 @@ struct stat_round_event {
 	u64				time;
 };
 
-struct time_conv_event {
-	struct perf_event_header header;
-	u64 time_shift;
-	u64 time_mult;
-	u64 time_zero;
-};
-
 union perf_event {
 	struct perf_event_header	header;
 	struct mmap_event		mmap;
@@ -505,7 +496,6 @@ union perf_event {
 	struct stat_config_event	stat_config;
 	struct stat_event		stat;
 	struct stat_round_event		stat_round;
-	struct time_conv_event		time_conv;
 };
 
 void perf_event__print_totals(void);
@@ -607,8 +597,10 @@ int perf_event__process(struct perf_tool *tool,
 
 struct addr_location;
 
-int machine__resolve(struct machine *machine, struct addr_location *al,
-		     struct perf_sample *sample);
+int perf_event__preprocess_sample(const union perf_event *event,
+				  struct machine *machine,
+				  struct addr_location *al,
+				  struct perf_sample *sample);
 
 void addr_location__put(struct addr_location *al);
 
@@ -616,8 +608,10 @@ struct thread;
 
 bool is_bts_event(struct perf_event_attr *attr);
 bool sample_addr_correlates_sym(struct perf_event_attr *attr);
-void thread__resolve(struct thread *thread, struct addr_location *al,
-		     struct perf_sample *sample);
+void perf_event__preprocess_sample_addr(union perf_event *event,
+					struct perf_sample *sample,
+					struct thread *thread,
+					struct addr_location *al);
 
 const char *perf_event__name(unsigned int id);
 

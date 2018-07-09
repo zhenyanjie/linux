@@ -238,7 +238,15 @@ static int syscon_gpio_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, priv);
 
-	return devm_gpiochip_add_data(&pdev->dev, &priv->chip, priv);
+	return gpiochip_add_data(&priv->chip, priv);
+}
+
+static int syscon_gpio_remove(struct platform_device *pdev)
+{
+	struct syscon_gpio_priv *priv = platform_get_drvdata(pdev);
+
+	gpiochip_remove(&priv->chip);
+	return 0;
 }
 
 static struct platform_driver syscon_gpio_driver = {
@@ -247,6 +255,7 @@ static struct platform_driver syscon_gpio_driver = {
 		.of_match_table	= syscon_gpio_ids,
 	},
 	.probe	= syscon_gpio_probe,
+	.remove	= syscon_gpio_remove,
 };
 module_platform_driver(syscon_gpio_driver);
 

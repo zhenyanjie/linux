@@ -311,7 +311,7 @@ struct pid *alloc_pid(struct pid_namespace *ns)
 	pid->level = ns->level;
 	for (i = ns->level; i >= 0; i--) {
 		nr = alloc_pidmap(tmp);
-		if (nr < 0) {
+		if (IS_ERR_VALUE(nr)) {
 			retval = nr;
 			goto out_free;
 		}

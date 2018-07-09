@@ -915,7 +915,8 @@ int die_get_typename(Dwarf_Die *vr_die, struct strbuf *buf)
 		tmp = "*";
 	else if (tag == DW_TAG_subroutine_type) {
 		/* Function pointer */
-		return strbuf_add(buf, "(function_type)", 15);
+		strbuf_addf(buf, "(function_type)");
+		return 0;
 	} else {
 		if (!dwarf_diename(&type))
 			return -ENOENT;
@@ -926,10 +927,14 @@ int die_get_typename(Dwarf_Die *vr_die, struct strbuf *buf)
 		else if (tag == DW_TAG_enumeration_type)
 			tmp = "enum ";
 		/* Write a base name */
-		return strbuf_addf(buf, "%s%s", tmp, dwarf_diename(&type));
+		strbuf_addf(buf, "%s%s", tmp, dwarf_diename(&type));
+		return 0;
 	}
 	ret = die_get_typename(&type, buf);
-	return ret ? ret : strbuf_addstr(buf, tmp);
+	if (ret == 0)
+		strbuf_addf(buf, "%s", tmp);
+
+	return ret;
 }
 
 /**
@@ -946,13 +951,14 @@ int die_get_varname(Dwarf_Die *vr_die, struct strbuf *buf)
 	ret = die_get_typename(vr_die, buf);
 	if (ret < 0) {
 		pr_debug("Failed to get type, make it unknown.\n");
-		ret = strbuf_add(buf, " (unknown_type)", 14);
+		strbuf_addf(buf, "(unknown_type)");
 	}
 
-	return ret < 0 ? ret : strbuf_addf(buf, "\t%s", dwarf_diename(vr_die));
+	strbuf_addf(buf, "\t%s", dwarf_diename(vr_die));
+
+	return 0;
 }
 
-#ifdef HAVE_DWARF_GETLOCATIONS
 /**
  * die_get_var_innermost_scope - Get innermost scope range of given variable DIE
  * @sp_die: a subprogram DIE
@@ -992,24 +998,22 @@ static int die_get_var_innermost_scope(Dwarf_Die *sp_die, Dwarf_Die *vr_die,
 	}
 
 	while ((offset = dwarf_ranges(&scopes[1], offset, &base,
-					&start, &end)) > 0) {
+				&start, &end)) > 0) {
 		start -= entry;
 		end -= entry;
 
 		if (first) {
-			ret = strbuf_addf(buf, "@<%s+[%" PRIu64 "-%" PRIu64,
-					  name, start, end);
+			strbuf_addf(buf, "@<%s+[%" PRIu64 "-%" PRIu64,
+				name, start, end);
 			first = false;
 		} else {
-			ret = strbuf_addf(buf, ",%" PRIu64 "-%" PRIu64,
-					  start, end);
+			strbuf_addf(buf, ",%" PRIu64 "-%" PRIu64,
+				start, end);
 		}
-		if (ret < 0)
-			goto out;
 	}
 
 	if (!first)
-		ret = strbuf_add(buf, "]>", 2);
+		strbuf_addf(buf, "]>");
 
 out:
 	free(scopes);
@@ -1049,39 +1053,30 @@ int die_get_var_range(Dwarf_Die *sp_die, Dwarf_Die *vr_die, struct strbuf *buf)
 	if (dwarf_attr(vr_die, DW_AT_location, &attr) == NULL)
 		return -EINVAL;
 
-	while ((offset = dwarf_getlocations(&attr, offset, &base,
-					&start, &end, &op, &nops)) > 0) {
+	while ((offset = dwarf_getlocations(
+				&attr, offset, &base,
+				&start, &end, &op, &nops)) > 0) {
 		if (start == 0) {
 			/* Single Location Descriptions */
 			ret = die_get_var_innermost_scope(sp_die, vr_die, buf);
-			goto out;
+			return ret;
 		}
 
 		/* Location Lists */
 		start -= entry;
 		end -= entry;
 		if (first) {
-			ret = strbuf_addf(buf, "@<%s+[%" PRIu64 "-%" PRIu64,
-					  name, start, end);
+			strbuf_addf(buf, "@<%s+[%" PRIu64 "-%" PRIu64,
+				name, start, end);
 			first = false;
 		} else {
-			ret = strbuf_addf(buf, ",%" PRIu64 "-%" PRIu64,
-					  start, end);
+			strbuf_addf(buf, ",%" PRIu64 "-%" PRIu64,
+				start, end);
 		}
-		if (ret < 0)
-			goto out;
 	}
 
 	if (!first)
-		ret = strbuf_add(buf, "]>", 2);
-out:
+		strbuf_addf(buf, "]>");
+
 	return ret;
 }
-#else
-int die_get_var_range(Dwarf_Die *sp_die __maybe_unused,
-		      Dwarf_Die *vr_die __maybe_unused,
-		      struct strbuf *buf __maybe_unused)
-{
-	return -ENOTSUP;
-}
-#endif

@@ -107,9 +107,9 @@ static int kfd_open(struct inode *inode, struct file *filep)
 	if (iminor(inode) != 0)
 		return -ENODEV;
 
-	is_32bit_user_mode = in_compat_syscall();
+	is_32bit_user_mode = is_compat_task();
 
-	if (is_32bit_user_mode) {
+	if (is_32bit_user_mode == true) {
 		dev_warn(kfd_device,
 			"Process %d (32-bit) failed to open /dev/kfd\n"
 			"32-bit processes are not supported by amdkfd\n",
@@ -131,11 +131,12 @@ static int kfd_ioctl_get_version(struct file *filep, struct kfd_process *p,
 					void *data)
 {
 	struct kfd_ioctl_get_version_args *args = data;
+	int err = 0;
 
 	args->major_version = KFD_IOCTL_MAJOR_VERSION;
 	args->minor_version = KFD_IOCTL_MINOR_VERSION;
 
-	return 0;
+	return err;
 }
 
 static int set_queue_properties_from_user(struct queue_properties *q_properties,

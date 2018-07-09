@@ -429,7 +429,7 @@ static netdev_tx_t irda_usb_hard_xmit(struct sk_buff *skb,
 			 * do an extra memcpy and increment packet counters...
 			 * Jean II */
 			irda_usb_change_speed_xbofs(self);
-			netif_trans_update(netdev);
+			netdev->trans_start = jiffies;
 			/* Will netif_wake_queue() in callback */
 			goto drop;
 		}
@@ -526,7 +526,7 @@ static netdev_tx_t irda_usb_hard_xmit(struct sk_buff *skb,
 		netdev->stats.tx_packets++;
                 netdev->stats.tx_bytes += skb->len;
 		
-		netif_trans_update(netdev);
+		netdev->trans_start = jiffies;
 	}
 	spin_unlock_irqrestore(&self->lock, flags);
 	

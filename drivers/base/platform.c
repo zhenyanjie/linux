@@ -322,16 +322,16 @@ EXPORT_SYMBOL_GPL(platform_device_add_data);
 /**
  * platform_device_add_properties - add built-in properties to a platform device
  * @pdev: platform device to add properties to
- * @properties: null terminated array of properties to add
+ * @pset: properties to add
  *
- * The function will take deep copy of @properties and attach the copy to the
- * platform device. The memory associated with properties will be freed when the
- * platform device is released.
+ * The function will take deep copy of the properties in @pset and attach
+ * the copy to the platform device. The memory associated with properties
+ * will be freed when the platform device is released.
  */
 int platform_device_add_properties(struct platform_device *pdev,
-				   struct property_entry *properties)
+				   const struct property_set *pset)
 {
-	return device_add_properties(&pdev->dev, properties);
+	return device_add_property_set(&pdev->dev, pset);
 }
 EXPORT_SYMBOL_GPL(platform_device_add_properties);
 
@@ -447,7 +447,7 @@ void platform_device_del(struct platform_device *pdev)
 				release_resource(r);
 		}
 
-		device_remove_properties(&pdev->dev);
+		device_remove_property_set(&pdev->dev);
 	}
 }
 EXPORT_SYMBOL_GPL(platform_device_del);
@@ -526,9 +526,8 @@ struct platform_device *platform_device_register_full(
 	if (ret)
 		goto err;
 
-	if (pdevinfo->properties) {
-		ret = platform_device_add_properties(pdev,
-						     pdevinfo->properties);
+	if (pdevinfo->pset) {
+		ret = platform_device_add_properties(pdev, pdevinfo->pset);
 		if (ret)
 			goto err;
 	}

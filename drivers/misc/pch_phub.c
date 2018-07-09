@@ -503,7 +503,8 @@ static ssize_t pch_phub_bin_read(struct file *filp, struct kobject *kobj,
 	int err;
 	ssize_t rom_size;
 
-	struct pch_phub_reg *chip = dev_get_drvdata(kobj_to_dev(kobj));
+	struct pch_phub_reg *chip =
+		dev_get_drvdata(container_of(kobj, struct device, kobj));
 
 	ret = mutex_lock_interruptible(&pch_phub_mutex);
 	if (ret) {
@@ -513,10 +514,8 @@ static ssize_t pch_phub_bin_read(struct file *filp, struct kobject *kobj,
 
 	/* Get Rom signature */
 	chip->pch_phub_extrom_base_address = pci_map_rom(chip->pdev, &rom_size);
-	if (!chip->pch_phub_extrom_base_address) {
-		err = -ENODATA;
+	if (!chip->pch_phub_extrom_base_address)
 		goto exrom_map_err;
-	}
 
 	pch_phub_read_serial_rom(chip, chip->pch_opt_rom_start_address,
 				(unsigned char *)&rom_signature);
@@ -568,7 +567,8 @@ static ssize_t pch_phub_bin_write(struct file *filp, struct kobject *kobj,
 	unsigned int addr_offset;
 	int ret;
 	ssize_t rom_size;
-	struct pch_phub_reg *chip = dev_get_drvdata(kobj_to_dev(kobj));
+	struct pch_phub_reg *chip =
+		dev_get_drvdata(container_of(kobj, struct device, kobj));
 
 	ret = mutex_lock_interruptible(&pch_phub_mutex);
 	if (ret)

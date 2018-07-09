@@ -30,7 +30,7 @@ static int regcache_hw_init(struct regmap *map)
 	int i, j;
 	int ret;
 	int count;
-	unsigned int reg, val;
+	unsigned int val;
 	void *tmp_buf;
 
 	if (!map->num_reg_defaults_raw)
@@ -57,7 +57,7 @@ static int regcache_hw_init(struct regmap *map)
 		bool cache_bypass = map->cache_bypass;
 		dev_warn(map->dev, "No cache defaults, reading back from HW\n");
 
-		/* Bypass the cache access till data read from HW */
+		/* Bypass the cache access till data read from HW*/
 		map->cache_bypass = true;
 		tmp_buf = kmalloc(map->cache_size_raw, GFP_KERNEL);
 		if (!tmp_buf) {
@@ -65,48 +65,29 @@ static int regcache_hw_init(struct regmap *map)
 			goto err_free;
 		}
 		ret = regmap_raw_read(map, 0, tmp_buf,
-				      map->cache_size_raw);
+				      map->num_reg_defaults_raw);
 		map->cache_bypass = cache_bypass;
-		if (ret == 0) {
-			map->reg_defaults_raw = tmp_buf;
-			map->cache_free = 1;
-		} else {
-			kfree(tmp_buf);
-		}
+		if (ret < 0)
+			goto err_cache_free;
+
+		map->reg_defaults_raw = tmp_buf;
+		map->cache_free = 1;
 	}
 
 	/* fill the reg_defaults */
 	for (i = 0, j = 0; i < map->num_reg_defaults_raw; i++) {
-		reg = i * map->reg_stride;
-
-		if (!regmap_readable(map, reg))
+		if (regmap_volatile(map, i * map->reg_stride))
 			continue;
-
-		if (regmap_volatile(map, reg))
-			continue;
-
-		if (map->reg_defaults_raw) {
-			val = regcache_get_val(map, map->reg_defaults_raw, i);
-		} else {
-			bool cache_bypass = map->cache_bypass;
-
-			map->cache_bypass = true;
-			ret = regmap_read(map, reg, &val);
-			map->cache_bypass = cache_bypass;
-			if (ret != 0) {
-				dev_err(map->dev, "Failed to read %d: %d\n",
-					reg, ret);
-				goto err_free;
-			}
-		}
-
-		map->reg_defaults[j].reg = reg;
+		val = regcache_get_val(map, map->reg_defaults_raw, i);
+		map->reg_defaults[j].reg = i * map->reg_stride;
 		map->reg_defaults[j].def = val;
 		j++;
 	}
 
 	return 0;
 
+err_cache_free:
+	kfree(tmp_buf);
 err_free:
 	kfree(map->reg_defaults);
 
@@ -529,7 +510,7 @@ EXPORT_SYMBOL_GPL(regcache_mark_dirty);
  * regcache_cache_bypass: Put a register map into cache bypass mode
  *
  * @map: map to configure
- * @cache_bypass: flag if changes should not be written to the cache
+ * @cache_bypass: flag if changes should not be written to the hardware
  *
  * When a register map is marked with the cache bypass option, writes
  * to the register map API will only update the hardware and not the

@@ -616,7 +616,7 @@ static int breakpoint_handler(unsigned long unused, unsigned int esr,
 		perf_bp_event(bp, regs);
 
 		/* Do we need to handle the stepping? */
-		if (is_default_overflow_handler(bp))
+		if (!bp->overflow_handler)
 			step = 1;
 unlock:
 		rcu_read_unlock();
@@ -712,7 +712,7 @@ static int watchpoint_handler(unsigned long addr, unsigned int esr,
 		perf_bp_event(wp, regs);
 
 		/* Do we need to handle the stepping? */
-		if (is_default_overflow_handler(wp))
+		if (!wp->overflow_handler)
 			step = 1;
 
 unlock:
@@ -886,11 +886,9 @@ static int hw_breakpoint_reset_notify(struct notifier_block *self,
 						unsigned long action,
 						void *hcpu)
 {
-	if ((action & ~CPU_TASKS_FROZEN) == CPU_ONLINE) {
-		local_irq_disable();
-		hw_breakpoint_reset(NULL);
-		local_irq_enable();
-	}
+	int cpu = (long)hcpu;
+	if ((action & ~CPU_TASKS_FROZEN) == CPU_ONLINE)
+		smp_call_function_single(cpu, hw_breakpoint_reset, NULL, 1);
 	return NOTIFY_OK;
 }
 

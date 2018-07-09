@@ -49,9 +49,9 @@ static ssize_t max_rpcs_in_flight_show(struct kobject *kobj,
 					      obd_kobj);
 	struct client_obd *cli = &dev->u.cli;
 
-	spin_lock(&cli->cl_loi_list_lock);
+	client_obd_list_lock(&cli->cl_loi_list_lock);
 	len = sprintf(buf, "%u\n", cli->cl_max_rpcs_in_flight);
-	spin_unlock(&cli->cl_loi_list_lock);
+	client_obd_list_unlock(&cli->cl_loi_list_lock);
 
 	return len;
 }
@@ -74,9 +74,9 @@ static ssize_t max_rpcs_in_flight_store(struct kobject *kobj,
 	if (val < 1 || val > MDC_MAX_RIF_MAX)
 		return -ERANGE;
 
-	spin_lock(&cli->cl_loi_list_lock);
+	client_obd_list_lock(&cli->cl_loi_list_lock);
 	cli->cl_max_rpcs_in_flight = val;
-	spin_unlock(&cli->cl_loi_list_lock);
+	client_obd_list_unlock(&cli->cl_loi_list_lock);
 
 	return count;
 }

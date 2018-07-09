@@ -119,22 +119,16 @@ struct sdhci_host *sdhci_pltfm_init(struct platform_device *pdev,
 {
 	struct sdhci_host *host;
 	struct resource *iomem;
-	void __iomem *ioaddr;
-	int irq, ret;
+	int ret;
 
 	iomem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	ioaddr = devm_ioremap_resource(&pdev->dev, iomem);
-	if (IS_ERR(ioaddr)) {
-		ret = PTR_ERR(ioaddr);
+	if (!iomem) {
+		ret = -ENOMEM;
 		goto err;
 	}
 
-	irq = platform_get_irq(pdev, 0);
-	if (irq < 0) {
-		dev_err(&pdev->dev, "failed to get IRQ number\n");
-		ret = irq;
-		goto err;
-	}
+	if (resource_size(iomem) < 0x100)
+		dev_err(&pdev->dev, "Invalid iomem size!\n");
 
 	host = sdhci_alloc_host(&pdev->dev,
 		sizeof(struct sdhci_pltfm_host) + priv_size);
@@ -144,8 +138,6 @@ struct sdhci_host *sdhci_pltfm_init(struct platform_device *pdev,
 		goto err;
 	}
 
-	host->ioaddr = ioaddr;
-	host->irq = irq;
 	host->hw_name = dev_name(&pdev->dev);
 	if (pdata && pdata->ops)
 		host->ops = pdata->ops;
@@ -154,6 +146,22 @@ struct sdhci_host *sdhci_pltfm_init(struct platform_device *pdev,
 	if (pdata) {
 		host->quirks = pdata->quirks;
 		host->quirks2 = pdata->quirks2;
+	}
+
+	host->irq = platform_get_irq(pdev, 0);
+
+	if (!request_mem_region(iomem->start, resource_size(iomem),
+		mmc_hostname(host->mmc))) {
+		dev_err(&pdev->dev, "cannot request region\n");
+		ret = -EBUSY;
+		goto err_request;
+	}
+
+	host->ioaddr = ioremap(iomem->start, resource_size(iomem));
+	if (!host->ioaddr) {
+		dev_err(&pdev->dev, "failed to remap registers\n");
+		ret = -ENOMEM;
+		goto err_remap;
 	}
 
 	/*
@@ -166,6 +174,11 @@ struct sdhci_host *sdhci_pltfm_init(struct platform_device *pdev,
 	platform_set_drvdata(pdev, host);
 
 	return host;
+
+err_remap:
+	release_mem_region(iomem->start, resource_size(iomem));
+err_request:
+	sdhci_free_host(host);
 err:
 	dev_err(&pdev->dev, "%s failed %d\n", __func__, ret);
 	return ERR_PTR(ret);
@@ -175,7 +188,10 @@ EXPORT_SYMBOL_GPL(sdhci_pltfm_init);
 void sdhci_pltfm_free(struct platform_device *pdev)
 {
 	struct sdhci_host *host = platform_get_drvdata(pdev);
+	struct resource *iomem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
+	iounmap(host->ioaddr);
+	release_mem_region(iomem->start, resource_size(iomem));
 	sdhci_free_host(host);
 }
 EXPORT_SYMBOL_GPL(sdhci_pltfm_free);

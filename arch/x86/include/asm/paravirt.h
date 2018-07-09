@@ -13,7 +13,17 @@
 #include <linux/bug.h>
 #include <linux/types.h>
 #include <linux/cpumask.h>
-#include <asm/frame.h>
+
+static inline int paravirt_enabled(void)
+{
+	return pv_info.paravirt_enabled;
+}
+
+static inline int paravirt_has_feature(unsigned int feature)
+{
+	WARN_ON_ONCE(!pv_info.paravirt_enabled);
+	return (pv_info.features & feature);
+}
 
 static inline void load_sp0(struct tss_struct *tss,
 			     struct thread_struct *thread)
@@ -119,31 +129,21 @@ static inline void wbinvd(void)
 
 #define get_kernel_rpl()  (pv_info.kernel_rpl)
 
-static inline u64 paravirt_read_msr(unsigned msr)
+static inline u64 paravirt_read_msr(unsigned msr, int *err)
 {
-	return PVOP_CALL1(u64, pv_cpu_ops.read_msr, msr);
+	return PVOP_CALL2(u64, pv_cpu_ops.read_msr, msr, err);
 }
 
-static inline void paravirt_write_msr(unsigned msr,
-				      unsigned low, unsigned high)
+static inline int paravirt_write_msr(unsigned msr, unsigned low, unsigned high)
 {
-	return PVOP_VCALL3(pv_cpu_ops.write_msr, msr, low, high);
+	return PVOP_CALL3(int, pv_cpu_ops.write_msr, msr, low, high);
 }
 
-static inline u64 paravirt_read_msr_safe(unsigned msr, int *err)
-{
-	return PVOP_CALL2(u64, pv_cpu_ops.read_msr_safe, msr, err);
-}
-
-static inline int paravirt_write_msr_safe(unsigned msr,
-					  unsigned low, unsigned high)
-{
-	return PVOP_CALL3(int, pv_cpu_ops.write_msr_safe, msr, low, high);
-}
-
+/* These should all do BUG_ON(_err), but our headers are too tangled. */
 #define rdmsr(msr, val1, val2)			\
 do {						\
-	u64 _l = paravirt_read_msr(msr);	\
+	int _err;				\
+	u64 _l = paravirt_read_msr(msr, &_err);	\
 	val1 = (u32)_l;				\
 	val2 = _l >> 32;			\
 } while (0)
@@ -155,7 +155,8 @@ do {						\
 
 #define rdmsrl(msr, val)			\
 do {						\
-	val = paravirt_read_msr(msr);		\
+	int _err;				\
+	val = paravirt_read_msr(msr, &_err);	\
 } while (0)
 
 static inline void wrmsrl(unsigned msr, u64 val)
@@ -163,23 +164,23 @@ static inline void wrmsrl(unsigned msr, u64 val)
 	wrmsr(msr, (u32)val, (u32)(val>>32));
 }
 
-#define wrmsr_safe(msr, a, b)	paravirt_write_msr_safe(msr, a, b)
+#define wrmsr_safe(msr, a, b)	paravirt_write_msr(msr, a, b)
 
 /* rdmsr with exception handling */
-#define rdmsr_safe(msr, a, b)				\
-({							\
-	int _err;					\
-	u64 _l = paravirt_read_msr_safe(msr, &_err);	\
-	(*a) = (u32)_l;					\
-	(*b) = _l >> 32;				\
-	_err;						\
+#define rdmsr_safe(msr, a, b)			\
+({						\
+	int _err;				\
+	u64 _l = paravirt_read_msr(msr, &_err);	\
+	(*a) = (u32)_l;				\
+	(*b) = _l >> 32;			\
+	_err;					\
 })
 
 static inline int rdmsrl_safe(unsigned msr, unsigned long long *p)
 {
 	int err;
 
-	*p = paravirt_read_msr_safe(msr, &err);
+	*p = paravirt_read_msr(msr, &err);
 	return err;
 }
 
@@ -755,19 +756,15 @@ static __always_inline void __ticket_unlock_kick(struct arch_spinlock *lock,
  * call. The return value in rax/eax will not be saved, even for void
  * functions.
  */
-#define PV_THUNK_NAME(func) "__raw_callee_save_" #func
 #define PV_CALLEE_SAVE_REGS_THUNK(func)					\
 	extern typeof(func) __raw_callee_save_##func;			\
 									\
 	asm(".pushsection .text;"					\
-	    ".globl " PV_THUNK_NAME(func) ";"				\
-	    ".type " PV_THUNK_NAME(func) ", @function;"			\
-	    PV_THUNK_NAME(func) ":"					\
-	    FRAME_BEGIN							\
+	    ".globl __raw_callee_save_" #func " ; "			\
+	    "__raw_callee_save_" #func ": "				\
 	    PV_SAVE_ALL_CALLER_REGS					\
 	    "call " #func ";"						\
 	    PV_RESTORE_ALL_CALLER_REGS					\
-	    FRAME_END							\
 	    "ret;"							\
 	    ".popsection")
 

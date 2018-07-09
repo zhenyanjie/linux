@@ -22,6 +22,11 @@ struct dsa_device_ops {
 };
 
 struct dsa_slave_priv {
+	/*
+	 * The linux network interface corresponding to this
+	 * switch port.
+	 */
+	struct net_device	*dev;
 	struct sk_buff *	(*xmit)(struct sk_buff *skb,
 					struct net_device *dev);
 

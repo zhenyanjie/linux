@@ -217,8 +217,7 @@ static u32 initiate_file_draining(struct nfs_client *clp,
 	}
 
 	if (pnfs_mark_matching_lsegs_return(lo, &free_me_list,
-				&args->cbl_range,
-				be32_to_cpu(args->cbl_stateid.seqid))) {
+					&args->cbl_range)) {
 		rv = NFS4_OK;
 		goto unlock;
 	}
@@ -355,38 +354,47 @@ out:
  * a single outstanding callback request at a time.
  */
 static __be32
-validate_seqid(const struct nfs4_slot_table *tbl, const struct nfs4_slot *slot,
-		const struct cb_sequenceargs * args)
+validate_seqid(struct nfs4_slot_table *tbl, struct cb_sequenceargs * args)
 {
-	dprintk("%s enter. slotid %u seqid %u, slot table seqid: %u\n",
-		__func__, args->csa_slotid, args->csa_sequenceid, slot->seq_nr);
+	struct nfs4_slot *slot;
 
-	if (args->csa_slotid > tbl->server_highest_slotid)
+	dprintk("%s enter. slotid %u seqid %u\n",
+		__func__, args->csa_slotid, args->csa_sequenceid);
+
+	if (args->csa_slotid >= NFS41_BC_MAX_CALLBACKS)
 		return htonl(NFS4ERR_BADSLOT);
+
+	slot = tbl->slots + args->csa_slotid;
+	dprintk("%s slot table seqid: %u\n", __func__, slot->seq_nr);
+
+	/* Normal */
+	if (likely(args->csa_sequenceid == slot->seq_nr + 1))
+		goto out_ok;
 
 	/* Replay */
 	if (args->csa_sequenceid == slot->seq_nr) {
 		dprintk("%s seqid %u is a replay\n",
 			__func__, args->csa_sequenceid);
-		if (nfs4_test_locked_slot(tbl, slot->slot_nr))
-			return htonl(NFS4ERR_DELAY);
 		/* Signal process_op to set this error on next op */
 		if (args->csa_cachethis == 0)
 			return htonl(NFS4ERR_RETRY_UNCACHED_REP);
 
-		/* Liar! We never allowed you to set csa_cachethis != 0 */
-		return htonl(NFS4ERR_SEQ_FALSE_RETRY);
+		/* The ca_maxresponsesize_cached is 0 with no DRC */
+		else if (args->csa_cachethis == 1)
+			return htonl(NFS4ERR_REP_TOO_BIG_TO_CACHE);
 	}
 
 	/* Wraparound */
-	if (unlikely(slot->seq_nr == 0xFFFFFFFFU)) {
-		if (args->csa_sequenceid == 1)
-			return htonl(NFS4_OK);
-	} else if (likely(args->csa_sequenceid == slot->seq_nr + 1))
-		return htonl(NFS4_OK);
+	if (args->csa_sequenceid == 1 && (slot->seq_nr + 1) == 0) {
+		slot->seq_nr = 1;
+		goto out_ok;
+	}
 
 	/* Misordered request */
 	return htonl(NFS4ERR_SEQ_MISORDERED);
+out_ok:
+	tbl->highest_used_slotid = args->csa_slotid;
+	return htonl(NFS4_OK);
 }
 
 /*
@@ -430,8 +438,11 @@ static bool referring_call_exists(struct nfs_client *clp,
 				((u32 *)&rclist->rcl_sessionid.data)[3],
 				ref->rc_sequenceid, ref->rc_slotid);
 
-			status = nfs4_slot_seqid_in_use(tbl, ref->rc_slotid,
+			spin_lock(&tbl->slot_tbl_lock);
+			status = (test_bit(ref->rc_slotid, tbl->used_slots) &&
+				  tbl->slots[ref->rc_slotid].seq_nr ==
 					ref->rc_sequenceid);
+			spin_unlock(&tbl->slot_tbl_lock);
 			if (status)
 				goto out;
 		}
@@ -462,12 +473,6 @@ __be32 nfs4_callback_sequence(struct cb_sequenceargs *args,
 	tbl = &clp->cl_session->bc_slot_table;
 	slot = tbl->slots + args->csa_slotid;
 
-	/* Set up res before grabbing the spinlock */
-	memcpy(&res->csr_sessionid, &args->csa_sessionid,
-	       sizeof(res->csr_sessionid));
-	res->csr_sequenceid = args->csa_sequenceid;
-	res->csr_slotid = args->csa_slotid;
-
 	spin_lock(&tbl->slot_tbl_lock);
 	/* state manager is resetting the session */
 	if (test_bit(NFS4_SLOT_TBL_DRAINING, &tbl->slot_tbl_state)) {
@@ -480,28 +485,18 @@ __be32 nfs4_callback_sequence(struct cb_sequenceargs *args,
 		goto out_unlock;
 	}
 
-	status = htonl(NFS4ERR_BADSLOT);
-	slot = nfs4_lookup_slot(tbl, args->csa_slotid);
-	if (IS_ERR(slot))
-		goto out_unlock;
+	memcpy(&res->csr_sessionid, &args->csa_sessionid,
+	       sizeof(res->csr_sessionid));
+	res->csr_sequenceid = args->csa_sequenceid;
+	res->csr_slotid = args->csa_slotid;
+	res->csr_highestslotid = NFS41_BC_MAX_CALLBACKS - 1;
+	res->csr_target_highestslotid = NFS41_BC_MAX_CALLBACKS - 1;
 
-	res->csr_highestslotid = tbl->server_highest_slotid;
-	res->csr_target_highestslotid = tbl->target_highest_slotid;
-
-	status = validate_seqid(tbl, slot, args);
+	status = validate_seqid(tbl, args);
 	if (status)
 		goto out_unlock;
-	if (!nfs4_try_to_lock_slot(tbl, slot)) {
-		status = htonl(NFS4ERR_DELAY);
-		goto out_unlock;
-	}
-	cps->slot = slot;
 
-	/* The ca_maxresponsesize_cached is 0 with no DRC */
-	if (args->csa_cachethis != 0) {
-		status = htonl(NFS4ERR_REP_TOO_BIG_TO_CACHE);
-		goto out_unlock;
-	}
+	cps->slotid = args->csa_slotid;
 
 	/*
 	 * Check for pending referring calls.  If a match is found, a
@@ -518,7 +513,7 @@ __be32 nfs4_callback_sequence(struct cb_sequenceargs *args,
 	 * If CB_SEQUENCE returns an error, then the state of the slot
 	 * (sequence ID, cached reply) MUST NOT change.
 	 */
-	slot->seq_nr = args->csa_sequenceid;
+	slot->seq_nr++;
 out_unlock:
 	spin_unlock(&tbl->slot_tbl_lock);
 

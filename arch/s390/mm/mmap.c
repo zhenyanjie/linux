@@ -22,7 +22,6 @@
  * Started by Ingo Molnar <mingo@elte.hu>
  */
 
-#include <linux/elf-randomize.h>
 #include <linux/personality.h>
 #include <linux/mm.h>
 #include <linux/mman.h>
@@ -175,7 +174,7 @@ int s390_mmap_check(unsigned long addr, unsigned long len, unsigned long flags)
 	if (!(flags & MAP_FIXED))
 		addr = 0;
 	if ((addr + len) >= TASK_SIZE)
-		return crst_table_upgrade(current->mm);
+		return crst_table_upgrade(current->mm, TASK_MAX_SIZE);
 	return 0;
 }
 
@@ -192,7 +191,7 @@ s390_get_unmapped_area(struct file *filp, unsigned long addr,
 		return area;
 	if (area == -ENOMEM && !is_compat_task() && TASK_SIZE < TASK_MAX_SIZE) {
 		/* Upgrade the page table to 4 levels and retry. */
-		rc = crst_table_upgrade(mm);
+		rc = crst_table_upgrade(mm, TASK_MAX_SIZE);
 		if (rc)
 			return (unsigned long) rc;
 		area = arch_get_unmapped_area(filp, addr, len, pgoff, flags);
@@ -214,7 +213,7 @@ s390_get_unmapped_area_topdown(struct file *filp, const unsigned long addr,
 		return area;
 	if (area == -ENOMEM && !is_compat_task() && TASK_SIZE < TASK_MAX_SIZE) {
 		/* Upgrade the page table to 4 levels and retry. */
-		rc = crst_table_upgrade(mm);
+		rc = crst_table_upgrade(mm, TASK_MAX_SIZE);
 		if (rc)
 			return (unsigned long) rc;
 		area = arch_get_unmapped_area_topdown(filp, addr, len,

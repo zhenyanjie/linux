@@ -650,7 +650,7 @@ xfs_buf_read_map(
 	if (bp) {
 		trace_xfs_buf_read(bp, flags, _RET_IP_);
 
-		if (!(bp->b_flags & XBF_DONE)) {
+		if (!XFS_BUF_ISDONE(bp)) {
 			XFS_STATS_INC(target->bt_mount, xb_get_read);
 			bp->b_ops = ops;
 			_xfs_buf_read(bp, flags);
@@ -1100,18 +1100,22 @@ xfs_bwrite(
 	return error;
 }
 
-static void
+STATIC void
 xfs_buf_bio_end_io(
 	struct bio		*bio)
 {
-	struct xfs_buf		*bp = (struct xfs_buf *)bio->bi_private;
+	xfs_buf_t		*bp = (xfs_buf_t *)bio->bi_private;
 
 	/*
 	 * don't overwrite existing errors - otherwise we can lose errors on
 	 * buffers that require multiple bios to complete.
 	 */
-	if (bio->bi_error)
-		cmpxchg(&bp->b_io_error, 0, bio->bi_error);
+	if (bio->bi_error) {
+		spin_lock(&bp->b_lock);
+		if (!bp->b_io_error)
+			bp->b_io_error = bio->bi_error;
+		spin_unlock(&bp->b_lock);
+	}
 
 	if (!bp->b_error && xfs_buf_is_vmapped(bp) && (bp->b_flags & XBF_READ))
 		invalidate_kernel_vmap_range(bp->b_addr, xfs_buf_vmap_len(bp));
@@ -1531,7 +1535,7 @@ xfs_wait_buftarg(
 	 * ensure here that all reference counts have been dropped before we
 	 * start walking the LRU list.
 	 */
-	flush_workqueue(btp->bt_mount->m_buf_workqueue);
+	drain_workqueue(btp->bt_mount->m_buf_workqueue);
 
 	/* loop until there is nothing left on the lru list. */
 	while (list_lru_count(&btp->bt_lru)) {

@@ -27,7 +27,6 @@
 #include <linux/platform_device.h>
 #include <linux/interrupt.h>
 #include <linux/mod_devicetable.h>
-#include <linux/syscore_ops.h>
 #include <asm/prom.h>
 #include <asm/fsl_lbc.h>
 
@@ -353,42 +352,24 @@ err:
 #ifdef CONFIG_SUSPEND
 
 /* save lbc registers */
-static int fsl_lbc_syscore_suspend(void)
+static int fsl_lbc_suspend(struct platform_device *pdev, pm_message_t state)
 {
-	struct fsl_lbc_ctrl *ctrl;
-	struct fsl_lbc_regs __iomem *lbc;
-
-	ctrl = fsl_lbc_ctrl_dev;
-	if (!ctrl)
-		goto out;
-
-	lbc = ctrl->regs;
-	if (!lbc)
-		goto out;
+	struct fsl_lbc_ctrl *ctrl = dev_get_drvdata(&pdev->dev);
+	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
 
 	ctrl->saved_regs = kmalloc(sizeof(struct fsl_lbc_regs), GFP_KERNEL);
 	if (!ctrl->saved_regs)
 		return -ENOMEM;
 
 	_memcpy_fromio(ctrl->saved_regs, lbc, sizeof(struct fsl_lbc_regs));
-
-out:
 	return 0;
 }
 
 /* restore lbc registers */
-static void fsl_lbc_syscore_resume(void)
+static int fsl_lbc_resume(struct platform_device *pdev)
 {
-	struct fsl_lbc_ctrl *ctrl;
-	struct fsl_lbc_regs __iomem *lbc;
-
-	ctrl = fsl_lbc_ctrl_dev;
-	if (!ctrl)
-		goto out;
-
-	lbc = ctrl->regs;
-	if (!lbc)
-		goto out;
+	struct fsl_lbc_ctrl *ctrl = dev_get_drvdata(&pdev->dev);
+	struct fsl_lbc_regs __iomem *lbc = ctrl->regs;
 
 	if (ctrl->saved_regs) {
 		_memcpy_toio(lbc, ctrl->saved_regs,
@@ -396,9 +377,7 @@ static void fsl_lbc_syscore_resume(void)
 		kfree(ctrl->saved_regs);
 		ctrl->saved_regs = NULL;
 	}
-
-out:
-	return;
+	return 0;
 }
 #endif /* CONFIG_SUSPEND */
 
@@ -410,26 +389,20 @@ static const struct of_device_id fsl_lbc_match[] = {
 	{},
 };
 
-#ifdef CONFIG_SUSPEND
-static struct syscore_ops lbc_syscore_pm_ops = {
-	.suspend = fsl_lbc_syscore_suspend,
-	.resume = fsl_lbc_syscore_resume,
-};
-#endif
-
 static struct platform_driver fsl_lbc_ctrl_driver = {
 	.driver = {
 		.name = "fsl-lbc",
 		.of_match_table = fsl_lbc_match,
 	},
 	.probe = fsl_lbc_ctrl_probe,
+#ifdef CONFIG_SUSPEND
+	.suspend     = fsl_lbc_suspend,
+	.resume      = fsl_lbc_resume,
+#endif
 };
 
 static int __init fsl_lbc_init(void)
 {
-#ifdef CONFIG_SUSPEND
-	register_syscore_ops(&lbc_syscore_pm_ops);
-#endif
 	return platform_driver_register(&fsl_lbc_ctrl_driver);
 }
 subsys_initcall(fsl_lbc_init);

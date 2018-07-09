@@ -34,7 +34,6 @@
 #include "disk-io.h"
 #include "btrfs_inode.h"
 #include "transaction.h"
-#include "compression.h"
 
 static int g_verbose = 0;
 
@@ -305,7 +304,7 @@ static struct fs_path *fs_path_alloc(void)
 {
 	struct fs_path *p;
 
-	p = kmalloc(sizeof(*p), GFP_KERNEL);
+	p = kmalloc(sizeof(*p), GFP_NOFS);
 	if (!p)
 		return NULL;
 	p->reversed = 0;
@@ -364,11 +363,11 @@ static int fs_path_ensure_buf(struct fs_path *p, int len)
 	 * First time the inline_buf does not suffice
 	 */
 	if (p->buf == p->inline_buf) {
-		tmp_buf = kmalloc(len, GFP_KERNEL);
+		tmp_buf = kmalloc(len, GFP_NOFS);
 		if (tmp_buf)
 			memcpy(tmp_buf, p->buf, old_buf_len);
 	} else {
-		tmp_buf = krealloc(p->buf, len, GFP_KERNEL);
+		tmp_buf = krealloc(p->buf, len, GFP_NOFS);
 	}
 	if (!tmp_buf)
 		return -ENOMEM;
@@ -996,7 +995,7 @@ static int iterate_dir_item(struct btrfs_root *root, struct btrfs_path *path,
 	 * values are small.
 	 */
 	buf_len = PATH_MAX;
-	buf = kmalloc(buf_len, GFP_KERNEL);
+	buf = kmalloc(buf_len, GFP_NOFS);
 	if (!buf) {
 		ret = -ENOMEM;
 		goto out;
@@ -1043,7 +1042,7 @@ static int iterate_dir_item(struct btrfs_root *root, struct btrfs_path *path,
 				buf = NULL;
 			} else {
 				char *tmp = krealloc(buf, buf_len,
-						GFP_KERNEL | __GFP_NOWARN);
+						     GFP_NOFS | __GFP_NOWARN);
 
 				if (!tmp)
 					kfree(buf);
@@ -1304,7 +1303,7 @@ static int find_extent_clone(struct send_ctx *sctx,
 	/* We only use this path under the commit sem */
 	tmp_path->need_commit_sem = 0;
 
-	backref_ctx = kmalloc(sizeof(*backref_ctx), GFP_KERNEL);
+	backref_ctx = kmalloc(sizeof(*backref_ctx), GFP_NOFS);
 	if (!backref_ctx) {
 		ret = -ENOMEM;
 		goto out;
@@ -1831,7 +1830,7 @@ static int will_overwrite_ref(struct send_ctx *sctx, u64 dir, u64 dir_gen,
 
 	/*
 	 * If we have a parent root we need to verify that the parent dir was
-	 * not deleted and then re-created, if it was then we have no overwrite
+	 * not delted and then re-created, if it was then we have no overwrite
 	 * and we can just unlink this entry.
 	 */
 	if (sctx->parent_root) {
@@ -1985,7 +1984,7 @@ static int name_cache_insert(struct send_ctx *sctx,
 	nce_head = radix_tree_lookup(&sctx->name_cache,
 			(unsigned long)nce->ino);
 	if (!nce_head) {
-		nce_head = kmalloc(sizeof(*nce_head), GFP_KERNEL);
+		nce_head = kmalloc(sizeof(*nce_head), GFP_NOFS);
 		if (!nce_head) {
 			kfree(nce);
 			return -ENOMEM;
@@ -2180,7 +2179,7 @@ out_cache:
 	/*
 	 * Store the result of the lookup in the name cache.
 	 */
-	nce = kmalloc(sizeof(*nce) + fs_path_len(dest) + 1, GFP_KERNEL);
+	nce = kmalloc(sizeof(*nce) + fs_path_len(dest) + 1, GFP_NOFS);
 	if (!nce) {
 		ret = -ENOMEM;
 		goto out;
@@ -2316,7 +2315,7 @@ static int send_subvol_begin(struct send_ctx *sctx)
 	if (!path)
 		return -ENOMEM;
 
-	name = kmalloc(BTRFS_PATH_NAME_MAX, GFP_KERNEL);
+	name = kmalloc(BTRFS_PATH_NAME_MAX, GFP_NOFS);
 	if (!name) {
 		btrfs_free_path(path);
 		return -ENOMEM;
@@ -2731,7 +2730,7 @@ static int __record_ref(struct list_head *head, u64 dir,
 {
 	struct recorded_ref *ref;
 
-	ref = kmalloc(sizeof(*ref), GFP_KERNEL);
+	ref = kmalloc(sizeof(*ref), GFP_NOFS);
 	if (!ref)
 		return -ENOMEM;
 
@@ -2756,7 +2755,7 @@ static int dup_ref(struct recorded_ref *ref, struct list_head *list)
 {
 	struct recorded_ref *new;
 
-	new = kmalloc(sizeof(*ref), GFP_KERNEL);
+	new = kmalloc(sizeof(*ref), GFP_NOFS);
 	if (!new)
 		return -ENOMEM;
 
@@ -2819,7 +2818,7 @@ add_orphan_dir_info(struct send_ctx *sctx, u64 dir_ino)
 	struct rb_node *parent = NULL;
 	struct orphan_dir_info *entry, *odi;
 
-	odi = kmalloc(sizeof(*odi), GFP_KERNEL);
+	odi = kmalloc(sizeof(*odi), GFP_NOFS);
 	if (!odi)
 		return ERR_PTR(-ENOMEM);
 	odi->ino = dir_ino;
@@ -2974,7 +2973,7 @@ static int add_waiting_dir_move(struct send_ctx *sctx, u64 ino, bool orphanized)
 	struct rb_node *parent = NULL;
 	struct waiting_dir_move *entry, *dm;
 
-	dm = kmalloc(sizeof(*dm), GFP_KERNEL);
+	dm = kmalloc(sizeof(*dm), GFP_NOFS);
 	if (!dm)
 		return -ENOMEM;
 	dm->ino = ino;
@@ -3041,7 +3040,7 @@ static int add_pending_dir_move(struct send_ctx *sctx,
 	int exists = 0;
 	int ret;
 
-	pm = kmalloc(sizeof(*pm), GFP_KERNEL);
+	pm = kmalloc(sizeof(*pm), GFP_NOFS);
 	if (!pm)
 		return -ENOMEM;
 	pm->parent_ino = parent_ino;
@@ -4192,9 +4191,9 @@ static int __process_new_xattr(int num, struct btrfs_key *di_key,
 		return -ENOMEM;
 
 	/*
-	 * This hack is needed because empty acls are stored as zero byte
+	 * This hack is needed because empty acl's are stored as zero byte
 	 * data in xattrs. Problem with that is, that receiving these zero byte
-	 * acls will fail later. To fix this, we send a dummy acl list that
+	 * acl's will fail later. To fix this, we send a dummy acl list that
 	 * only contains the version number and no entries.
 	 */
 	if (!strncmp(name, XATTR_NAME_POSIX_ACL_ACCESS, name_len) ||
@@ -4281,7 +4280,7 @@ static int __find_xattr(int num, struct btrfs_key *di_key,
 	    strncmp(name, ctx->name, name_len) == 0) {
 		ctx->found_idx = num;
 		ctx->found_data_len = data_len;
-		ctx->found_data = kmemdup(data, data_len, GFP_KERNEL);
+		ctx->found_data = kmemdup(data, data_len, GFP_NOFS);
 		if (!ctx->found_data)
 			return -ENOMEM;
 		return 1;
@@ -4449,9 +4448,9 @@ static ssize_t fill_read_buf(struct send_ctx *sctx, u64 offset, u32 len)
 	struct page *page;
 	char *addr;
 	struct btrfs_key key;
-	pgoff_t index = offset >> PAGE_SHIFT;
+	pgoff_t index = offset >> PAGE_CACHE_SHIFT;
 	pgoff_t last_index;
-	unsigned pg_offset = offset & ~PAGE_MASK;
+	unsigned pg_offset = offset & ~PAGE_CACHE_MASK;
 	ssize_t ret = 0;
 
 	key.objectid = sctx->cur_ino;
@@ -4471,7 +4470,7 @@ static ssize_t fill_read_buf(struct send_ctx *sctx, u64 offset, u32 len)
 	if (len == 0)
 		goto out;
 
-	last_index = (offset + len - 1) >> PAGE_SHIFT;
+	last_index = (offset + len - 1) >> PAGE_CACHE_SHIFT;
 
 	/* initial readahead */
 	memset(&sctx->ra, 0, sizeof(struct file_ra_state));
@@ -4481,8 +4480,8 @@ static ssize_t fill_read_buf(struct send_ctx *sctx, u64 offset, u32 len)
 
 	while (index <= last_index) {
 		unsigned cur_len = min_t(unsigned, len,
-					 PAGE_SIZE - pg_offset);
-		page = find_or_create_page(inode->i_mapping, index, GFP_KERNEL);
+					 PAGE_CACHE_SIZE - pg_offset);
+		page = find_or_create_page(inode->i_mapping, index, GFP_NOFS);
 		if (!page) {
 			ret = -ENOMEM;
 			break;
@@ -4493,7 +4492,7 @@ static ssize_t fill_read_buf(struct send_ctx *sctx, u64 offset, u32 len)
 			lock_page(page);
 			if (!PageUptodate(page)) {
 				unlock_page(page);
-				put_page(page);
+				page_cache_release(page);
 				ret = -EIO;
 				break;
 			}
@@ -4503,7 +4502,7 @@ static ssize_t fill_read_buf(struct send_ctx *sctx, u64 offset, u32 len)
 		memcpy(sctx->read_buf + ret, addr + pg_offset, cur_len);
 		kunmap(page);
 		unlock_page(page);
-		put_page(page);
+		page_cache_release(page);
 		index++;
 		pg_offset = 0;
 		len -= cur_len;
@@ -4804,7 +4803,7 @@ static int clone_range(struct send_ctx *sctx,
 		type = btrfs_file_extent_type(leaf, ei);
 		if (type == BTRFS_FILE_EXTENT_INLINE) {
 			ext_len = btrfs_file_extent_inline_len(leaf, slot, ei);
-			ext_len = PAGE_ALIGN(ext_len);
+			ext_len = PAGE_CACHE_ALIGN(ext_len);
 		} else {
 			ext_len = btrfs_file_extent_num_bytes(leaf, ei);
 		}
@@ -4886,7 +4885,7 @@ static int send_write_or_clone(struct send_ctx *sctx,
 		 * but there may be items after this page.  Make
 		 * sure to send the whole thing
 		 */
-		len = PAGE_ALIGN(len);
+		len = PAGE_CACHE_ALIGN(len);
 	} else {
 		len = btrfs_file_extent_num_bytes(path->nodes[0], ei);
 	}
@@ -5939,7 +5938,6 @@ long btrfs_ioctl_send(struct file *mnt_file, void __user *arg_)
 	u32 i;
 	u64 *clone_sources_tmp = NULL;
 	int clone_sources_to_rollback = 0;
-	unsigned alloc_size;
 	int sort_clone_roots = 0;
 	int index;
 
@@ -5979,12 +5977,6 @@ long btrfs_ioctl_send(struct file *mnt_file, void __user *arg_)
 		goto out;
 	}
 
-	if (arg->clone_sources_count >
-	    ULLONG_MAX / sizeof(*arg->clone_sources)) {
-		ret = -EINVAL;
-		goto out;
-	}
-
 	if (!access_ok(VERIFY_READ, arg->clone_sources,
 			sizeof(*arg->clone_sources) *
 			arg->clone_sources_count)) {
@@ -5997,7 +5989,7 @@ long btrfs_ioctl_send(struct file *mnt_file, void __user *arg_)
 		goto out;
 	}
 
-	sctx = kzalloc(sizeof(struct send_ctx), GFP_KERNEL);
+	sctx = kzalloc(sizeof(struct send_ctx), GFP_NOFS);
 	if (!sctx) {
 		ret = -ENOMEM;
 		goto out;
@@ -6005,7 +5997,7 @@ long btrfs_ioctl_send(struct file *mnt_file, void __user *arg_)
 
 	INIT_LIST_HEAD(&sctx->new_refs);
 	INIT_LIST_HEAD(&sctx->deleted_refs);
-	INIT_RADIX_TREE(&sctx->name_cache, GFP_KERNEL);
+	INIT_RADIX_TREE(&sctx->name_cache, GFP_NOFS);
 	INIT_LIST_HEAD(&sctx->name_cache_list);
 
 	sctx->flags = arg->flags;
@@ -6029,53 +6021,40 @@ long btrfs_ioctl_send(struct file *mnt_file, void __user *arg_)
 	sctx->clone_roots_cnt = arg->clone_sources_count;
 
 	sctx->send_max_size = BTRFS_SEND_BUF_SIZE;
-	sctx->send_buf = kmalloc(sctx->send_max_size, GFP_KERNEL | __GFP_NOWARN);
+	sctx->send_buf = vmalloc(sctx->send_max_size);
 	if (!sctx->send_buf) {
-		sctx->send_buf = vmalloc(sctx->send_max_size);
-		if (!sctx->send_buf) {
-			ret = -ENOMEM;
-			goto out;
-		}
+		ret = -ENOMEM;
+		goto out;
 	}
 
-	sctx->read_buf = kmalloc(BTRFS_SEND_READ_SIZE, GFP_KERNEL | __GFP_NOWARN);
+	sctx->read_buf = vmalloc(BTRFS_SEND_READ_SIZE);
 	if (!sctx->read_buf) {
-		sctx->read_buf = vmalloc(BTRFS_SEND_READ_SIZE);
-		if (!sctx->read_buf) {
-			ret = -ENOMEM;
-			goto out;
-		}
+		ret = -ENOMEM;
+		goto out;
 	}
 
 	sctx->pending_dir_moves = RB_ROOT;
 	sctx->waiting_dir_moves = RB_ROOT;
 	sctx->orphan_dirs = RB_ROOT;
 
-	alloc_size = sizeof(struct clone_root) * (arg->clone_sources_count + 1);
-
-	sctx->clone_roots = kzalloc(alloc_size, GFP_KERNEL | __GFP_NOWARN);
+	sctx->clone_roots = vzalloc(sizeof(struct clone_root) *
+			(arg->clone_sources_count + 1));
 	if (!sctx->clone_roots) {
-		sctx->clone_roots = vzalloc(alloc_size);
-		if (!sctx->clone_roots) {
+		ret = -ENOMEM;
+		goto out;
+	}
+
+	if (arg->clone_sources_count) {
+		clone_sources_tmp = vmalloc(arg->clone_sources_count *
+				sizeof(*arg->clone_sources));
+		if (!clone_sources_tmp) {
 			ret = -ENOMEM;
 			goto out;
 		}
-	}
-
-	alloc_size = arg->clone_sources_count * sizeof(*arg->clone_sources);
-
-	if (arg->clone_sources_count) {
-		clone_sources_tmp = kmalloc(alloc_size, GFP_KERNEL | __GFP_NOWARN);
-		if (!clone_sources_tmp) {
-			clone_sources_tmp = vmalloc(alloc_size);
-			if (!clone_sources_tmp) {
-				ret = -ENOMEM;
-				goto out;
-			}
-		}
 
 		ret = copy_from_user(clone_sources_tmp, arg->clone_sources,
-				alloc_size);
+				arg->clone_sources_count *
+				sizeof(*arg->clone_sources));
 		if (ret) {
 			ret = -EFAULT;
 			goto out;
@@ -6109,7 +6088,7 @@ long btrfs_ioctl_send(struct file *mnt_file, void __user *arg_)
 			sctx->clone_roots[i].root = clone_root;
 			clone_sources_to_rollback = i + 1;
 		}
-		kvfree(clone_sources_tmp);
+		vfree(clone_sources_tmp);
 		clone_sources_tmp = NULL;
 	}
 
@@ -6227,15 +6206,15 @@ out:
 		btrfs_root_dec_send_in_progress(sctx->parent_root);
 
 	kfree(arg);
-	kvfree(clone_sources_tmp);
+	vfree(clone_sources_tmp);
 
 	if (sctx) {
 		if (sctx->send_filp)
 			fput(sctx->send_filp);
 
-		kvfree(sctx->clone_roots);
-		kvfree(sctx->send_buf);
-		kvfree(sctx->read_buf);
+		vfree(sctx->clone_roots);
+		vfree(sctx->send_buf);
+		vfree(sctx->read_buf);
 
 		name_cache_free(sctx);
 

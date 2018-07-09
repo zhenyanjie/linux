@@ -126,6 +126,8 @@
 #include <linux/usb.h>
 #include <linux/byteorder/generic.h>
 
+#define SUBMIT_URB(u, f)  usb_submit_urb(u, f)
+
 #include "p80211types.h"
 #include "p80211hdr.h"
 #include "p80211mgmt.h"
@@ -143,11 +145,11 @@ enum cmd_mode {
 	DOASYNC
 };
 
-#define THROTTLE_JIFFIES	(HZ / 8)
+#define THROTTLE_JIFFIES	(HZ/8)
 #define URB_ASYNC_UNLINK 0
 #define USB_QUEUE_BULK 0
 
-#define ROUNDUP64(a) (((a) + 63) & ~63)
+#define ROUNDUP64(a) (((a)+63)&~63)
 
 #ifdef DEBUG_USB
 static void dbprint_urb(struct urb *urb);
@@ -210,6 +212,8 @@ static int
 unlocked_usbctlx_cancel_async(hfa384x_t *hw, hfa384x_usbctlx_t *ctlx);
 
 static void hfa384x_cb_status(hfa384x_t *hw, const hfa384x_usbctlx_t *ctlx);
+
+static void hfa384x_cb_rrid(hfa384x_t *hw, const hfa384x_usbctlx_t *ctlx);
 
 static int
 usbctlx_get_status(const hfa384x_usb_cmdresp_t *cmdresp,
@@ -328,7 +332,7 @@ static int submit_rx_urb(hfa384x_t *hw, gfp_t memflags)
 	int result;
 
 	skb = dev_alloc_skb(sizeof(hfa384x_usbin_t));
-	if (!skb) {
+	if (skb == NULL) {
 		result = -ENOMEM;
 		goto done;
 	}
@@ -344,7 +348,7 @@ static int submit_rx_urb(hfa384x_t *hw, gfp_t memflags)
 	result = -ENOLINK;
 	if (!hw->wlandev->hwremoved &&
 	    !test_bit(WORK_RX_HALT, &hw->usb_flags)) {
-		result = usb_submit_urb(&hw->rx_urb, memflags);
+		result = SUBMIT_URB(&hw->rx_urb, memflags);
 
 		/* Check whether we need to reset the RX pipe */
 		if (result == -EPIPE) {
@@ -393,7 +397,7 @@ static int submit_tx_urb(hfa384x_t *hw, struct urb *tx_urb, gfp_t memflags)
 	if (netif_running(netdev)) {
 		if (!hw->wlandev->hwremoved &&
 		    !test_bit(WORK_TX_HALT, &hw->usb_flags)) {
-			result = usb_submit_urb(tx_urb, memflags);
+			result = SUBMIT_URB(tx_urb, memflags);
 
 			/* Test whether we need to reset the TX pipe */
 			if (result == -EPIPE) {
@@ -614,7 +618,7 @@ static hfa384x_usbctlx_t *usbctlx_alloc(void)
 
 	ctlx = kzalloc(sizeof(*ctlx),
 		       in_interrupt() ? GFP_ATOMIC : GFP_KERNEL);
-	if (ctlx)
+	if (ctlx != NULL)
 		init_completion(&ctlx->done);
 
 	return ctlx;
@@ -797,7 +801,7 @@ static inline struct usbctlx_completor *init_rmem_completor(
 ----------------------------------------------------------------*/
 static void hfa384x_cb_status(hfa384x_t *hw, const hfa384x_usbctlx_t *ctlx)
 {
-	if (ctlx->usercb) {
+	if (ctlx->usercb != NULL) {
 		hfa384x_cmdresult_t cmdresult;
 
 		if (ctlx->state != CTLX_COMPLETE) {
@@ -809,6 +813,43 @@ static void hfa384x_cb_status(hfa384x_t *hw, const hfa384x_usbctlx_t *ctlx)
 		}
 
 		ctlx->usercb(hw, &cmdresult, ctlx->usercb_data);
+	}
+}
+
+/*----------------------------------------------------------------
+* hfa384x_cb_rrid
+*
+* CTLX completion handler for async RRID type control exchanges.
+*
+* Note: If the handling is changed here, it should probably be
+*       changed in dorrid as well.
+*
+* Arguments:
+*	hw		hw struct
+*	ctlx		completed CTLX
+*
+* Returns:
+*	nothing
+*
+* Side effects:
+*
+* Call context:
+*	interrupt
+----------------------------------------------------------------*/
+static void hfa384x_cb_rrid(hfa384x_t *hw, const hfa384x_usbctlx_t *ctlx)
+{
+	if (ctlx->usercb != NULL) {
+		hfa384x_rridresult_t rridresult;
+
+		if (ctlx->state != CTLX_COMPLETE) {
+			memset(&rridresult, 0, sizeof(rridresult));
+			rridresult.rid = le16_to_cpu(ctlx->outbuf.rridreq.rid);
+		} else {
+			usbctlx_get_rridresult(&ctlx->inbuf.rridresp,
+					       &rridresult);
+		}
+
+		ctlx->usercb(hw, &rridresult, ctlx->usercb_data);
 	}
 }
 
@@ -971,6 +1012,7 @@ int hfa384x_cmd_initialize(hfa384x_t *hw)
 ----------------------------------------------------------------*/
 int hfa384x_cmd_disable(hfa384x_t *hw, u16 macport)
 {
+	int result = 0;
 	hfa384x_metacmd_t cmd;
 
 	cmd.cmd = HFA384x_CMD_CMDCODE_SET(HFA384x_CMDCODE_DISABLE) |
@@ -979,7 +1021,9 @@ int hfa384x_cmd_disable(hfa384x_t *hw, u16 macport)
 	cmd.parm1 = 0;
 	cmd.parm2 = 0;
 
-	return hfa384x_docmd_wait(hw, &cmd);
+	result = hfa384x_docmd_wait(hw, &cmd);
+
+	return result;
 }
 
 /*----------------------------------------------------------------
@@ -1004,6 +1048,7 @@ int hfa384x_cmd_disable(hfa384x_t *hw, u16 macport)
 ----------------------------------------------------------------*/
 int hfa384x_cmd_enable(hfa384x_t *hw, u16 macport)
 {
+	int result = 0;
 	hfa384x_metacmd_t cmd;
 
 	cmd.cmd = HFA384x_CMD_CMDCODE_SET(HFA384x_CMDCODE_ENABLE) |
@@ -1012,7 +1057,9 @@ int hfa384x_cmd_enable(hfa384x_t *hw, u16 macport)
 	cmd.parm1 = 0;
 	cmd.parm2 = 0;
 
-	return hfa384x_docmd_wait(hw, &cmd);
+	result = hfa384x_docmd_wait(hw, &cmd);
+
+	return result;
 }
 
 /*----------------------------------------------------------------
@@ -1046,6 +1093,7 @@ int hfa384x_cmd_enable(hfa384x_t *hw, u16 macport)
 ----------------------------------------------------------------*/
 int hfa384x_cmd_monitor(hfa384x_t *hw, u16 enable)
 {
+	int result = 0;
 	hfa384x_metacmd_t cmd;
 
 	cmd.cmd = HFA384x_CMD_CMDCODE_SET(HFA384x_CMDCODE_MONITOR) |
@@ -1054,7 +1102,9 @@ int hfa384x_cmd_monitor(hfa384x_t *hw, u16 enable)
 	cmd.parm1 = 0;
 	cmd.parm2 = 0;
 
-	return hfa384x_docmd_wait(hw, &cmd);
+	result = hfa384x_docmd_wait(hw, &cmd);
+
+	return result;
 }
 
 /*----------------------------------------------------------------
@@ -1098,6 +1148,7 @@ int hfa384x_cmd_monitor(hfa384x_t *hw, u16 enable)
 int hfa384x_cmd_download(hfa384x_t *hw, u16 mode, u16 lowaddr,
 			 u16 highaddr, u16 codelen)
 {
+	int result = 0;
 	hfa384x_metacmd_t cmd;
 
 	pr_debug("mode=%d, lowaddr=0x%04x, highaddr=0x%04x, codelen=%d\n",
@@ -1110,7 +1161,9 @@ int hfa384x_cmd_download(hfa384x_t *hw, u16 mode, u16 lowaddr,
 	cmd.parm1 = highaddr;
 	cmd.parm2 = codelen;
 
-	return hfa384x_docmd_wait(hw, &cmd);
+	result = hfa384x_docmd_wait(hw, &cmd);
+
+	return result;
 }
 
 /*----------------------------------------------------------------
@@ -1298,7 +1351,7 @@ hfa384x_docmd(hfa384x_t *hw,
 	hfa384x_usbctlx_t *ctlx;
 
 	ctlx = usbctlx_alloc();
-	if (!ctlx) {
+	if (ctlx == NULL) {
 		result = -ENOMEM;
 		goto done;
 	}
@@ -1388,7 +1441,7 @@ hfa384x_dorrid(hfa384x_t *hw,
 	hfa384x_usbctlx_t *ctlx;
 
 	ctlx = usbctlx_alloc();
-	if (!ctlx) {
+	if (ctlx == NULL) {
 		result = -ENOMEM;
 		goto done;
 	}
@@ -1469,7 +1522,7 @@ hfa384x_dowrid(hfa384x_t *hw,
 	hfa384x_usbctlx_t *ctlx;
 
 	ctlx = usbctlx_alloc();
-	if (!ctlx) {
+	if (ctlx == NULL) {
 		result = -ENOMEM;
 		goto done;
 	}
@@ -1557,7 +1610,7 @@ hfa384x_dormem(hfa384x_t *hw,
 	hfa384x_usbctlx_t *ctlx;
 
 	ctlx = usbctlx_alloc();
-	if (!ctlx) {
+	if (ctlx == NULL) {
 		result = -ENOMEM;
 		goto done;
 	}
@@ -1650,7 +1703,7 @@ hfa384x_dowmem(hfa384x_t *hw,
 	pr_debug("page=0x%04x offset=0x%04x len=%d\n", page, offset, len);
 
 	ctlx = usbctlx_alloc();
-	if (!ctlx) {
+	if (ctlx == NULL) {
 		result = -ENOMEM;
 		goto done;
 	}
@@ -1691,6 +1744,37 @@ hfa384x_dowmem(hfa384x_t *hw,
 
 done:
 	return result;
+}
+
+/*----------------------------------------------------------------
+* hfa384x_drvr_commtallies
+*
+* Send a commtallies inquiry to the MAC.  Note that this is an async
+* call that will result in an info frame arriving sometime later.
+*
+* Arguments:
+*	hw		device structure
+*
+* Returns:
+*	zero		success.
+*
+* Side effects:
+*
+* Call context:
+*	process
+----------------------------------------------------------------*/
+int hfa384x_drvr_commtallies(hfa384x_t *hw)
+{
+	hfa384x_metacmd_t cmd;
+
+	cmd.cmd = HFA384x_CMDCODE_INQ;
+	cmd.parm0 = HFA384x_IT_COMMTALLIES;
+	cmd.parm1 = 0;
+	cmd.parm2 = 0;
+
+	hfa384x_docmd_async(hw, &cmd, NULL, NULL, NULL);
+
+	return 0;
 }
 
 /*----------------------------------------------------------------
@@ -2035,6 +2119,41 @@ exit_proc:
 int hfa384x_drvr_getconfig(hfa384x_t *hw, u16 rid, void *buf, u16 len)
 {
 	return hfa384x_dorrid_wait(hw, rid, buf, len);
+}
+
+/*----------------------------------------------------------------
+ * hfa384x_drvr_getconfig_async
+ *
+ * Performs the sequence necessary to perform an async read of
+ * of a config/info item.
+ *
+ * Arguments:
+ *       hw              device structure
+ *       rid             config/info record id (host order)
+ *       buf             host side record buffer.  Upon return it will
+ *                       contain the body portion of the record (minus the
+ *                       RID and len).
+ *       len             buffer length (in bytes, should match record length)
+ *       cbfn            caller supplied callback, called when the command
+ *                       is done (successful or not).
+ *       cbfndata        pointer to some caller supplied data that will be
+ *                       passed in as an argument to the cbfn.
+ *
+ * Returns:
+ *       nothing         the cbfn gets a status argument identifying if
+ *                       any errors occur.
+ * Side effects:
+ *       Queues an hfa384x_usbcmd_t for subsequent execution.
+ *
+ * Call context:
+ *       Any
+ ----------------------------------------------------------------*/
+int
+hfa384x_drvr_getconfig_async(hfa384x_t *hw,
+			     u16 rid, ctlx_usercb_t usercb, void *usercb_data)
+{
+	return hfa384x_dorrid_async(hw, rid, NULL, 0,
+				    hfa384x_cb_rrid, usercb, usercb_data);
 }
 
 /*----------------------------------------------------------------
@@ -2691,7 +2810,8 @@ void hfa384x_tx_timeout(wlandevice_t *wlandev)
 static void hfa384x_usbctlx_reaper_task(unsigned long data)
 {
 	hfa384x_t *hw = (hfa384x_t *)data;
-	hfa384x_usbctlx_t *ctlx, *temp;
+	struct list_head *entry;
+	struct list_head *temp;
 	unsigned long flags;
 
 	spin_lock_irqsave(&hw->ctlxq.lock, flags);
@@ -2699,7 +2819,10 @@ static void hfa384x_usbctlx_reaper_task(unsigned long data)
 	/* This list is guaranteed to be empty if someone
 	 * has unplugged the adapter.
 	 */
-	list_for_each_entry_safe(ctlx, temp, &hw->ctlxq.reapable, list) {
+	list_for_each_safe(entry, temp, &hw->ctlxq.reapable) {
+		hfa384x_usbctlx_t *ctlx;
+
+		ctlx = list_entry(entry, hfa384x_usbctlx_t, list);
 		list_del(&ctlx->list);
 		kfree(ctlx);
 	}
@@ -2724,7 +2847,8 @@ static void hfa384x_usbctlx_reaper_task(unsigned long data)
 static void hfa384x_usbctlx_completion_task(unsigned long data)
 {
 	hfa384x_t *hw = (hfa384x_t *)data;
-	hfa384x_usbctlx_t *ctlx, *temp;
+	struct list_head *entry;
+	struct list_head *temp;
 	unsigned long flags;
 
 	int reap = 0;
@@ -2734,11 +2858,15 @@ static void hfa384x_usbctlx_completion_task(unsigned long data)
 	/* This list is guaranteed to be empty if someone
 	 * has unplugged the adapter ...
 	 */
-	list_for_each_entry_safe(ctlx, temp, &hw->ctlxq.completing, list) {
+	list_for_each_safe(entry, temp, &hw->ctlxq.completing) {
+		hfa384x_usbctlx_t *ctlx;
+
+		ctlx = list_entry(entry, hfa384x_usbctlx_t, list);
+
 		/* Call the completion function that this
 		 * command was assigned, assuming it has one.
 		 */
-		if (ctlx->cmdcb) {
+		if (ctlx->cmdcb != NULL) {
 			spin_unlock_irqrestore(&hw->ctlxq.lock, flags);
 			ctlx->cmdcb(hw, ctlx);
 			spin_lock_irqsave(&hw->ctlxq.lock, flags);
@@ -2923,7 +3051,7 @@ static void hfa384x_usbctlxq_run(hfa384x_t *hw)
 		hw->ctlx_urb.transfer_flags |= USB_QUEUE_BULK;
 
 		/* Now submit the URB and update the CTLX's state */
-		result = usb_submit_urb(&hw->ctlx_urb, GFP_ATOMIC);
+		result = SUBMIT_URB(&hw->ctlx_urb, GFP_ATOMIC);
 		if (result == 0) {
 			/* This CTLX is now running on the active queue */
 			head->state = CTLX_REQ_SUBMITTED;
@@ -3446,7 +3574,7 @@ static void hfa384x_int_rxmonitor(wlandevice_t *wlandev,
 	}
 
 	skb = dev_alloc_skb(skblen);
-	if (!skb)
+	if (skb == NULL)
 		return;
 
 	/* only prepend the prism header if in the right mode */
@@ -3629,7 +3757,7 @@ static void hfa384x_ctlxout_callback(struct urb *urb)
 	dbprint_urb(urb);
 #endif
 	if ((urb->status == -ESHUTDOWN) ||
-	    (urb->status == -ENODEV) || !hw)
+	    (urb->status == -ENODEV) || (hw == NULL))
 		return;
 
 retry:
@@ -3857,7 +3985,8 @@ static void hfa384x_usb_throttlefn(unsigned long data)
 	pr_debug("flags=0x%lx\n", hw->usb_flags);
 	if (!hw->wlandev->hwremoved &&
 	    ((test_and_clear_bit(THROTTLE_RX, &hw->usb_flags) &&
-	      !test_and_set_bit(WORK_RX_RESUME, &hw->usb_flags)) |
+	      !test_and_set_bit(WORK_RX_RESUME, &hw->usb_flags))
+	     |
 	     (test_and_clear_bit(THROTTLE_TX, &hw->usb_flags) &&
 	      !test_and_set_bit(WORK_TX_RESUME, &hw->usb_flags))
 	    )) {

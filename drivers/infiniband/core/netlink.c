@@ -151,11 +151,12 @@ static int ibnl_rcv_msg(struct sk_buff *skb, struct nlmsghdr *nlh)
 	struct ibnl_client *client;
 	int type = nlh->nlmsg_type;
 	int index = RDMA_NL_GET_CLIENT(type);
-	unsigned int op = RDMA_NL_GET_OP(type);
+	int op = RDMA_NL_GET_OP(type);
 
 	list_for_each_entry(client, &client_list, list) {
 		if (client->index == index) {
-			if (op >= client->nops || !client->cb_table[op].dump)
+			if (op < 0 || op >= client->nops ||
+			    !client->cb_table[op].dump)
 				return -EINVAL;
 
 			/*

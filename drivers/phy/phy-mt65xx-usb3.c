@@ -134,11 +134,6 @@
 #define U3P_SR_COEF_DIVISOR	1000
 #define U3P_FM_DET_CYCLE_CNT	1024
 
-struct mt65xx_phy_pdata {
-	/* avoid RX sensitivity level degradation only for mt8173 */
-	bool avoid_rx_sen_degradation;
-};
-
 struct mt65xx_phy_instance {
 	struct phy *phy;
 	void __iomem *port_base;
@@ -150,7 +145,6 @@ struct mt65xx_u3phy {
 	struct device *dev;
 	void __iomem *sif_base;	/* include sif2, but exclude port's */
 	struct clk *u3phya_ref;	/* reference clock of usb3 anolog phy */
-	const struct mt65xx_phy_pdata *pdata;
 	struct mt65xx_phy_instance **phys;
 	int nphys;
 };
@@ -247,26 +241,22 @@ static void phy_instance_init(struct mt65xx_u3phy *u3phy,
 		tmp = readl(port_base + U3P_U2PHYACR4);
 		tmp &= ~P2C_U2_GPIO_CTR_MSK;
 		writel(tmp, port_base + U3P_U2PHYACR4);
-	}
 
-	if (u3phy->pdata->avoid_rx_sen_degradation) {
-		if (!index) {
-			tmp = readl(port_base + U3P_USBPHYACR2);
-			tmp |= PA2_RG_SIF_U2PLL_FORCE_EN;
-			writel(tmp, port_base + U3P_USBPHYACR2);
+		tmp = readl(port_base + U3P_USBPHYACR2);
+		tmp |= PA2_RG_SIF_U2PLL_FORCE_EN;
+		writel(tmp, port_base + U3P_USBPHYACR2);
 
-			tmp = readl(port_base + U3D_U2PHYDCR0);
-			tmp &= ~P2C_RG_SIF_U2PLL_FORCE_ON;
-			writel(tmp, port_base + U3D_U2PHYDCR0);
-		} else {
-			tmp = readl(port_base + U3D_U2PHYDCR0);
-			tmp |= P2C_RG_SIF_U2PLL_FORCE_ON;
-			writel(tmp, port_base + U3D_U2PHYDCR0);
+		tmp = readl(port_base + U3D_U2PHYDCR0);
+		tmp &= ~P2C_RG_SIF_U2PLL_FORCE_ON;
+		writel(tmp, port_base + U3D_U2PHYDCR0);
+	} else {
+		tmp = readl(port_base + U3D_U2PHYDCR0);
+		tmp |= P2C_RG_SIF_U2PLL_FORCE_ON;
+		writel(tmp, port_base + U3D_U2PHYDCR0);
 
-			tmp = readl(port_base + U3P_U2PHYDTM0);
-			tmp |= P2C_RG_SUSPENDM | P2C_FORCE_SUSPENDM;
-			writel(tmp, port_base + U3P_U2PHYDTM0);
-		}
+		tmp = readl(port_base + U3P_U2PHYDTM0);
+		tmp |= P2C_RG_SUSPENDM | P2C_FORCE_SUSPENDM;
+		writel(tmp, port_base + U3P_U2PHYDTM0);
 	}
 
 	tmp = readl(port_base + U3P_USBPHYACR6);
@@ -328,7 +318,7 @@ static void phy_instance_power_on(struct mt65xx_u3phy *u3phy,
 		tmp |= XC3_RG_U3_XTAL_RX_PWD | XC3_RG_U3_FRC_XTAL_RX_PWD;
 		writel(tmp, u3phy->sif_base + U3P_XTALCTL3);
 
-		/* switch 100uA current to SSUSB */
+		/* [mt8173]switch 100uA current to SSUSB */
 		tmp = readl(port_base + U3P_USBPHYACR5);
 		tmp |= PA5_RG_U2_HS_100U_U3_EN;
 		writel(tmp, port_base + U3P_USBPHYACR5);
@@ -345,7 +335,7 @@ static void phy_instance_power_on(struct mt65xx_u3phy *u3phy,
 	tmp |= PA5_RG_U2_HSTX_SRCTRL_VAL(4);
 	writel(tmp, port_base + U3P_USBPHYACR5);
 
-	if (u3phy->pdata->avoid_rx_sen_degradation && index) {
+	if (index) {
 		tmp = readl(port_base + U3D_U2PHYDCR0);
 		tmp |= P2C_RG_SIF_U2PLL_FORCE_ON;
 		writel(tmp, port_base + U3D_U2PHYDCR0);
@@ -396,9 +386,7 @@ static void phy_instance_power_off(struct mt65xx_u3phy *u3phy,
 		tmp = readl(port_base + U3P_U3_PHYA_REG0);
 		tmp &= ~P3A_RG_U3_VUSB10_ON;
 		writel(tmp, port_base + U3P_U3_PHYA_REG0);
-	}
-
-	if (u3phy->pdata->avoid_rx_sen_degradation && index) {
+	} else {
 		tmp = readl(port_base + U3D_U2PHYDCR0);
 		tmp &= ~P2C_RG_SIF_U2PLL_FORCE_ON;
 		writel(tmp, port_base + U3D_U2PHYDCR0);
@@ -414,7 +402,7 @@ static void phy_instance_exit(struct mt65xx_u3phy *u3phy,
 	u32 index = instance->index;
 	u32 tmp;
 
-	if (u3phy->pdata->avoid_rx_sen_degradation && index) {
+	if (index) {
 		tmp = readl(port_base + U3D_U2PHYDCR0);
 		tmp &= ~P2C_RG_SIF_U2PLL_FORCE_ON;
 		writel(tmp, port_base + U3D_U2PHYDCR0);
@@ -514,24 +502,8 @@ static struct phy_ops mt65xx_u3phy_ops = {
 	.owner		= THIS_MODULE,
 };
 
-static const struct mt65xx_phy_pdata mt2701_pdata = {
-	.avoid_rx_sen_degradation = false,
-};
-
-static const struct mt65xx_phy_pdata mt8173_pdata = {
-	.avoid_rx_sen_degradation = true,
-};
-
-static const struct of_device_id mt65xx_u3phy_id_table[] = {
-	{ .compatible = "mediatek,mt2701-u3phy", .data = &mt2701_pdata },
-	{ .compatible = "mediatek,mt8173-u3phy", .data = &mt8173_pdata },
-	{ },
-};
-MODULE_DEVICE_TABLE(of, mt65xx_u3phy_id_table);
-
 static int mt65xx_u3phy_probe(struct platform_device *pdev)
 {
-	const struct of_device_id *match;
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
 	struct device_node *child_np;
@@ -541,15 +513,10 @@ static int mt65xx_u3phy_probe(struct platform_device *pdev)
 	struct resource res;
 	int port, retval;
 
-	match = of_match_node(mt65xx_u3phy_id_table, pdev->dev.of_node);
-	if (!match)
-		return -EINVAL;
-
 	u3phy = devm_kzalloc(dev, sizeof(*u3phy), GFP_KERNEL);
 	if (!u3phy)
 		return -ENOMEM;
 
-	u3phy->pdata = match->data;
 	u3phy->nphys = of_get_child_count(np);
 	u3phy->phys = devm_kcalloc(dev, u3phy->nphys,
 				       sizeof(*u3phy->phys), GFP_KERNEL);
@@ -619,6 +586,12 @@ put_child:
 	of_node_put(child_np);
 	return retval;
 }
+
+static const struct of_device_id mt65xx_u3phy_id_table[] = {
+	{ .compatible = "mediatek,mt8173-u3phy", },
+	{ },
+};
+MODULE_DEVICE_TABLE(of, mt65xx_u3phy_id_table);
 
 static struct platform_driver mt65xx_u3phy_driver = {
 	.probe		= mt65xx_u3phy_probe,

@@ -506,7 +506,6 @@ int lirc_dev_fop_close(struct inode *inode, struct file *file)
 {
 	struct irctl *ir = irctls[iminor(inode)];
 	struct cdev *cdev;
-	int ret;
 
 	if (!ir) {
 		printk(KERN_ERR "%s: called with invalid irctl\n", __func__);
@@ -517,8 +516,7 @@ int lirc_dev_fop_close(struct inode *inode, struct file *file)
 
 	dev_dbg(ir->d.dev, LOGHEAD "close called\n", ir->d.name, ir->d.minor);
 
-	ret = mutex_lock_killable(&lirc_dev_lock);
-	WARN_ON(ret);
+	WARN_ON(mutex_lock_killable(&lirc_dev_lock));
 
 	rc_close(ir->d.rdev);
 
@@ -534,8 +532,7 @@ int lirc_dev_fop_close(struct inode *inode, struct file *file)
 		kfree(ir);
 	}
 
-	if (!ret)
-		mutex_unlock(&lirc_dev_lock);
+	mutex_unlock(&lirc_dev_lock);
 
 	return 0;
 }

@@ -24,6 +24,8 @@
 #include <asm/cpufeature.h>
 #include <asm/alternative.h>
 
+#include "proc-macros.S"
+
 /*
  *	flush_icache_range(start,end)
  *

@@ -144,11 +144,13 @@ int irq_can_set_affinity(unsigned int irq)
  */
 void irq_set_thread_affinity(struct irq_desc *desc)
 {
-	struct irqaction *action;
+	struct irqaction *action = desc->action;
 
-	for_each_action_of_desc(desc, action)
+	while (action) {
 		if (action->thread)
 			set_bit(IRQTF_AFFINITY, &action->thread_flags);
+		action = action->next;
+	}
 }
 
 #ifdef CONFIG_GENERIC_PENDING_IRQ
@@ -992,7 +994,7 @@ void irq_wake_thread(unsigned int irq, void *dev_id)
 		return;
 
 	raw_spin_lock_irqsave(&desc->lock, flags);
-	for_each_action_of_desc(desc, action) {
+	for (action = desc->action; action; action = action->next) {
 		if (action->dev_id == dev_id) {
 			if (action->thread)
 				__irq_wake_thread(desc, action);
@@ -1322,8 +1324,8 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 
 		if (nmsk != omsk)
 			/* hope the handler works with current  trigger mode */
-			pr_warn("irq %d uses trigger mode %u; requested %u\n",
-				irq, nmsk, omsk);
+			pr_warning("irq %d uses trigger mode %u; requested %u\n",
+				   irq, nmsk, omsk);
 	}
 
 	*old_ptr = new;
@@ -1407,7 +1409,7 @@ int setup_irq(unsigned int irq, struct irqaction *act)
 	int retval;
 	struct irq_desc *desc = irq_to_desc(irq);
 
-	if (!desc || WARN_ON(irq_settings_is_per_cpu_devid(desc)))
+	if (WARN_ON(irq_settings_is_per_cpu_devid(desc)))
 		return -EINVAL;
 	chip_bus_lock(desc);
 	retval = __setup_irq(irq, desc, act);
@@ -1607,9 +1609,6 @@ int request_threaded_irq(unsigned int irq, irq_handler_t handler,
 	struct irq_desc *desc;
 	int retval;
 
-	if (irq == IRQ_NOTCONNECTED)
-		return -ENOTCONN;
-
 	/*
 	 * Sanity-check: shared interrupts must pass in a real dev-ID,
 	 * otherwise we'll have trouble later trying to figure out
@@ -1700,13 +1699,9 @@ EXPORT_SYMBOL(request_threaded_irq);
 int request_any_context_irq(unsigned int irq, irq_handler_t handler,
 			    unsigned long flags, const char *name, void *dev_id)
 {
-	struct irq_desc *desc;
+	struct irq_desc *desc = irq_to_desc(irq);
 	int ret;
 
-	if (irq == IRQ_NOTCONNECTED)
-		return -ENOTCONN;
-
-	desc = irq_to_desc(irq);
 	if (!desc)
 		return -EINVAL;
 

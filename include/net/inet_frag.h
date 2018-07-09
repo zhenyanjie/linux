@@ -13,7 +13,6 @@ struct netns_frags {
 	int			timeout;
 	int			high_thresh;
 	int			low_thresh;
-	int			max_dist;
 };
 
 /**

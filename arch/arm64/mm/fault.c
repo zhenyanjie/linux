@@ -109,7 +109,7 @@ int ptep_set_access_flags(struct vm_area_struct *vma,
 	 * PTE_RDONLY is cleared by default in the asm below, so set it in
 	 * back if necessary (read-only or clean PTE).
 	 */
-	if (!pte_write(entry) || !pte_sw_dirty(entry))
+	if (!pte_write(entry) || !dirty)
 		pte_val(entry) |= PTE_RDONLY;
 
 	/*
@@ -242,14 +242,6 @@ out:
 	return fault;
 }
 
-static inline int permission_fault(unsigned int esr)
-{
-	unsigned int ec       = (esr & ESR_ELx_EC_MASK) >> ESR_ELx_EC_SHIFT;
-	unsigned int fsc_type = esr & ESR_ELx_FSC_TYPE;
-
-	return (ec == ESR_ELx_EC_DABT_CUR && fsc_type == ESR_ELx_FSC_PERM);
-}
-
 static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 				   struct pt_regs *regs)
 {
@@ -261,6 +253,10 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 
 	tsk = current;
 	mm  = tsk->mm;
+
+	/* Enable interrupts if they were enabled in the parent context. */
+	if (interrupts_enabled(regs))
+		local_irq_enable();
 
 	/*
 	 * If we're in an interrupt or have no user context, we must not take
@@ -279,14 +275,12 @@ static int __kprobes do_page_fault(unsigned long addr, unsigned int esr,
 		mm_flags |= FAULT_FLAG_WRITE;
 	}
 
-	if (permission_fault(esr) && (addr < USER_DS)) {
-		/* regs->orig_addr_limit may be 0 if we entered from EL0 */
-		if (regs->orig_addr_limit == KERNEL_DS)
-			die("Accessing user space memory with fs=KERNEL_DS", regs, esr);
-
-		if (!search_exception_tables(regs->pc))
-			die("Accessing user space memory outside uaccess.h routines", regs, esr);
-	}
+	/*
+	 * PAN bit set implies the fault happened in kernel space, but not
+	 * in the arch's user access functions.
+	 */
+	if (IS_ENABLED(CONFIG_ARM64_PAN) && (regs->pstate & PSR_PAN_BIT))
+		goto no_context;
 
 	/*
 	 * As per x86, we may deadlock here. However, since the kernel only
@@ -351,7 +345,7 @@ retry:
 	up_read(&mm->mmap_sem);
 
 	/*
-	 * Handle the "normal" case first - VM_FAULT_MAJOR
+	 * Handle the "normal" case first - VM_FAULT_MAJOR / VM_FAULT_MINOR
 	 */
 	if (likely(!(fault & (VM_FAULT_ERROR | VM_FAULT_BADMAP |
 			      VM_FAULT_BADACCESS))))
@@ -442,7 +436,7 @@ static int do_bad(unsigned long addr, unsigned int esr, struct pt_regs *regs)
 	return 1;
 }
 
-static const struct fault_info {
+static struct fault_info {
 	int	(*fn)(unsigned long addr, unsigned int esr, struct pt_regs *regs);
 	int	sig;
 	int	code;
@@ -602,33 +596,20 @@ asmlinkage int __exception do_debug_exception(unsigned long addr,
 {
 	const struct fault_info *inf = debug_fault_info + DBG_ESR_EVT(esr);
 	struct siginfo info;
-	int rv;
 
-	/*
-	 * Tell lockdep we disabled irqs in entry.S. Do nothing if they were
-	 * already disabled to preserve the last enabled/disabled addresses.
-	 */
-	if (interrupts_enabled(regs))
-		trace_hardirqs_off();
+	if (!inf->fn(addr, esr, regs))
+		return 1;
 
-	if (!inf->fn(addr, esr, regs)) {
-		rv = 1;
-	} else {
-		pr_alert("Unhandled debug exception: %s (0x%08x) at 0x%016lx\n",
-			 inf->name, esr, addr);
+	pr_alert("Unhandled debug exception: %s (0x%08x) at 0x%016lx\n",
+		 inf->name, esr, addr);
 
-		info.si_signo = inf->sig;
-		info.si_errno = 0;
-		info.si_code  = inf->code;
-		info.si_addr  = (void __user *)addr;
-		arm64_notify_die("", regs, &info, 0);
-		rv = 0;
-	}
+	info.si_signo = inf->sig;
+	info.si_errno = 0;
+	info.si_code  = inf->code;
+	info.si_addr  = (void __user *)addr;
+	arm64_notify_die("", regs, &info, 0);
 
-	if (interrupts_enabled(regs))
-		trace_hardirqs_on();
-
-	return rv;
+	return 0;
 }
 
 #ifdef CONFIG_ARM64_PAN
@@ -637,16 +618,3 @@ void cpu_enable_pan(void *__unused)
 	config_sctlr_el1(SCTLR_EL1_SPAN, 0);
 }
 #endif /* CONFIG_ARM64_PAN */
-
-#ifdef CONFIG_ARM64_UAO
-/*
- * Kernel threads have fs=KERNEL_DS by default, and don't need to call
- * set_fs(), devtmpfs in particular relies on this behaviour.
- * We need to enable the feature at runtime (instead of adding it to
- * PSR_MODE_EL1h) as the feature may not be implemented by the cpu.
- */
-void cpu_enable_uao(void *__unused)
-{
-	asm(SET_PSTATE_UAO(1));
-}
-#endif /* CONFIG_ARM64_UAO */

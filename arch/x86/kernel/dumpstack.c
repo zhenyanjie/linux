@@ -42,14 +42,16 @@ void printk_address(unsigned long address)
 static void
 print_ftrace_graph_addr(unsigned long addr, void *data,
 			const struct stacktrace_ops *ops,
-			struct task_struct *task, int *graph)
+			struct thread_info *tinfo, int *graph)
 {
+	struct task_struct *task;
 	unsigned long ret_addr;
 	int index;
 
 	if (addr != (unsigned long)return_to_handler)
 		return;
 
+	task = tinfo->task;
 	index = task->curr_ret_stack;
 
 	if (!task->ret_stack || index < *graph)
@@ -66,7 +68,7 @@ print_ftrace_graph_addr(unsigned long addr, void *data,
 static inline void
 print_ftrace_graph_addr(unsigned long addr, void *data,
 			const struct stacktrace_ops *ops,
-			struct task_struct *task, int *graph)
+			struct thread_info *tinfo, int *graph)
 { }
 #endif
 
@@ -77,10 +79,10 @@ print_ftrace_graph_addr(unsigned long addr, void *data,
  * severe exception (double fault, nmi, stack fault, debug, mce) hardware stack
  */
 
-static inline int valid_stack_ptr(struct task_struct *task,
+static inline int valid_stack_ptr(struct thread_info *tinfo,
 			void *p, unsigned int size, void *end)
 {
-	void *t = task_stack_page(task);
+	void *t = tinfo;
 	if (end) {
 		if (p < end && p >= (end-THREAD_SIZE))
 			return 1;
@@ -91,14 +93,14 @@ static inline int valid_stack_ptr(struct task_struct *task,
 }
 
 unsigned long
-print_context_stack(struct task_struct *task,
+print_context_stack(struct thread_info *tinfo,
 		unsigned long *stack, unsigned long bp,
 		const struct stacktrace_ops *ops, void *data,
 		unsigned long *end, int *graph)
 {
 	struct stack_frame *frame = (struct stack_frame *)bp;
 
-	while (valid_stack_ptr(task, stack, sizeof(*stack), end)) {
+	while (valid_stack_ptr(tinfo, stack, sizeof(*stack), end)) {
 		unsigned long addr;
 
 		addr = *stack;
@@ -110,7 +112,7 @@ print_context_stack(struct task_struct *task,
 			} else {
 				ops->address(data, addr, 0);
 			}
-			print_ftrace_graph_addr(addr, data, ops, task, graph);
+			print_ftrace_graph_addr(addr, data, ops, tinfo, graph);
 		}
 		stack++;
 	}
@@ -119,7 +121,7 @@ print_context_stack(struct task_struct *task,
 EXPORT_SYMBOL_GPL(print_context_stack);
 
 unsigned long
-print_context_stack_bp(struct task_struct *task,
+print_context_stack_bp(struct thread_info *tinfo,
 		       unsigned long *stack, unsigned long bp,
 		       const struct stacktrace_ops *ops, void *data,
 		       unsigned long *end, int *graph)
@@ -127,17 +129,16 @@ print_context_stack_bp(struct task_struct *task,
 	struct stack_frame *frame = (struct stack_frame *)bp;
 	unsigned long *ret_addr = &frame->return_address;
 
-	while (valid_stack_ptr(task, ret_addr, sizeof(*ret_addr), end)) {
+	while (valid_stack_ptr(tinfo, ret_addr, sizeof(*ret_addr), end)) {
 		unsigned long addr = *ret_addr;
 
 		if (!__kernel_text_address(addr))
 			break;
 
-		if (ops->address(data, addr, 1))
-			break;
+		ops->address(data, addr, 1);
 		frame = frame->next_frame;
 		ret_addr = &frame->return_address;
-		print_ftrace_graph_addr(addr, data, ops, task, graph);
+		print_ftrace_graph_addr(addr, data, ops, tinfo, graph);
 	}
 
 	return (unsigned long)frame;
@@ -153,11 +154,10 @@ static int print_trace_stack(void *data, char *name)
 /*
  * Print one address/symbol entries per line.
  */
-static int print_trace_address(void *data, unsigned long addr, int reliable)
+static void print_trace_address(void *data, unsigned long addr, int reliable)
 {
 	touch_nmi_watchdog();
 	printk_stack_address(addr, reliable, data);
-	return 0;
 }
 
 static const struct stacktrace_ops print_trace_ops = {
@@ -258,12 +258,20 @@ int __die(const char *str, struct pt_regs *regs, long err)
 	unsigned long sp;
 #endif
 	printk(KERN_DEFAULT
-	       "%s: %04lx [#%d]%s%s%s%s\n", str, err & 0xffff, ++die_counter,
-	       IS_ENABLED(CONFIG_PREEMPT) ? " PREEMPT"         : "",
-	       IS_ENABLED(CONFIG_SMP)     ? " SMP"             : "",
-	       debug_pagealloc_enabled()  ? " DEBUG_PAGEALLOC" : "",
-	       IS_ENABLED(CONFIG_KASAN)   ? " KASAN"           : "");
-
+	       "%s: %04lx [#%d] ", str, err & 0xffff, ++die_counter);
+#ifdef CONFIG_PREEMPT
+	printk("PREEMPT ");
+#endif
+#ifdef CONFIG_SMP
+	printk("SMP ");
+#endif
+#ifdef CONFIG_DEBUG_PAGEALLOC
+	printk("DEBUG_PAGEALLOC ");
+#endif
+#ifdef CONFIG_KASAN
+	printk("KASAN");
+#endif
+	printk("\n");
 	if (notify_die(DIE_OOPS, str, regs, err,
 			current->thread.trap_nr, SIGSEGV) == NOTIFY_STOP)
 		return 1;

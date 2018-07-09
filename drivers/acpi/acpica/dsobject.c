@@ -524,7 +524,8 @@ acpi_ds_build_internal_package_obj(struct acpi_walk_state *walk_state,
 			arg = arg->common.next;
 		}
 
-		ACPI_INFO(("Actual Package length (%u) is larger than "
+		ACPI_INFO((AE_INFO,
+			   "Actual Package length (%u) is larger than "
 			   "NumElements field (%u), truncated",
 			   i, element_count));
 	} else if (i < element_count) {

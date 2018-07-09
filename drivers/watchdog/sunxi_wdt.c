@@ -83,8 +83,7 @@ static const int wdt_timeout_map[] = {
 };
 
 
-static int sunxi_wdt_restart(struct watchdog_device *wdt_dev,
-			     unsigned long action, void *data)
+static int sunxi_wdt_restart(struct watchdog_device *wdt_dev)
 {
 	struct sunxi_wdt_dev *sunxi_wdt = watchdog_get_drvdata(wdt_dev);
 	void __iomem *wdt_base = sunxi_wdt->wdt_base;

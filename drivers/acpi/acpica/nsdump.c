@@ -81,7 +81,7 @@ acpi_ns_get_max_depth(acpi_handle obj_handle,
  *
  ******************************************************************************/
 
-void acpi_ns_print_pathname(u32 num_segments, const char *pathname)
+void acpi_ns_print_pathname(u32 num_segments, char *pathname)
 {
 	u32 i;
 
@@ -114,9 +114,6 @@ void acpi_ns_print_pathname(u32 num_segments, const char *pathname)
 	acpi_os_printf("]\n");
 }
 
-#ifdef ACPI_OBSOLETE_FUNCTIONS
-/* Not used at this time, perhaps later */
-
 /*******************************************************************************
  *
  * FUNCTION:    acpi_ns_dump_pathname
@@ -134,8 +131,7 @@ void acpi_ns_print_pathname(u32 num_segments, const char *pathname)
  ******************************************************************************/
 
 void
-acpi_ns_dump_pathname(acpi_handle handle,
-		      const char *msg, u32 level, u32 component)
+acpi_ns_dump_pathname(acpi_handle handle, char *msg, u32 level, u32 component)
 {
 
 	ACPI_FUNCTION_TRACE(ns_dump_pathname);
@@ -152,7 +148,6 @@ acpi_ns_dump_pathname(acpi_handle handle,
 	acpi_os_printf("\n");
 	return_VOID;
 }
-#endif
 
 /*******************************************************************************
  *

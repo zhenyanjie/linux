@@ -61,8 +61,6 @@
 #define HCI_RS232	4
 #define HCI_PCI		5
 #define HCI_SDIO	6
-#define HCI_SPI		7
-#define HCI_I2C		8
 
 /* HCI controller types */
 #define HCI_BREDR	0x00
@@ -235,7 +233,6 @@ enum {
 	HCI_SC_ENABLED,
 	HCI_SC_ONLY,
 	HCI_PRIVACY,
-	HCI_LIMITED_PRIVACY,
 	HCI_RPA_EXPIRED,
 	HCI_RPA_RESOLVING,
 	HCI_HS_ENABLED,

@@ -132,8 +132,7 @@ static int arizona_gpio_probe(struct platform_device *pdev)
 	else
 		arizona_gpio->gpio_chip.base = -1;
 
-	ret = devm_gpiochip_add_data(&pdev->dev, &arizona_gpio->gpio_chip,
-				     arizona_gpio);
+	ret = gpiochip_add_data(&arizona_gpio->gpio_chip, arizona_gpio);
 	if (ret < 0) {
 		dev_err(&pdev->dev, "Could not register gpiochip, %d\n",
 			ret);
@@ -148,9 +147,18 @@ err:
 	return ret;
 }
 
+static int arizona_gpio_remove(struct platform_device *pdev)
+{
+	struct arizona_gpio *arizona_gpio = platform_get_drvdata(pdev);
+
+	gpiochip_remove(&arizona_gpio->gpio_chip);
+	return 0;
+}
+
 static struct platform_driver arizona_gpio_driver = {
 	.driver.name	= "arizona-gpio",
 	.probe		= arizona_gpio_probe,
+	.remove		= arizona_gpio_remove,
 };
 
 module_platform_driver(arizona_gpio_driver);

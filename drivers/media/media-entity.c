@@ -46,41 +46,25 @@ static inline const char *intf_type(struct media_interface *intf)
 {
 	switch (intf->type) {
 	case MEDIA_INTF_T_DVB_FE:
-		return "dvb-frontend";
+		return "frontend";
 	case MEDIA_INTF_T_DVB_DEMUX:
-		return "dvb-demux";
+		return "demux";
 	case MEDIA_INTF_T_DVB_DVR:
-		return "dvb-dvr";
+		return "DVR";
 	case MEDIA_INTF_T_DVB_CA:
-		return  "dvb-ca";
+		return  "CA";
 	case MEDIA_INTF_T_DVB_NET:
-		return "dvb-net";
+		return "dvbnet";
 	case MEDIA_INTF_T_V4L_VIDEO:
-		return "v4l-video";
+		return "video";
 	case MEDIA_INTF_T_V4L_VBI:
-		return "v4l-vbi";
+		return "vbi";
 	case MEDIA_INTF_T_V4L_RADIO:
-		return "v4l-radio";
+		return "radio";
 	case MEDIA_INTF_T_V4L_SUBDEV:
-		return "v4l-subdev";
+		return "v4l2-subdev";
 	case MEDIA_INTF_T_V4L_SWRADIO:
-		return "v4l-swradio";
-	case MEDIA_INTF_T_ALSA_PCM_CAPTURE:
-		return "alsa-pcm-capture";
-	case MEDIA_INTF_T_ALSA_PCM_PLAYBACK:
-		return "alsa-pcm-playback";
-	case MEDIA_INTF_T_ALSA_CONTROL:
-		return "alsa-control";
-	case MEDIA_INTF_T_ALSA_COMPRESS:
-		return "alsa-compress";
-	case MEDIA_INTF_T_ALSA_RAWMIDI:
-		return "alsa-rawmidi";
-	case MEDIA_INTF_T_ALSA_HWDEP:
-		return "alsa-hwdep";
-	case MEDIA_INTF_T_ALSA_SEQUENCER:
-		return "alsa-sequencer";
-	case MEDIA_INTF_T_ALSA_TIMER:
-		return "alsa-timer";
+		return "swradio";
 	default:
 		return "unknown-intf";
 	}
@@ -89,9 +73,8 @@ static inline const char *intf_type(struct media_interface *intf)
 __must_check int __media_entity_enum_init(struct media_entity_enum *ent_enum,
 					  int idx_max)
 {
-	idx_max = ALIGN(idx_max, BITS_PER_LONG);
-	ent_enum->bmap = kcalloc(idx_max / BITS_PER_LONG, sizeof(long),
-				 GFP_KERNEL);
+	ent_enum->bmap = kcalloc(DIV_ROUND_UP(idx_max, BITS_PER_LONG),
+				 sizeof(long), GFP_KERNEL);
 	if (!ent_enum->bmap)
 		return -ENOMEM;
 
@@ -219,7 +202,7 @@ int media_entity_pads_init(struct media_entity *entity, u16 num_pads,
 	entity->pads = pads;
 
 	if (mdev)
-		mutex_lock(&mdev->graph_mutex);
+		spin_lock(&mdev->lock);
 
 	for (i = 0; i < num_pads; i++) {
 		pads[i].entity = entity;
@@ -230,7 +213,7 @@ int media_entity_pads_init(struct media_entity *entity, u16 num_pads,
 	}
 
 	if (mdev)
-		mutex_unlock(&mdev->graph_mutex);
+		spin_unlock(&mdev->lock);
 
 	return 0;
 }
@@ -366,14 +349,16 @@ EXPORT_SYMBOL_GPL(media_entity_graph_walk_next);
  * Pipeline management
  */
 
-__must_check int __media_entity_pipeline_start(struct media_entity *entity,
-					       struct media_pipeline *pipe)
+__must_check int media_entity_pipeline_start(struct media_entity *entity,
+					     struct media_pipeline *pipe)
 {
 	struct media_device *mdev = entity->graph_obj.mdev;
 	struct media_entity_graph *graph = &pipe->graph;
 	struct media_entity *entity_err = entity;
 	struct media_link *link;
 	int ret;
+
+	mutex_lock(&mdev->graph_mutex);
 
 	if (!pipe->streaming_count++) {
 		ret = media_entity_graph_walk_init(&pipe->graph, mdev);
@@ -445,7 +430,7 @@ __must_check int __media_entity_pipeline_start(struct media_entity *entity,
 		bitmap_or(active, active, has_no_links, entity->num_pads);
 
 		if (!bitmap_full(active, entity->num_pads)) {
-			ret = -ENOLINK;
+			ret = -EPIPE;
 			dev_dbg(entity->graph_obj.mdev->dev,
 				"\"%s\":%u must be connected by an enabled link\n",
 				entity->name,
@@ -454,6 +439,8 @@ __must_check int __media_entity_pipeline_start(struct media_entity *entity,
 			goto error;
 		}
 	}
+
+	mutex_unlock(&mdev->graph_mutex);
 
 	return 0;
 
@@ -465,12 +452,9 @@ error:
 	media_entity_graph_walk_start(graph, entity_err);
 
 	while ((entity_err = media_entity_graph_walk_next(graph))) {
-		/* don't let the stream_count go negative */
-		if (entity->stream_count > 0) {
-			entity_err->stream_count--;
-			if (entity_err->stream_count == 0)
-				entity_err->pipe = NULL;
-		}
+		entity_err->stream_count--;
+		if (entity_err->stream_count == 0)
+			entity_err->pipe = NULL;
 
 		/*
 		 * We haven't increased stream_count further than this
@@ -484,53 +468,32 @@ error_graph_walk_start:
 	if (!--pipe->streaming_count)
 		media_entity_graph_walk_cleanup(graph);
 
-	return ret;
-}
-EXPORT_SYMBOL_GPL(__media_entity_pipeline_start);
-
-__must_check int media_entity_pipeline_start(struct media_entity *entity,
-					     struct media_pipeline *pipe)
-{
-	struct media_device *mdev = entity->graph_obj.mdev;
-	int ret;
-
-	mutex_lock(&mdev->graph_mutex);
-	ret = __media_entity_pipeline_start(entity, pipe);
 	mutex_unlock(&mdev->graph_mutex);
+
 	return ret;
 }
 EXPORT_SYMBOL_GPL(media_entity_pipeline_start);
 
-void __media_entity_pipeline_stop(struct media_entity *entity)
+void media_entity_pipeline_stop(struct media_entity *entity)
 {
+	struct media_device *mdev = entity->graph_obj.mdev;
 	struct media_entity_graph *graph = &entity->pipe->graph;
 	struct media_pipeline *pipe = entity->pipe;
 
+	mutex_lock(&mdev->graph_mutex);
 
 	WARN_ON(!pipe->streaming_count);
 	media_entity_graph_walk_start(graph, entity);
 
 	while ((entity = media_entity_graph_walk_next(graph))) {
-		/* don't let the stream_count go negative */
-		if (entity->stream_count > 0) {
-			entity->stream_count--;
-			if (entity->stream_count == 0)
-				entity->pipe = NULL;
-		}
+		entity->stream_count--;
+		if (entity->stream_count == 0)
+			entity->pipe = NULL;
 	}
 
 	if (!--pipe->streaming_count)
 		media_entity_graph_walk_cleanup(graph);
 
-}
-EXPORT_SYMBOL_GPL(__media_entity_pipeline_stop);
-
-void media_entity_pipeline_stop(struct media_entity *entity)
-{
-	struct media_device *mdev = entity->graph_obj.mdev;
-
-	mutex_lock(&mdev->graph_mutex);
-	__media_entity_pipeline_stop(entity);
 	mutex_unlock(&mdev->graph_mutex);
 }
 EXPORT_SYMBOL_GPL(media_entity_pipeline_stop);
@@ -747,9 +710,9 @@ void media_entity_remove_links(struct media_entity *entity)
 	if (mdev == NULL)
 		return;
 
-	mutex_lock(&mdev->graph_mutex);
+	spin_lock(&mdev->lock);
 	__media_entity_remove_links(entity);
-	mutex_unlock(&mdev->graph_mutex);
+	spin_unlock(&mdev->lock);
 }
 EXPORT_SYMBOL_GPL(media_entity_remove_links);
 
@@ -820,7 +783,6 @@ int __media_entity_setup_link(struct media_link *link, u32 flags)
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(__media_entity_setup_link);
 
 int media_entity_setup_link(struct media_link *link, u32 flags)
 {
@@ -951,9 +913,9 @@ void media_remove_intf_link(struct media_link *link)
 	if (mdev == NULL)
 		return;
 
-	mutex_lock(&mdev->graph_mutex);
+	spin_lock(&mdev->lock);
 	__media_remove_intf_link(link);
-	mutex_unlock(&mdev->graph_mutex);
+	spin_unlock(&mdev->lock);
 }
 EXPORT_SYMBOL_GPL(media_remove_intf_link);
 
@@ -975,8 +937,8 @@ void media_remove_intf_links(struct media_interface *intf)
 	if (mdev == NULL)
 		return;
 
-	mutex_lock(&mdev->graph_mutex);
+	spin_lock(&mdev->lock);
 	__media_remove_intf_links(intf);
-	mutex_unlock(&mdev->graph_mutex);
+	spin_unlock(&mdev->lock);
 }
 EXPORT_SYMBOL_GPL(media_remove_intf_links);

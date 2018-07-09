@@ -1930,7 +1930,6 @@ int __init acpi_scan_init(void)
 	acpi_memory_hotplug_init();
 	acpi_pnp_init();
 	acpi_int340x_thermal_init();
-	acpi_amba_init();
 
 	acpi_scan_add_handler(&generic_device_handler);
 
@@ -1967,7 +1966,7 @@ int __init acpi_scan_init(void)
 
 static struct acpi_probe_entry *ape;
 static int acpi_probe_count;
-static DEFINE_MUTEX(acpi_probe_mutex);
+static DEFINE_SPINLOCK(acpi_probe_lock);
 
 static int __init acpi_match_madt(struct acpi_subtable_header *header,
 				  const unsigned long end)
@@ -1986,7 +1985,7 @@ int __init __acpi_probe_device_table(struct acpi_probe_entry *ap_head, int nr)
 	if (acpi_disabled)
 		return 0;
 
-	mutex_lock(&acpi_probe_mutex);
+	spin_lock(&acpi_probe_lock);
 	for (ape = ap_head; nr; ape++, nr--) {
 		if (ACPI_COMPARE_NAME(ACPI_SIG_MADT, ape->id)) {
 			acpi_probe_count = 0;
@@ -1999,7 +1998,7 @@ int __init __acpi_probe_device_table(struct acpi_probe_entry *ap_head, int nr)
 				count++;
 		}
 	}
-	mutex_unlock(&acpi_probe_mutex);
+	spin_unlock(&acpi_probe_lock);
 
 	return count;
 }

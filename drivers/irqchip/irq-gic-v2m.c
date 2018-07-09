@@ -49,9 +49,6 @@
 /* APM X-Gene with GICv2m MSI_IIDR register value */
 #define XGENE_GICV2M_MSI_IIDR		0x06000170
 
-/* Broadcom NS2 GICv2m MSI_IIDR register value */
-#define BCM_NS2_GICV2M_MSI_IIDR		0x0000013f
-
 /* List of flags for specific v2m implementation */
 #define GICV2M_NEEDS_SPI_OFFSET		0x00000001
 
@@ -65,7 +62,6 @@ struct v2m_data {
 	void __iomem *base;	/* GICv2m virt address */
 	u32 spi_start;		/* The SPI number that MSIs start */
 	u32 nr_spis;		/* The number of SPIs for MSIs */
-	u32 spi_offset;		/* offset to be subtracted from SPI number */
 	unsigned long *bm;	/* MSI vector bitmap */
 	u32 flags;		/* v2m flags for specific implementation */
 };
@@ -96,6 +92,18 @@ static struct msi_domain_info gicv2m_msi_domain_info = {
 	.chip	= &gicv2m_msi_irq_chip,
 };
 
+static int gicv2m_set_affinity(struct irq_data *irq_data,
+			       const struct cpumask *mask, bool force)
+{
+	int ret;
+
+	ret = irq_chip_set_affinity_parent(irq_data, mask, force);
+	if (ret == IRQ_SET_MASK_OK)
+		ret = IRQ_SET_MASK_OK_DONE;
+
+	return ret;
+}
+
 static void gicv2m_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
 {
 	struct v2m_data *v2m = irq_data_get_irq_chip_data(data);
@@ -106,7 +114,7 @@ static void gicv2m_compose_msi_msg(struct irq_data *data, struct msi_msg *msg)
 	msg->data = data->hwirq;
 
 	if (v2m->flags & GICV2M_NEEDS_SPI_OFFSET)
-		msg->data -= v2m->spi_offset;
+		msg->data -= v2m->spi_start;
 }
 
 static struct irq_chip gicv2m_irq_chip = {
@@ -114,7 +122,7 @@ static struct irq_chip gicv2m_irq_chip = {
 	.irq_mask		= irq_chip_mask_parent,
 	.irq_unmask		= irq_chip_unmask_parent,
 	.irq_eoi		= irq_chip_eoi_parent,
-	.irq_set_affinity	= irq_chip_set_affinity_parent,
+	.irq_set_affinity	= gicv2m_set_affinity,
 	.irq_compose_msi_msg	= gicv2m_compose_msi_msg,
 };
 
@@ -344,20 +352,9 @@ static int __init gicv2m_init_one(struct fwnode_handle *fwnode,
 	 * different from the standard GICv2m implementation where
 	 * the MSI data is the absolute value within the range from
 	 * spi_start to (spi_start + num_spis).
-	 *
-	 * Broadom NS2 GICv2m implementation has an erratum where the MSI data
-	 * is 'spi_number - 32'
 	 */
-	switch (readl_relaxed(v2m->base + V2M_MSI_IIDR)) {
-	case XGENE_GICV2M_MSI_IIDR:
+	if (readl_relaxed(v2m->base + V2M_MSI_IIDR) == XGENE_GICV2M_MSI_IIDR)
 		v2m->flags |= GICV2M_NEEDS_SPI_OFFSET;
-		v2m->spi_offset = v2m->spi_start;
-		break;
-	case BCM_NS2_GICV2M_MSI_IIDR:
-		v2m->flags |= GICV2M_NEEDS_SPI_OFFSET;
-		v2m->spi_offset = 32;
-		break;
-	}
 
 	v2m->bm = kzalloc(sizeof(long) * BITS_TO_LONGS(v2m->nr_spis),
 			  GFP_KERNEL);

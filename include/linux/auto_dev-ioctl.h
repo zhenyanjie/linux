@@ -11,7 +11,12 @@
 #define _LINUX_AUTO_DEV_IOCTL_H
 
 #include <linux/auto_fs.h>
+
+#ifdef __KERNEL__
 #include <linux/string.h>
+#else
+#include <string.h>
+#endif /* __KERNEL__ */
 
 #define AUTOFS_DEVICE_NAME		"autofs"
 
@@ -120,6 +125,7 @@ static inline void init_autofs_dev_ioctl(struct autofs_dev_ioctl *in)
 	in->ver_minor = AUTOFS_DEV_IOCTL_VERSION_MINOR;
 	in->size = sizeof(struct autofs_dev_ioctl);
 	in->ioctlfd = -1;
+	return;
 }
 
 /*

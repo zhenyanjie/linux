@@ -72,7 +72,6 @@ struct panel_desc {
 	} delay;
 
 	u32 bus_format;
-	u32 bus_flags;
 };
 
 struct panel_simple {
@@ -117,11 +116,7 @@ static int panel_simple_get_fixed_modes(struct panel_simple *panel)
 		}
 
 		drm_display_mode_from_videomode(&vm, mode);
-
-		mode->type |= DRM_MODE_TYPE_DRIVER;
-
-		if (panel->desc->num_modes == 1)
-			mode->type |= DRM_MODE_TYPE_PREFERRED;
+		drm_mode_set_name(mode);
 
 		drm_mode_probed_add(connector, mode);
 		num++;
@@ -137,11 +132,6 @@ static int panel_simple_get_fixed_modes(struct panel_simple *panel)
 			continue;
 		}
 
-		mode->type |= DRM_MODE_TYPE_DRIVER;
-
-		if (panel->desc->num_modes == 1)
-			mode->type |= DRM_MODE_TYPE_PREFERRED;
-
 		drm_mode_set_name(mode);
 
 		drm_mode_probed_add(connector, mode);
@@ -154,7 +144,6 @@ static int panel_simple_get_fixed_modes(struct panel_simple *panel)
 	if (panel->desc->bus_format)
 		drm_display_info_set_bus_formats(&connector->display_info,
 						 &panel->desc->bus_format, 1);
-	connector->display_info.bus_flags = panel->desc->bus_flags;
 
 	return num;
 }
@@ -824,29 +813,6 @@ static const struct panel_desc innolux_at043tn24 = {
 	.bus_format = MEDIA_BUS_FMT_RGB888_1X24,
 };
 
-static const struct drm_display_mode innolux_at070tn92_mode = {
-	.clock = 33333,
-	.hdisplay = 800,
-	.hsync_start = 800 + 210,
-	.hsync_end = 800 + 210 + 20,
-	.htotal = 800 + 210 + 20 + 46,
-	.vdisplay = 480,
-	.vsync_start = 480 + 22,
-	.vsync_end = 480 + 22 + 10,
-	.vtotal = 480 + 22 + 23 + 10,
-	.vrefresh = 60,
-};
-
-static const struct panel_desc innolux_at070tn92 = {
-	.modes = &innolux_at070tn92_mode,
-	.num_modes = 1,
-	.size = {
-		.width = 154,
-		.height = 86,
-	},
-	.bus_format = MEDIA_BUS_FMT_RGB888_1X24,
-};
-
 static const struct drm_display_mode innolux_g121i1_l01_mode = {
 	.clock = 71000,
 	.hdisplay = 1280,
@@ -881,7 +847,6 @@ static const struct drm_display_mode innolux_g121x1_l03_mode = {
 	.vsync_end = 768 + 38 + 1,
 	.vtotal = 768 + 38 + 1 + 0,
 	.vrefresh = 60,
-	.flags = DRM_MODE_FLAG_NHSYNC | DRM_MODE_FLAG_NVSYNC,
 };
 
 static const struct panel_desc innolux_g121x1_l03 = {
@@ -1017,29 +982,6 @@ static const struct panel_desc lg_lb070wv8 = {
 	.bus_format = MEDIA_BUS_FMT_RGB888_1X7X4_SPWG,
 };
 
-static const struct drm_display_mode lg_lp120up1_mode = {
-	.clock = 162300,
-	.hdisplay = 1920,
-	.hsync_start = 1920 + 40,
-	.hsync_end = 1920 + 40 + 40,
-	.htotal = 1920 + 40 + 40+ 80,
-	.vdisplay = 1280,
-	.vsync_start = 1280 + 4,
-	.vsync_end = 1280 + 4 + 4,
-	.vtotal = 1280 + 4 + 4 + 12,
-	.vrefresh = 60,
-};
-
-static const struct panel_desc lg_lp120up1 = {
-	.modes = &lg_lp120up1_mode,
-	.num_modes = 1,
-	.bpc = 8,
-	.size = {
-		.width = 267,
-		.height = 183,
-	},
-};
-
 static const struct drm_display_mode lg_lp129qe_mode = {
 	.clock = 285250,
 	.hdisplay = 2560,
@@ -1074,7 +1016,6 @@ static const struct drm_display_mode nec_nl4827hc19_05b_mode = {
 	.vsync_end = 272 + 2 + 4,
 	.vtotal = 272 + 2 + 4 + 2,
 	.vrefresh = 74,
-	.flags = DRM_MODE_FLAG_NVSYNC | DRM_MODE_FLAG_NHSYNC,
 };
 
 static const struct panel_desc nec_nl4827hc19_05b = {
@@ -1085,8 +1026,7 @@ static const struct panel_desc nec_nl4827hc19_05b = {
 		.width = 95,
 		.height = 54,
 	},
-	.bus_format = MEDIA_BUS_FMT_RGB888_1X24,
-	.bus_flags = DRM_BUS_FLAG_PIXDATA_POSEDGE,
+	.bus_format = MEDIA_BUS_FMT_RGB888_1X24
 };
 
 static const struct display_timing okaya_rs800480t_7x0gp_timing = {
@@ -1117,63 +1057,6 @@ static const struct panel_desc okaya_rs800480t_7x0gp = {
 		.disable = 50,
 	},
 	.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
-};
-
-static const struct drm_display_mode olimex_lcd_olinuxino_43ts_mode = {
-	.clock = 9000,
-	.hdisplay = 480,
-	.hsync_start = 480 + 5,
-	.hsync_end = 480 + 5 + 30,
-	.htotal = 480 + 5 + 30 + 10,
-	.vdisplay = 272,
-	.vsync_start = 272 + 8,
-	.vsync_end = 272 + 8 + 5,
-	.vtotal = 272 + 8 + 5 + 3,
-	.vrefresh = 60,
-};
-
-static const struct panel_desc olimex_lcd_olinuxino_43ts = {
-	.modes = &olimex_lcd_olinuxino_43ts_mode,
-	.num_modes = 1,
-	.size = {
-		.width = 105,
-		.height = 67,
-	},
-	.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
-};
-
-/*
- * 800x480 CVT. The panel appears to be quite accepting, at least as far as
- * pixel clocks, but this is the timing that was being used in the Adafruit
- * installation instructions.
- */
-static const struct drm_display_mode ontat_yx700wv03_mode = {
-	.clock = 29500,
-	.hdisplay = 800,
-	.hsync_start = 824,
-	.hsync_end = 896,
-	.htotal = 992,
-	.vdisplay = 480,
-	.vsync_start = 483,
-	.vsync_end = 493,
-	.vtotal = 500,
-	.vrefresh = 60,
-	.flags = DRM_MODE_FLAG_NVSYNC | DRM_MODE_FLAG_NHSYNC,
-};
-
-/*
- * Specification at:
- * https://www.adafruit.com/images/product-files/2406/c3163.pdf
- */
-static const struct panel_desc ontat_yx700wv03 = {
-	.modes = &ontat_yx700wv03_mode,
-	.num_modes = 1,
-	.bpc = 8,
-	.size = {
-		.width = 154,
-		.height = 83,
-	},
-	.bus_format = MEDIA_BUS_FMT_RGB888_1X24,
 };
 
 static const struct drm_display_mode ortustech_com43h4m85ulc_mode  = {
@@ -1293,87 +1176,6 @@ static const struct panel_desc shelly_sca07010_bfn_lnn = {
 	.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
 };
 
-static const struct drm_display_mode tpk_f07a_0102_mode = {
-	.clock = 33260,
-	.hdisplay = 800,
-	.hsync_start = 800 + 40,
-	.hsync_end = 800 + 40 + 128,
-	.htotal = 800 + 40 + 128 + 88,
-	.vdisplay = 480,
-	.vsync_start = 480 + 10,
-	.vsync_end = 480 + 10 + 2,
-	.vtotal = 480 + 10 + 2 + 33,
-	.vrefresh = 60,
-};
-
-static const struct panel_desc tpk_f07a_0102 = {
-	.modes = &tpk_f07a_0102_mode,
-	.num_modes = 1,
-	.size = {
-		.width = 152,
-		.height = 91,
-	},
-	.bus_flags = DRM_BUS_FLAG_PIXDATA_POSEDGE,
-};
-
-static const struct drm_display_mode tpk_f10a_0102_mode = {
-	.clock = 45000,
-	.hdisplay = 1024,
-	.hsync_start = 1024 + 176,
-	.hsync_end = 1024 + 176 + 5,
-	.htotal = 1024 + 176 + 5 + 88,
-	.vdisplay = 600,
-	.vsync_start = 600 + 20,
-	.vsync_end = 600 + 20 + 5,
-	.vtotal = 600 + 20 + 5 + 25,
-	.vrefresh = 60,
-};
-
-static const struct panel_desc tpk_f10a_0102 = {
-	.modes = &tpk_f10a_0102_mode,
-	.num_modes = 1,
-	.size = {
-		.width = 223,
-		.height = 125,
-	},
-};
-
-static const struct display_timing urt_umsh_8596md_timing = {
-	.pixelclock = { 33260000, 33260000, 33260000 },
-	.hactive = { 800, 800, 800 },
-	.hfront_porch = { 41, 41, 41 },
-	.hback_porch = { 216 - 128, 216 - 128, 216 - 128 },
-	.hsync_len = { 71, 128, 128 },
-	.vactive = { 480, 480, 480 },
-	.vfront_porch = { 10, 10, 10 },
-	.vback_porch = { 35 - 2, 35 - 2, 35 - 2 },
-	.vsync_len = { 2, 2, 2 },
-	.flags = DISPLAY_FLAGS_DE_HIGH | DISPLAY_FLAGS_PIXDATA_NEGEDGE |
-		DISPLAY_FLAGS_HSYNC_LOW | DISPLAY_FLAGS_VSYNC_LOW,
-};
-
-static const struct panel_desc urt_umsh_8596md_lvds = {
-	.timings = &urt_umsh_8596md_timing,
-	.num_timings = 1,
-	.bpc = 6,
-	.size = {
-		.width = 152,
-		.height = 91,
-	},
-	.bus_format = MEDIA_BUS_FMT_RGB666_1X7X3_SPWG,
-};
-
-static const struct panel_desc urt_umsh_8596md_parallel = {
-	.timings = &urt_umsh_8596md_timing,
-	.num_timings = 1,
-	.bpc = 6,
-	.size = {
-		.width = 152,
-		.height = 91,
-	},
-	.bus_format = MEDIA_BUS_FMT_RGB666_1X18,
-};
-
 static const struct of_device_id platform_of_match[] = {
 	{
 		.compatible = "ampire,am800480r3tmqwa1h",
@@ -1433,9 +1235,6 @@ static const struct of_device_id platform_of_match[] = {
 		.compatible = "innolux,at043tn24",
 		.data = &innolux_at043tn24,
 	}, {
-		.compatible = "innolux,at070tn92",
-		.data = &innolux_at070tn92,
-	}, {
 		.compatible ="innolux,g121i1-l01",
 		.data = &innolux_g121i1_l01
 	}, {
@@ -1457,9 +1256,6 @@ static const struct of_device_id platform_of_match[] = {
 		.compatible = "lg,lb070wv8",
 		.data = &lg_lb070wv8,
 	}, {
-		.compatible = "lg,lp120up1",
-		.data = &lg_lp120up1,
-	}, {
 		.compatible = "lg,lp129qe",
 		.data = &lg_lp129qe,
 	}, {
@@ -1468,12 +1264,6 @@ static const struct of_device_id platform_of_match[] = {
 	}, {
 		.compatible = "okaya,rs800480t-7x0gp",
 		.data = &okaya_rs800480t_7x0gp,
-	}, {
-		.compatible = "olimex,lcd-olinuxino-43-ts",
-		.data = &olimex_lcd_olinuxino_43ts,
-	}, {
-		.compatible = "ontat,yx700wv03",
-		.data = &ontat_yx700wv03,
 	}, {
 		.compatible = "ortustech,com43h4m85ulc",
 		.data = &ortustech_com43h4m85ulc,
@@ -1489,30 +1279,6 @@ static const struct of_device_id platform_of_match[] = {
 	}, {
 		.compatible = "shelly,sca07010-bfn-lnn",
 		.data = &shelly_sca07010_bfn_lnn,
-	}, {
-		.compatible = "tpk,f07a-0102",
-		.data = &tpk_f07a_0102,
-	}, {
-		.compatible = "tpk,f10a-0102",
-		.data = &tpk_f10a_0102,
-	}, {
-		.compatible = "urt,umsh-8596md-t",
-		.data = &urt_umsh_8596md_parallel,
-	}, {
-		.compatible = "urt,umsh-8596md-1t",
-		.data = &urt_umsh_8596md_parallel,
-	}, {
-		.compatible = "urt,umsh-8596md-7t",
-		.data = &urt_umsh_8596md_parallel,
-	}, {
-		.compatible = "urt,umsh-8596md-11t",
-		.data = &urt_umsh_8596md_lvds,
-	}, {
-		.compatible = "urt,umsh-8596md-19t",
-		.data = &urt_umsh_8596md_lvds,
-	}, {
-		.compatible = "urt,umsh-8596md-20t",
-		.data = &urt_umsh_8596md_parallel,
 	}, {
 		/* sentinel */
 	}

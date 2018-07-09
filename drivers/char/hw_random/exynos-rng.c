@@ -2,7 +2,7 @@
  * exynos-rng.c - Random Number Generator driver for the exynos
  *
  * Copyright (C) 2012 Samsung Electronics
- * Jonghwa Lee <jonghwa3.lee@samsung.com>
+ * Jonghwa Lee <jonghwa3.lee@smasung.com>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -77,8 +77,7 @@ static int exynos_init(struct hwrng *rng)
 
 	pm_runtime_get_sync(exynos_rng->dev);
 	ret = exynos_rng_configure(exynos_rng);
-	pm_runtime_mark_last_busy(exynos_rng->dev);
-	pm_runtime_put_autosuspend(exynos_rng->dev);
+	pm_runtime_put_noidle(exynos_rng->dev);
 
 	return ret;
 }
@@ -119,7 +118,6 @@ static int exynos_rng_probe(struct platform_device *pdev)
 {
 	struct exynos_rng *exynos_rng;
 	struct resource *res;
-	int ret;
 
 	exynos_rng = devm_kzalloc(&pdev->dev, sizeof(struct exynos_rng),
 					GFP_KERNEL);
@@ -147,24 +145,11 @@ static int exynos_rng_probe(struct platform_device *pdev)
 	pm_runtime_use_autosuspend(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 
-	ret = devm_hwrng_register(&pdev->dev, &exynos_rng->rng);
-	if (ret) {
-		pm_runtime_dont_use_autosuspend(&pdev->dev);
-		pm_runtime_disable(&pdev->dev);
-	}
-
-	return ret;
+	return devm_hwrng_register(&pdev->dev, &exynos_rng->rng);
 }
 
-static int exynos_rng_remove(struct platform_device *pdev)
-{
-	pm_runtime_dont_use_autosuspend(&pdev->dev);
-	pm_runtime_disable(&pdev->dev);
-
-	return 0;
-}
-
-static int __maybe_unused exynos_rng_runtime_suspend(struct device *dev)
+#ifdef CONFIG_PM
+static int exynos_rng_runtime_suspend(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct exynos_rng *exynos_rng = platform_get_drvdata(pdev);
@@ -174,7 +159,7 @@ static int __maybe_unused exynos_rng_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused exynos_rng_runtime_resume(struct device *dev)
+static int exynos_rng_runtime_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct exynos_rng *exynos_rng = platform_get_drvdata(pdev);
@@ -182,12 +167,12 @@ static int __maybe_unused exynos_rng_runtime_resume(struct device *dev)
 	return clk_prepare_enable(exynos_rng->clk);
 }
 
-static int __maybe_unused exynos_rng_suspend(struct device *dev)
+static int exynos_rng_suspend(struct device *dev)
 {
 	return pm_runtime_force_suspend(dev);
 }
 
-static int __maybe_unused exynos_rng_resume(struct device *dev)
+static int exynos_rng_resume(struct device *dev)
 {
 	struct platform_device *pdev = to_platform_device(dev);
 	struct exynos_rng *exynos_rng = platform_get_drvdata(pdev);
@@ -199,6 +184,7 @@ static int __maybe_unused exynos_rng_resume(struct device *dev)
 
 	return exynos_rng_configure(exynos_rng);
 }
+#endif
 
 static const struct dev_pm_ops exynos_rng_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(exynos_rng_suspend, exynos_rng_resume)
@@ -221,7 +207,6 @@ static struct platform_driver exynos_rng_driver = {
 		.of_match_table = exynos_rng_dt_match,
 	},
 	.probe		= exynos_rng_probe,
-	.remove		= exynos_rng_remove,
 };
 
 module_platform_driver(exynos_rng_driver);

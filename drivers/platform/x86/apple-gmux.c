@@ -19,7 +19,6 @@
 #include <linux/acpi.h>
 #include <linux/pnp.h>
 #include <linux/apple_bl.h>
-#include <linux/apple-gmux.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
 #include <linux/pci.h>
@@ -58,9 +57,7 @@ struct apple_gmux_data {
 	/* switcheroo data */
 	acpi_handle dhandle;
 	int gpe;
-	enum vga_switcheroo_client_id switch_state_display;
-	enum vga_switcheroo_client_id switch_state_ddc;
-	enum vga_switcheroo_client_id switch_state_external;
+	enum vga_switcheroo_client_id resume_client_id;
 	enum vga_switcheroo_state power_state;
 	struct completion powerchange_done;
 };
@@ -371,70 +368,19 @@ static const struct backlight_ops gmux_bl_ops = {
  * for the selected GPU.
  */
 
-static void gmux_read_switch_state(struct apple_gmux_data *gmux_data)
-{
-	if (gmux_read8(gmux_data, GMUX_PORT_SWITCH_DDC) == 1)
-		gmux_data->switch_state_ddc = VGA_SWITCHEROO_IGD;
-	else
-		gmux_data->switch_state_ddc = VGA_SWITCHEROO_DIS;
-
-	if (gmux_read8(gmux_data, GMUX_PORT_SWITCH_DISPLAY) == 2)
-		gmux_data->switch_state_display = VGA_SWITCHEROO_IGD;
-	else
-		gmux_data->switch_state_display = VGA_SWITCHEROO_DIS;
-
-	if (gmux_read8(gmux_data, GMUX_PORT_SWITCH_EXTERNAL) == 2)
-		gmux_data->switch_state_external = VGA_SWITCHEROO_IGD;
-	else
-		gmux_data->switch_state_external = VGA_SWITCHEROO_DIS;
-}
-
-static void gmux_write_switch_state(struct apple_gmux_data *gmux_data)
-{
-	if (gmux_data->switch_state_ddc == VGA_SWITCHEROO_IGD)
-		gmux_write8(gmux_data, GMUX_PORT_SWITCH_DDC, 1);
-	else
-		gmux_write8(gmux_data, GMUX_PORT_SWITCH_DDC, 2);
-
-	if (gmux_data->switch_state_display == VGA_SWITCHEROO_IGD)
-		gmux_write8(gmux_data, GMUX_PORT_SWITCH_DISPLAY, 2);
-	else
-		gmux_write8(gmux_data, GMUX_PORT_SWITCH_DISPLAY, 3);
-
-	if (gmux_data->switch_state_external == VGA_SWITCHEROO_IGD)
-		gmux_write8(gmux_data, GMUX_PORT_SWITCH_EXTERNAL, 2);
-	else
-		gmux_write8(gmux_data, GMUX_PORT_SWITCH_EXTERNAL, 3);
-}
-
 static int gmux_switchto(enum vga_switcheroo_client_id id)
 {
-	apple_gmux_data->switch_state_ddc = id;
-	apple_gmux_data->switch_state_display = id;
-	apple_gmux_data->switch_state_external = id;
-
-	gmux_write_switch_state(apple_gmux_data);
+	if (id == VGA_SWITCHEROO_IGD) {
+		gmux_write8(apple_gmux_data, GMUX_PORT_SWITCH_DDC, 1);
+		gmux_write8(apple_gmux_data, GMUX_PORT_SWITCH_DISPLAY, 2);
+		gmux_write8(apple_gmux_data, GMUX_PORT_SWITCH_EXTERNAL, 2);
+	} else {
+		gmux_write8(apple_gmux_data, GMUX_PORT_SWITCH_DDC, 2);
+		gmux_write8(apple_gmux_data, GMUX_PORT_SWITCH_DISPLAY, 3);
+		gmux_write8(apple_gmux_data, GMUX_PORT_SWITCH_EXTERNAL, 3);
+	}
 
 	return 0;
-}
-
-static int gmux_switch_ddc(enum vga_switcheroo_client_id id)
-{
-	enum vga_switcheroo_client_id old_ddc_owner =
-		apple_gmux_data->switch_state_ddc;
-
-	if (id == old_ddc_owner)
-		return id;
-
-	pr_debug("Switching DDC from %d to %d\n", old_ddc_owner, id);
-	apple_gmux_data->switch_state_ddc = id;
-
-	if (id == VGA_SWITCHEROO_IGD)
-		gmux_write8(apple_gmux_data, GMUX_PORT_SWITCH_DDC, 1);
-	else
-		gmux_write8(apple_gmux_data, GMUX_PORT_SWITCH_DDC, 2);
-
-	return old_ddc_owner;
 }
 
 /**
@@ -494,15 +440,17 @@ static int gmux_get_client_id(struct pci_dev *pdev)
 		return VGA_SWITCHEROO_DIS;
 }
 
-static const struct vga_switcheroo_handler gmux_handler_indexed = {
-	.switchto = gmux_switchto,
-	.power_state = gmux_set_power_state,
-	.get_client_id = gmux_get_client_id,
-};
+static enum vga_switcheroo_client_id
+gmux_active_client(struct apple_gmux_data *gmux_data)
+{
+	if (gmux_read8(gmux_data, GMUX_PORT_SWITCH_DISPLAY) == 2)
+		return VGA_SWITCHEROO_IGD;
 
-static const struct vga_switcheroo_handler gmux_handler_classic = {
+	return VGA_SWITCHEROO_DIS;
+}
+
+static const struct vga_switcheroo_handler gmux_handler = {
 	.switchto = gmux_switchto,
-	.switch_ddc = gmux_switch_ddc,
 	.power_state = gmux_set_power_state,
 	.get_client_id = gmux_get_client_id,
 };
@@ -565,6 +513,7 @@ static int gmux_suspend(struct device *dev)
 	struct pnp_dev *pnp = to_pnp_dev(dev);
 	struct apple_gmux_data *gmux_data = pnp_get_drvdata(pnp);
 
+	gmux_data->resume_client_id = gmux_active_client(gmux_data);
 	gmux_disable_interrupts(gmux_data);
 	return 0;
 }
@@ -575,7 +524,7 @@ static int gmux_resume(struct device *dev)
 	struct apple_gmux_data *gmux_data = pnp_get_drvdata(pnp);
 
 	gmux_enable_interrupts(gmux_data);
-	gmux_write_switch_state(gmux_data);
+	gmux_switchto(gmux_data->resume_client_id);
 	if (gmux_data->power_state == VGA_SWITCHEROO_OFF)
 		gmux_set_discrete_state(gmux_data, gmux_data->power_state);
 	return 0;
@@ -755,23 +704,9 @@ static int gmux_probe(struct pnp_dev *pnp, const struct pnp_device_id *id)
 	apple_gmux_data = gmux_data;
 	init_completion(&gmux_data->powerchange_done);
 	gmux_enable_interrupts(gmux_data);
-	gmux_read_switch_state(gmux_data);
 
-	/*
-	 * Retina MacBook Pros cannot switch the panel's AUX separately
-	 * and need eDP pre-calibration. They are distinguishable from
-	 * pre-retinas by having an "indexed" gmux.
-	 *
-	 * Pre-retina MacBook Pros can switch the panel's DDC separately.
-	 */
-	if (gmux_data->indexed)
-		ret = vga_switcheroo_register_handler(&gmux_handler_indexed,
-					      VGA_SWITCHEROO_NEEDS_EDP_CONFIG);
-	else
-		ret = vga_switcheroo_register_handler(&gmux_handler_classic,
-					      VGA_SWITCHEROO_CAN_SWITCH_DDC);
-	if (ret) {
-		pr_err("Failed to register vga_switcheroo handler\n");
+	if (vga_switcheroo_register_handler(&gmux_handler)) {
+		ret = -ENODEV;
 		goto err_register_handler;
 	}
 
@@ -829,7 +764,7 @@ static void gmux_remove(struct pnp_dev *pnp)
 }
 
 static const struct pnp_device_id gmux_device_ids[] = {
-	{GMUX_ACPI_HID, 0},
+	{"APP000B", 0},
 	{"", 0}
 };
 

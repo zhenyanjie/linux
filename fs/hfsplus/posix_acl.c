@@ -48,6 +48,9 @@ struct posix_acl *hfsplus_get_posix_acl(struct inode *inode, int type)
 
 	hfsplus_destroy_attr_entry((hfsplus_attr_entry *)value);
 
+	if (!IS_ERR(acl))
+		set_cached_acl(inode, type, acl);
+
 	return acl;
 }
 

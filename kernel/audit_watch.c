@@ -19,7 +19,6 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#include <linux/file.h>
 #include <linux/kernel.h>
 #include <linux/audit.h>
 #include <linux/kthread.h>
@@ -186,7 +185,7 @@ static struct audit_watch *audit_init_watch(char *path)
 	return watch;
 }
 
-/* Translate a watch string to kernel representation. */
+/* Translate a watch string to kernel respresentation. */
 int audit_to_watch(struct audit_krule *krule, char *path, int len, u32 op)
 {
 	struct audit_watch *watch;
@@ -368,7 +367,7 @@ static int audit_get_nd(struct audit_watch *watch, struct path *parent)
 	inode_unlock(d_backing_inode(parent->dentry));
 	if (d_is_positive(d)) {
 		/* update watch filter fields */
-		watch->dev = d->d_sb->s_dev;
+		watch->dev = d_backing_inode(d)->i_sb->s_dev;
 		watch->ino = d_backing_inode(d)->i_ino;
 	}
 	dput(d);
@@ -545,11 +544,10 @@ int audit_exe_compare(struct task_struct *tsk, struct audit_fsnotify_mark *mark)
 	unsigned long ino;
 	dev_t dev;
 
-	exe_file = get_task_exe_file(tsk);
-	if (!exe_file)
-		return 0;
+	rcu_read_lock();
+	exe_file = rcu_dereference(tsk->mm->exe_file);
 	ino = exe_file->f_inode->i_ino;
 	dev = exe_file->f_inode->i_sb->s_dev;
-	fput(exe_file);
+	rcu_read_unlock();
 	return audit_mark_compare(mark, ino, dev);
 }

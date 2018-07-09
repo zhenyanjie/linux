@@ -18,7 +18,7 @@
 #include <linux/fs.h>
 #include <linux/xattr.h>
 #include <linux/evm.h>
-
+#include <crypto/hash_info.h>
 #include "ima.h"
 
 /*
@@ -156,7 +156,7 @@ err_out:
  * ima_get_action - appraise & measure decision based on policy.
  * @inode: pointer to inode to measure
  * @mask: contains the permission mask (MAY_READ, MAY_WRITE, MAY_EXECUTE)
- * @func: caller identifier
+ * @function: calling function (FILE_CHECK, BPRM_CHECK, MMAP_CHECK, MODULE_CHECK)
  *
  * The policy is defined in terms of keypairs:
  *		subj=, obj=, type=, func=, mask=, fsmagic=
@@ -168,13 +168,13 @@ err_out:
  * Returns IMA_MEASURE, IMA_APPRAISE mask.
  *
  */
-int ima_get_action(struct inode *inode, int mask, enum ima_hooks func)
+int ima_get_action(struct inode *inode, int mask, int function)
 {
 	int flags = IMA_MEASURE | IMA_AUDIT | IMA_APPRAISE;
 
 	flags &= ima_policy_flag;
 
-	return ima_match_policy(inode, func, mask, flags);
+	return ima_match_policy(inode, function, mask, flags);
 }
 
 /*
@@ -188,8 +188,9 @@ int ima_get_action(struct inode *inode, int mask, enum ima_hooks func)
  * Return 0 on success, error code otherwise
  */
 int ima_collect_measurement(struct integrity_iint_cache *iint,
-			    struct file *file, void *buf, loff_t size,
-			    enum hash_algo algo)
+			    struct file *file,
+			    struct evm_ima_xattr_data **xattr_value,
+			    int *xattr_len)
 {
 	const char *audit_cause = "failed";
 	struct inode *inode = file_inode(file);
@@ -200,6 +201,9 @@ int ima_collect_measurement(struct integrity_iint_cache *iint,
 		char digest[IMA_MAX_DIGEST_SIZE];
 	} hash;
 
+	if (xattr_value)
+		*xattr_len = ima_read_xattr(file->f_path.dentry, xattr_value);
+
 	if (!(iint->flags & IMA_COLLECTED)) {
 		u64 i_version = file_inode(file)->i_version;
 
@@ -209,10 +213,13 @@ int ima_collect_measurement(struct integrity_iint_cache *iint,
 			goto out;
 		}
 
-		hash.hdr.algo = algo;
+		/* use default hash algorithm */
+		hash.hdr.algo = ima_hash_algo;
 
-		result = (!buf) ?  ima_calc_file_hash(file, &hash.hdr) :
-			ima_calc_buffer_hash(buf, size, &hash.hdr);
+		if (xattr_value)
+			ima_get_hash_algo(*xattr_value, *xattr_len, &hash.hdr);
+
+		result = ima_calc_file_hash(file, &hash.hdr);
 		if (!result) {
 			int length = sizeof(hash.hdr) + hash.hdr.length;
 			void *tmpbuf = krealloc(iint->ima_hash, length,
@@ -313,7 +320,7 @@ void ima_audit_measurement(struct integrity_iint_cache *iint,
 	iint->flags |= IMA_AUDITED;
 }
 
-const char *ima_d_path(const struct path *path, char **pathbuf)
+const char *ima_d_path(struct path *path, char **pathbuf)
 {
 	char *pathname = NULL;
 

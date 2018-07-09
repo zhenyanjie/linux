@@ -34,7 +34,7 @@
  */
 
 #include <linux/err.h>
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/gpio.h>
 #include <linux/irq.h>
 #include <linux/slab.h>
@@ -557,6 +557,7 @@ static const struct of_device_id mvebu_gpio_of_match[] = {
 		/* sentinel */
 	},
 };
+MODULE_DEVICE_TABLE(of, mvebu_gpio_of_match);
 
 static int mvebu_gpio_suspend(struct platform_device *pdev, pm_message_t state)
 {
@@ -755,7 +756,7 @@ static int mvebu_gpio_probe(struct platform_device *pdev)
 		BUG();
 	}
 
-	devm_gpiochip_add_data(&pdev->dev, &mvchip->chip, mvchip);
+	gpiochip_add_data(&mvchip->chip, mvchip);
 
 	/* Some gpio controllers do not provide irq support */
 	if (!of_irq_count(np))
@@ -776,14 +777,16 @@ static int mvebu_gpio_probe(struct platform_device *pdev)
 	mvchip->irqbase = irq_alloc_descs(-1, 0, ngpios, -1);
 	if (mvchip->irqbase < 0) {
 		dev_err(&pdev->dev, "no irqs\n");
-		return mvchip->irqbase;
+		err = mvchip->irqbase;
+		goto err_gpiochip_add;
 	}
 
 	gc = irq_alloc_generic_chip("mvebu_gpio_irq", 2, mvchip->irqbase,
 				    mvchip->membase, handle_level_irq);
 	if (!gc) {
 		dev_err(&pdev->dev, "Cannot allocate generic irq_chip\n");
-		return -ENOMEM;
+		err = -ENOMEM;
+		goto err_gpiochip_add;
 	}
 
 	gc->private = mvchip;
@@ -825,6 +828,9 @@ err_generic_chip:
 				IRQ_LEVEL | IRQ_NOPROBE);
 	kfree(gc);
 
+err_gpiochip_add:
+	gpiochip_remove(&mvchip->chip);
+
 	return err;
 }
 
@@ -837,4 +843,4 @@ static struct platform_driver mvebu_gpio_driver = {
 	.suspend        = mvebu_gpio_suspend,
 	.resume         = mvebu_gpio_resume,
 };
-builtin_platform_driver(mvebu_gpio_driver);
+module_platform_driver(mvebu_gpio_driver);

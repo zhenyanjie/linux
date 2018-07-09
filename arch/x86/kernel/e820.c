@@ -24,7 +24,6 @@
 #include <asm/e820.h>
 #include <asm/proto.h>
 #include <asm/setup.h>
-#include <asm/cpufeature.h>
 
 /*
  * The e820 map is the map that gets modified e.g. with command line parameters
@@ -348,7 +347,7 @@ int __init sanitize_e820_map(struct e820entry *biosmap, int max_nr_map,
 		 * continue building up new bios map based on this
 		 * information
 		 */
-		if (current_type != last_type) {
+		if (current_type != last_type || current_type == E820_PRAM) {
 			if (last_type != 0)	 {
 				new_bios[new_bios_entry].size =
 					change_point[chgidx]->addr - last_addr;
@@ -754,7 +753,7 @@ u64 __init early_reserve_e820(u64 size, u64 align)
 /*
  * Find the highest page frame number we have available
  */
-static unsigned long __init e820_end_pfn(unsigned long limit_pfn, unsigned type)
+static unsigned long __init e820_end_pfn(unsigned long limit_pfn)
 {
 	int i;
 	unsigned long last_pfn = 0;
@@ -765,7 +764,11 @@ static unsigned long __init e820_end_pfn(unsigned long limit_pfn, unsigned type)
 		unsigned long start_pfn;
 		unsigned long end_pfn;
 
-		if (ei->type != type)
+		/*
+		 * Persistent memory is accounted as ram for purposes of
+		 * establishing max_pfn and mem_map.
+		 */
+		if (ei->type != E820_RAM && ei->type != E820_PRAM)
 			continue;
 
 		start_pfn = ei->addr >> PAGE_SHIFT;
@@ -790,12 +793,12 @@ static unsigned long __init e820_end_pfn(unsigned long limit_pfn, unsigned type)
 }
 unsigned long __init e820_end_of_ram_pfn(void)
 {
-	return e820_end_pfn(MAX_ARCH_PFN, E820_RAM);
+	return e820_end_pfn(MAX_ARCH_PFN);
 }
 
 unsigned long __init e820_end_of_low_ram_pfn(void)
 {
-	return e820_end_pfn(1UL << (32 - PAGE_SHIFT), E820_RAM);
+	return e820_end_pfn(1UL << (32-PAGE_SHIFT));
 }
 
 static void early_panic(char *msg)
@@ -922,41 +925,6 @@ static const char *e820_type_to_string(int e820_type)
 	}
 }
 
-static unsigned long e820_type_to_iomem_type(int e820_type)
-{
-	switch (e820_type) {
-	case E820_RESERVED_KERN:
-	case E820_RAM:
-		return IORESOURCE_SYSTEM_RAM;
-	case E820_ACPI:
-	case E820_NVS:
-	case E820_UNUSABLE:
-	case E820_PRAM:
-	case E820_PMEM:
-	default:
-		return IORESOURCE_MEM;
-	}
-}
-
-static unsigned long e820_type_to_iores_desc(int e820_type)
-{
-	switch (e820_type) {
-	case E820_ACPI:
-		return IORES_DESC_ACPI_TABLES;
-	case E820_NVS:
-		return IORES_DESC_ACPI_NV_STORAGE;
-	case E820_PMEM:
-		return IORES_DESC_PERSISTENT_MEMORY;
-	case E820_PRAM:
-		return IORES_DESC_PERSISTENT_MEMORY_LEGACY;
-	case E820_RESERVED_KERN:
-	case E820_RAM:
-	case E820_UNUSABLE:
-	default:
-		return IORES_DESC_NONE;
-	}
-}
-
 static bool do_mark_busy(u32 type, struct resource *res)
 {
 	/* this is the legacy bios/dos rom-shadow + mmio region */
@@ -999,8 +967,7 @@ void __init e820_reserve_resources(void)
 		res->start = e820.map[i].addr;
 		res->end = end;
 
-		res->flags = e820_type_to_iomem_type(e820.map[i].type);
-		res->desc = e820_type_to_iores_desc(e820.map[i].type);
+		res->flags = IORESOURCE_MEM;
 
 		/*
 		 * don't register the region that could be conflicted with

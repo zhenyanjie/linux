@@ -278,8 +278,7 @@ static int prism2_fwapply(const struct ihex_binrec *rfptr,
 	/* Build the PDA we're going to use. */
 	if (read_cardpda(&pda, wlandev)) {
 		netdev_err(wlandev->netdev, "load_cardpda failed, exiting.\n");
-		result = 1;
-		goto out;
+		return 1;
 	}
 
 	/* read the card's PRI-SUP */
@@ -316,58 +315,51 @@ static int prism2_fwapply(const struct ihex_binrec *rfptr,
 	if (result) {
 		netdev_err(wlandev->netdev,
 			   "Failed to read the data exiting.\n");
-		goto out;
+		return 1;
 	}
 
 	result = validate_identity();
+
 	if (result) {
 		netdev_err(wlandev->netdev, "Incompatible firmware image.\n");
-		goto out;
+		return 1;
 	}
 
 	if (startaddr == 0x00000000) {
 		netdev_err(wlandev->netdev,
 			   "Can't RAM download a Flash image!\n");
-		result = 1;
-		goto out;
+		return 1;
 	}
 
 	/* Make the image chunks */
 	result = mkimage(fchunk, &nfchunks);
-	if (result) {
-		netdev_err(wlandev->netdev, "Failed to make image chunk.\n");
-		goto free_chunks;
-	}
 
 	/* Do any plugging */
 	result = plugimage(fchunk, nfchunks, s3plug, ns3plug, &pda);
 	if (result) {
 		netdev_err(wlandev->netdev, "Failed to plug data.\n");
-		goto free_chunks;
+		return 1;
 	}
 
 	/* Insert any CRCs */
-	result = crcimage(fchunk, nfchunks, s3crc, ns3crc);
-	if (result) {
+	if (crcimage(fchunk, nfchunks, s3crc, ns3crc)) {
 		netdev_err(wlandev->netdev, "Failed to insert all CRCs\n");
-		goto free_chunks;
+		return 1;
 	}
 
 	/* Write the image */
 	result = writeimage(wlandev, fchunk, nfchunks);
 	if (result) {
 		netdev_err(wlandev->netdev, "Failed to ramwrite image data.\n");
-		goto free_chunks;
+		return 1;
 	}
 
-	netdev_info(wlandev->netdev, "prism2_usb: firmware loading finished.\n");
-
-free_chunks:
 	/* clear any allocated memory */
 	free_chunks(fchunk, &nfchunks);
 	free_srecs();
 
-out:
+	netdev_info(wlandev->netdev, "prism2_usb: firmware loading finished.\n");
+
 	return result;
 }
 
@@ -546,7 +538,7 @@ static int mkimage(struct imgchunk *clist, unsigned int *ccnt)
 	/* Allocate buffer space for chunks */
 	for (i = 0; i < *ccnt; i++) {
 		clist[i].data = kzalloc(clist[i].len, GFP_KERNEL);
-		if (!clist[i].data) {
+		if (clist[i].data == NULL) {
 			pr_err("failed to allocate image space, exitting.\n");
 			return 1;
 		}

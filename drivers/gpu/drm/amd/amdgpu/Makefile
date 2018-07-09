@@ -8,8 +8,7 @@ ccflags-y := -Iinclude/drm -I$(FULL_AMD_PATH)/include/asic_reg \
 	-I$(FULL_AMD_PATH)/include \
 	-I$(FULL_AMD_PATH)/amdgpu \
 	-I$(FULL_AMD_PATH)/scheduler \
-	-I$(FULL_AMD_PATH)/powerplay/inc \
-	-I$(FULL_AMD_PATH)/acp/include
+	-I$(FULL_AMD_PATH)/powerplay/inc
 
 amdgpu-y := amdgpu_drv.o
 
@@ -21,7 +20,7 @@ amdgpu-y += amdgpu_device.o amdgpu_kms.o \
 	amdgpu_fb.o amdgpu_gem.o amdgpu_ring.o \
 	amdgpu_cs.o amdgpu_bios.o amdgpu_benchmark.o amdgpu_test.o \
 	amdgpu_pm.o atombios_dp.o amdgpu_afmt.o amdgpu_trace_points.o \
-	atombios_encoders.o amdgpu_sa.o atombios_i2c.o \
+	atombios_encoders.o amdgpu_semaphore.o amdgpu_sa.o atombios_i2c.o \
 	amdgpu_prime.o amdgpu_vm.o amdgpu_ib.o amdgpu_pll.o \
 	amdgpu_ucode.o amdgpu_bo_list.o amdgpu_ctx.o amdgpu_sync.o
 
@@ -93,17 +92,7 @@ amdgpu-y += amdgpu_cgs.o
 amdgpu-y += \
 	../scheduler/gpu_scheduler.o \
 	../scheduler/sched_fence.o \
-	amdgpu_job.o
-
-# ACP componet
-ifneq ($(CONFIG_DRM_AMD_ACP),)
-amdgpu-y += amdgpu_acp.o
-
-AMDACPPATH := ../acp
-include $(FULL_AMD_PATH)/acp/Makefile
-
-amdgpu-y += $(AMD_ACP_FILES)
-endif
+	amdgpu_sched.o
 
 amdgpu-$(CONFIG_COMPAT) += amdgpu_ioc32.o
 amdgpu-$(CONFIG_VGA_SWITCHEROO) += amdgpu_atpx_handler.o

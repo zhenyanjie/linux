@@ -76,7 +76,6 @@ int default_machine_kexec_prepare(struct kimage *image)
 	 * end of the blocked region (begin >= high).  Use the
 	 * boolean identity !(a || b)  === (!a && !b).
 	 */
-#ifdef CONFIG_PPC_STD_MMU_64
 	if (htab_address) {
 		low = __pa(htab_address);
 		high = low + htab_size_bytes;
@@ -89,7 +88,6 @@ int default_machine_kexec_prepare(struct kimage *image)
 				return -ETXTBSY;
 		}
 	}
-#endif /* CONFIG_PPC_STD_MMU_64 */
 
 	/* We also should not overwrite the tce tables */
 	for_each_node_by_type(node, "pci") {
@@ -383,7 +381,7 @@ void default_machine_kexec(struct kimage *image)
 	/* NOTREACHED */
 }
 
-#ifdef CONFIG_PPC_STD_MMU_64
+#ifndef CONFIG_PPC_BOOK3E
 /* Values we need to export to the second kernel via the device tree. */
 static unsigned long htab_base;
 static unsigned long htab_size;
@@ -403,6 +401,7 @@ static struct property htab_size_prop = {
 static int __init export_htab_values(void)
 {
 	struct device_node *node;
+	struct property *prop;
 
 	/* On machines with no htab htab_address is NULL */
 	if (!htab_address)
@@ -413,8 +412,12 @@ static int __init export_htab_values(void)
 		return -ENODEV;
 
 	/* remove any stale propertys so ours can be found */
-	of_remove_property(node, of_find_property(node, htab_base_prop.name, NULL));
-	of_remove_property(node, of_find_property(node, htab_size_prop.name, NULL));
+	prop = of_find_property(node, htab_base_prop.name, NULL);
+	if (prop)
+		of_remove_property(node, prop);
+	prop = of_find_property(node, htab_size_prop.name, NULL);
+	if (prop)
+		of_remove_property(node, prop);
 
 	htab_base = cpu_to_be64(__pa(htab_address));
 	of_add_property(node, &htab_base_prop);
@@ -425,4 +428,4 @@ static int __init export_htab_values(void)
 	return 0;
 }
 late_initcall(export_htab_values);
-#endif /* CONFIG_PPC_STD_MMU_64 */
+#endif /* !CONFIG_PPC_BOOK3E */

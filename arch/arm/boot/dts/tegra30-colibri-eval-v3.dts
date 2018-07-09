@@ -15,10 +15,6 @@
 		serial2 = &uartd;
 	};
 
-	chosen {
-		stdout-path = "serial0:115200n8";
-	};
-
 	host1x@50000000 {
 		dc@54200000 {
 			rgb {
@@ -146,7 +142,7 @@
 			gpios = <&gpio TEGRA_GPIO(V, 1) GPIO_ACTIVE_HIGH>;
 			linux,code = <KEY_WAKEUP>;
 			debounce-interval = <10>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 	};
 

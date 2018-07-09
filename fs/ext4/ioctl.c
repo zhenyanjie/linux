@@ -13,8 +13,8 @@
 #include <linux/compat.h>
 #include <linux/mount.h>
 #include <linux/file.h>
+#include <linux/random.h>
 #include <linux/quotaops.h>
-#include <linux/uuid.h>
 #include <asm/uaccess.h>
 #include "ext4_jbd2.h"
 #include "ext4.h"
@@ -782,13 +782,7 @@ resizefs_out:
 			goto encryption_policy_out;
 		}
 
-		err = mnt_want_write_file(filp);
-		if (err)
-			goto encryption_policy_out;
-
 		err = ext4_process_policy(&policy, inode);
-
-		mnt_drop_write_file(filp);
 encryption_policy_out:
 		return err;
 #else

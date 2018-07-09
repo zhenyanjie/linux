@@ -481,16 +481,29 @@ static int sec_pmic_probe(struct i2c_client *i2c,
 		/* If this happens the probe function is problem */
 		BUG();
 	}
-	ret = devm_mfd_add_devices(sec_pmic->dev, -1, sec_devs, num_sec_devs,
-				   NULL, 0, NULL);
+	ret = mfd_add_devices(sec_pmic->dev, -1, sec_devs, num_sec_devs, NULL,
+			      0, NULL);
 	if (ret)
-		return ret;
+		goto err_mfd;
 
 	device_init_wakeup(sec_pmic->dev, sec_pmic->wakeup);
 	sec_pmic_configure(sec_pmic);
 	sec_pmic_dump_rev(sec_pmic);
 
 	return ret;
+
+err_mfd:
+	sec_irq_exit(sec_pmic);
+	return ret;
+}
+
+static int sec_pmic_remove(struct i2c_client *i2c)
+{
+	struct sec_pmic_dev *sec_pmic = i2c_get_clientdata(i2c);
+
+	mfd_remove_devices(sec_pmic->dev);
+	sec_irq_exit(sec_pmic);
+	return 0;
 }
 
 static void sec_pmic_shutdown(struct i2c_client *i2c)
@@ -570,6 +583,7 @@ static struct i2c_driver sec_pmic_driver = {
 		   .of_match_table = of_match_ptr(sec_dt_match),
 	},
 	.probe = sec_pmic_probe,
+	.remove = sec_pmic_remove,
 	.shutdown = sec_pmic_shutdown,
 	.id_table = sec_pmic_id,
 };

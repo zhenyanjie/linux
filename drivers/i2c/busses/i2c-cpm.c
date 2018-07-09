@@ -197,7 +197,9 @@ static void cpm_i2c_parse_message(struct i2c_adapter *adap,
 	tbdf = cpm->tbase + tx;
 	rbdf = cpm->rbase + rx;
 
-	addr = i2c_8bit_addr_from_msg(pmsg);
+	addr = pmsg->addr << 1;
+	if (pmsg->flags & I2C_M_RD)
+		addr |= 1;
 
 	tb = cpm->txbuf[tx];
 	rb = cpm->rxbuf[rx];

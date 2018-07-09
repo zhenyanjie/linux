@@ -911,7 +911,11 @@ static struct pm2xxx_irq pm2xxx_charger_irq[] = {
 	{"PM2XXX_IRQ_INT", pm2xxx_irq_int},
 };
 
-static int __maybe_unused pm2xxx_wall_charger_resume(struct device *dev)
+#ifdef CONFIG_PM
+
+#ifdef CONFIG_PM_SLEEP
+
+static int pm2xxx_wall_charger_resume(struct device *dev)
 {
 	struct i2c_client *i2c_client = to_i2c_client(dev);
 	struct pm2xxx_charger *pm2;
@@ -927,7 +931,7 @@ static int __maybe_unused pm2xxx_wall_charger_resume(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused pm2xxx_wall_charger_suspend(struct device *dev)
+static int pm2xxx_wall_charger_suspend(struct device *dev)
 {
 	struct i2c_client *i2c_client = to_i2c_client(dev);
 	struct pm2xxx_charger *pm2;
@@ -945,7 +949,9 @@ static int __maybe_unused pm2xxx_wall_charger_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused pm2xxx_runtime_suspend(struct device *dev)
+#endif
+
+static int  pm2xxx_runtime_suspend(struct device *dev)
 {
 	struct i2c_client *pm2xxx_i2c_client = to_i2c_client(dev);
 	struct pm2xxx_charger *pm2;
@@ -956,7 +962,7 @@ static int __maybe_unused pm2xxx_runtime_suspend(struct device *dev)
 	return 0;
 }
 
-static int __maybe_unused pm2xxx_runtime_resume(struct device *dev)
+static int  pm2xxx_runtime_resume(struct device *dev)
 {
 	struct i2c_client *pm2xxx_i2c_client = to_i2c_client(dev);
 	struct pm2xxx_charger *pm2;
@@ -969,11 +975,15 @@ static int __maybe_unused pm2xxx_runtime_resume(struct device *dev)
 	return 0;
 }
 
-static const struct dev_pm_ops pm2xxx_pm_ops __maybe_unused = {
+static const struct dev_pm_ops pm2xxx_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(pm2xxx_wall_charger_suspend,
 		pm2xxx_wall_charger_resume)
 	SET_RUNTIME_PM_OPS(pm2xxx_runtime_suspend, pm2xxx_runtime_resume, NULL)
 };
+#define  PM2XXX_PM_OPS (&pm2xxx_pm_ops)
+#else
+#define  PM2XXX_PM_OPS  NULL
+#endif
 
 static int pm2xxx_wall_charger_probe(struct i2c_client *i2c_client,
 		const struct i2c_device_id *id)
@@ -1234,7 +1244,7 @@ static struct i2c_driver pm2xxx_charger_driver = {
 	.remove = pm2xxx_wall_charger_remove,
 	.driver = {
 		.name = "pm2xxx-wall_charger",
-		.pm = IS_ENABLED(CONFIG_PM) ? &pm2xxx_pm_ops : NULL,
+		.pm = PM2XXX_PM_OPS,
 	},
 	.id_table = pm2xxx_id,
 };

@@ -915,11 +915,11 @@ static int ip_error(struct sk_buff *skb)
 	if (!IN_DEV_FORWARD(in_dev)) {
 		switch (rt->dst.error) {
 		case EHOSTUNREACH:
-			__IP_INC_STATS(net, IPSTATS_MIB_INADDRERRORS);
+			IP_INC_STATS_BH(net, IPSTATS_MIB_INADDRERRORS);
 			break;
 
 		case ENETUNREACH:
-			__IP_INC_STATS(net, IPSTATS_MIB_INNOROUTES);
+			IP_INC_STATS_BH(net, IPSTATS_MIB_INNOROUTES);
 			break;
 		}
 		goto out;
@@ -934,7 +934,7 @@ static int ip_error(struct sk_buff *skb)
 		break;
 	case ENETUNREACH:
 		code = ICMP_NET_UNREACH;
-		__IP_INC_STATS(net, IPSTATS_MIB_INNOROUTES);
+		IP_INC_STATS_BH(net, IPSTATS_MIB_INNOROUTES);
 		break;
 	case EACCES:
 		code = ICMP_PKT_FILTERED;
@@ -1438,9 +1438,9 @@ static void rt_set_nexthop(struct rtable *rt, __be32 daddr,
 #endif
 }
 
-struct rtable *rt_dst_alloc(struct net_device *dev,
-			    unsigned int flags, u16 type,
-			    bool nopolicy, bool noxfrm, bool will_cache)
+static struct rtable *rt_dst_alloc(struct net_device *dev,
+				   unsigned int flags, u16 type,
+				   bool nopolicy, bool noxfrm, bool will_cache)
 {
 	struct rtable *rt;
 
@@ -1468,7 +1468,6 @@ struct rtable *rt_dst_alloc(struct net_device *dev,
 
 	return rt;
 }
-EXPORT_SYMBOL(rt_dst_alloc);
 
 /* called in rcu_read_lock() section */
 static int ip_route_input_mc(struct sk_buff *skb, __be32 daddr, __be32 saddr,
@@ -2146,7 +2145,6 @@ struct rtable *__ip_route_output_key_hash(struct net *net, struct flowi4 *fl4,
 	unsigned int flags = 0;
 	struct fib_result res;
 	struct rtable *rth;
-	int master_idx;
 	int orig_oif;
 	int err = -ENETUNREACH;
 
@@ -2156,9 +2154,6 @@ struct rtable *__ip_route_output_key_hash(struct net *net, struct flowi4 *fl4,
 
 	orig_oif = fl4->flowi4_oif;
 
-	master_idx = l3mdev_master_ifindex_by_index(net, fl4->flowi4_oif);
-	if (master_idx)
-		fl4->flowi4_oif = master_idx;
 	fl4->flowi4_iif = LOOPBACK_IFINDEX;
 	fl4->flowi4_tos = tos & IPTOS_RT_MASK;
 	fl4->flowi4_scope = ((tos & RTO_ONLINK) ?

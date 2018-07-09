@@ -26,13 +26,11 @@ struct fw_scs1x {
 	u8 output_bytes;
 	bool output_escaped;
 	bool output_escape_high_nibble;
-	struct work_struct work;
+	struct tasklet_struct tasklet;
 	wait_queue_head_t idle_wait;
 	u8 buffer[HSS1394_MAX_PACKET_SIZE];
 	bool transaction_running;
 	struct fw_transaction transaction;
-	unsigned int transaction_bytes;
-	bool error;
 	struct fw_device *fw_dev;
 };
 
@@ -127,16 +125,11 @@ static void scs_write_callback(struct fw_card *card, int rcode,
 {
 	struct fw_scs1x *scs = callback_data;
 
-	if (!rcode_is_permanent_error(rcode)) {
-		/* Don't retry for this data. */
-		if (rcode == RCODE_COMPLETE)
-			scs->transaction_bytes = 0;
-	} else {
-		scs->error = true;
-	}
+	if (rcode == RCODE_GENERATION)
+		;	/* TODO: retry this packet */
 
 	scs->transaction_running = false;
-	schedule_work(&scs->work);
+	tasklet_schedule(&scs->tasklet);
 }
 
 static bool is_valid_running_status(u8 status)
@@ -172,9 +165,9 @@ static bool is_invalid_cmd(u8 status)
 	       status == 0xfd;
 }
 
-static void scs_output_work(struct work_struct *work)
+static void scs_output_tasklet(unsigned long data)
 {
-	struct fw_scs1x *scs = container_of(work, struct fw_scs1x, work);
+	struct fw_scs1x *scs = (struct fw_scs1x *)data;
 	struct snd_rawmidi_substream *stream;
 	unsigned int i;
 	u8 byte;
@@ -184,14 +177,11 @@ static void scs_output_work(struct work_struct *work)
 		return;
 
 	stream = ACCESS_ONCE(scs->output);
-	if (!stream || scs->error) {
+	if (!stream) {
 		scs->output_idle = true;
 		wake_up(&scs->idle_wait);
 		return;
 	}
-
-	if (scs->transaction_bytes > 0)
-		goto retry;
 
 	i = scs->output_bytes;
 	for (;;) {
@@ -263,16 +253,13 @@ static void scs_output_work(struct work_struct *work)
 	scs->output_bytes = 1;
 	scs->output_escaped = false;
 
-	scs->transaction_bytes = i;
-retry:
 	scs->transaction_running = true;
 	generation = scs->fw_dev->generation;
 	smp_rmb(); /* node_id vs. generation */
 	fw_send_request(scs->fw_dev->card, &scs->transaction,
 			TCODE_WRITE_BLOCK_REQUEST, scs->fw_dev->node_id,
 			generation, scs->fw_dev->max_speed, HSS1394_ADDRESS,
-			scs->buffer, scs->transaction_bytes,
-			scs_write_callback, scs);
+			scs->buffer, i, scs_write_callback, scs);
 }
 
 static int midi_capture_open(struct snd_rawmidi_substream *stream)
@@ -322,11 +309,9 @@ static void midi_playback_trigger(struct snd_rawmidi_substream *stream, int up)
 		scs->output_bytes = 1;
 		scs->output_escaped = false;
 		scs->output_idle = false;
-		scs->transaction_bytes = 0;
-		scs->error = false;
 
 		ACCESS_ONCE(scs->output) = stream;
-		schedule_work(&scs->work);
+		tasklet_schedule(&scs->tasklet);
 	} else {
 		ACCESS_ONCE(scs->output) = NULL;
 	}
@@ -410,7 +395,7 @@ int snd_oxfw_scs1x_add(struct snd_oxfw *oxfw)
 	snd_rawmidi_set_ops(rmidi, SNDRV_RAWMIDI_STREAM_OUTPUT,
 			    &midi_playback_ops);
 
-	INIT_WORK(&scs->work, scs_output_work);
+	tasklet_init(&scs->tasklet, scs_output_tasklet, (unsigned long)scs);
 	init_waitqueue_head(&scs->idle_wait);
 	scs->output_idle = true;
 

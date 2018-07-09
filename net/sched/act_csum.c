@@ -42,13 +42,9 @@ static const struct nla_policy csum_policy[TCA_CSUM_MAX + 1] = {
 	[TCA_CSUM_PARMS] = { .len = sizeof(struct tc_csum), },
 };
 
-static int csum_net_id;
-
-static int tcf_csum_init(struct net *net, struct nlattr *nla,
-			 struct nlattr *est, struct tc_action *a, int ovr,
-			 int bind)
+static int tcf_csum_init(struct net *n, struct nlattr *nla, struct nlattr *est,
+			 struct tc_action *a, int ovr, int bind)
 {
-	struct tc_action_net *tn = net_generic(net, csum_net_id);
 	struct nlattr *tb[TCA_CSUM_MAX + 1];
 	struct tc_csum *parm;
 	struct tcf_csum *p;
@@ -65,9 +61,9 @@ static int tcf_csum_init(struct net *net, struct nlattr *nla,
 		return -EINVAL;
 	parm = nla_data(tb[TCA_CSUM_PARMS]);
 
-	if (!tcf_hash_check(tn, parm->index, a, bind)) {
-		ret = tcf_hash_create(tn, parm->index, est, a,
-				      sizeof(*p), bind, false);
+	if (!tcf_hash_check(parm->index, a, bind)) {
+		ret = tcf_hash_create(parm->index, est, a, sizeof(*p),
+				      bind, false);
 		if (ret)
 			return ret;
 		ret = ACT_P_CREATED;
@@ -86,7 +82,7 @@ static int tcf_csum_init(struct net *net, struct nlattr *nla,
 	spin_unlock_bh(&p->tcf_lock);
 
 	if (ret == ACT_P_CREATED)
-		tcf_hash_insert(tn, a);
+		tcf_hash_insert(a);
 
 	return ret;
 }
@@ -109,7 +105,9 @@ static void *tcf_csum_skb_nextlayer(struct sk_buff *skb,
 	int hl = ihl + jhl;
 
 	if (!pskb_may_pull(skb, ipl + ntkoff) || (ipl < hl) ||
-	    skb_try_make_writable(skb, hl + ntkoff))
+	    (skb_cloned(skb) &&
+	     !skb_clone_writable(skb, hl + ntkoff) &&
+	     pskb_expand_head(skb, 0, 0, GFP_ATOMIC)))
 		return NULL;
 	else
 		return (void *)(skb_network_header(skb) + ihl);
@@ -367,7 +365,9 @@ static int tcf_csum_ipv4(struct sk_buff *skb, u32 update_flags)
 	}
 
 	if (update_flags & TCA_CSUM_UPDATE_FLAG_IPV4HDR) {
-		if (skb_try_make_writable(skb, sizeof(*iph) + ntkoff))
+		if (skb_cloned(skb) &&
+		    !skb_clone_writable(skb, sizeof(*iph) + ntkoff) &&
+		    pskb_expand_head(skb, 0, 0, GFP_ATOMIC))
 			goto fail;
 
 		ip_send_check(ip_hdr(skb));
@@ -549,7 +549,7 @@ static int tcf_csum_dump(struct sk_buff *skb,
 	t.install = jiffies_to_clock_t(jiffies - p->tcf_tm.install);
 	t.lastuse = jiffies_to_clock_t(jiffies - p->tcf_tm.lastuse);
 	t.expires = jiffies_to_clock_t(p->tcf_tm.expires);
-	if (nla_put_64bit(skb, TCA_CSUM_TM, sizeof(t), &t, TCA_CSUM_PAD))
+	if (nla_put(skb, TCA_CSUM_TM, sizeof(t), &t))
 		goto nla_put_failure;
 
 	return skb->len;
@@ -559,22 +559,6 @@ nla_put_failure:
 	return -1;
 }
 
-static int tcf_csum_walker(struct net *net, struct sk_buff *skb,
-			   struct netlink_callback *cb, int type,
-			   struct tc_action *a)
-{
-	struct tc_action_net *tn = net_generic(net, csum_net_id);
-
-	return tcf_generic_walker(tn, skb, cb, type, a);
-}
-
-static int tcf_csum_search(struct net *net, struct tc_action *a, u32 index)
-{
-	struct tc_action_net *tn = net_generic(net, csum_net_id);
-
-	return tcf_hash_search(tn, a, index);
-}
-
 static struct tc_action_ops act_csum_ops = {
 	.kind		= "csum",
 	.type		= TCA_ACT_CSUM,
@@ -582,29 +566,6 @@ static struct tc_action_ops act_csum_ops = {
 	.act		= tcf_csum,
 	.dump		= tcf_csum_dump,
 	.init		= tcf_csum_init,
-	.walk		= tcf_csum_walker,
-	.lookup		= tcf_csum_search,
-};
-
-static __net_init int csum_init_net(struct net *net)
-{
-	struct tc_action_net *tn = net_generic(net, csum_net_id);
-
-	return tc_action_net_init(tn, &act_csum_ops, CSUM_TAB_MASK);
-}
-
-static void __net_exit csum_exit_net(struct net *net)
-{
-	struct tc_action_net *tn = net_generic(net, csum_net_id);
-
-	tc_action_net_exit(tn);
-}
-
-static struct pernet_operations csum_net_ops = {
-	.init = csum_init_net,
-	.exit = csum_exit_net,
-	.id   = &csum_net_id,
-	.size = sizeof(struct tc_action_net),
 };
 
 MODULE_DESCRIPTION("Checksum updating actions");
@@ -612,12 +573,12 @@ MODULE_LICENSE("GPL");
 
 static int __init csum_init_module(void)
 {
-	return tcf_register_action(&act_csum_ops, &csum_net_ops);
+	return tcf_register_action(&act_csum_ops, CSUM_TAB_MASK);
 }
 
 static void __exit csum_cleanup_module(void)
 {
-	tcf_unregister_action(&act_csum_ops, &csum_net_ops);
+	tcf_unregister_action(&act_csum_ops);
 }
 
 module_init(csum_init_module);

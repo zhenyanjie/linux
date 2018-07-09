@@ -37,7 +37,7 @@ static void set_topology_timer(void);
 static void topology_work_fn(struct work_struct *work);
 static struct sysinfo_15_1_x *tl_info;
 
-static bool topology_enabled = true;
+static int topology_enabled = 1;
 static DECLARE_WORK(topology_work, topology_work_fn);
 
 /*
@@ -444,7 +444,10 @@ static const struct cpumask *cpu_book_mask(int cpu)
 
 static int __init early_parse_topology(char *p)
 {
-	return kstrtobool(p, &topology_enabled);
+	if (strncmp(p, "off", 3))
+		return 0;
+	topology_enabled = 0;
+	return 0;
 }
 early_param("topology", early_parse_topology);
 

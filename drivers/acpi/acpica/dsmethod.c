@@ -209,7 +209,7 @@ acpi_ds_detect_named_opcodes(struct acpi_walk_state *walk_state,
  ******************************************************************************/
 
 acpi_status
-acpi_ds_method_error(acpi_status status, struct acpi_walk_state *walk_state)
+acpi_ds_method_error(acpi_status status, struct acpi_walk_state * walk_state)
 {
 	u32 aml_offset;
 
@@ -812,7 +812,8 @@ acpi_ds_terminate_control_method(union acpi_operand_object *method_desc,
 		if (method_desc->method.
 		    info_flags & ACPI_METHOD_SERIALIZED_PENDING) {
 			if (walk_state) {
-				ACPI_INFO(("Marking method %4.4s as Serialized "
+				ACPI_INFO((AE_INFO,
+					   "Marking method %4.4s as Serialized "
 					   "because of AE_ALREADY_EXISTS error",
 					   walk_state->method_node->name.
 					   ascii));

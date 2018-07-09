@@ -263,7 +263,6 @@ int exynos_mipi_dsi_register_lcd_driver(struct mipi_dsim_lcd_driver *lcd_drv)
 	return 0;
 
 }
-EXPORT_SYMBOL_GPL(exynos_mipi_dsi_register_lcd_driver);
 
 static struct mipi_dsim_ddi *exynos_mipi_dsi_bind_lcd_ddi(
 						struct mipi_dsim_device *dsim,
@@ -403,12 +402,12 @@ static int exynos_mipi_dsi_probe(struct platform_device *pdev)
 		goto error;
 	}
 
-	ret = platform_get_irq(pdev, 0);
-	if (ret < 0) {
+	dsim->irq = platform_get_irq(pdev, 0);
+	if (IS_ERR_VALUE(dsim->irq)) {
 		dev_err(&pdev->dev, "failed to request dsim irq resource\n");
+		ret = -EINVAL;
 		goto error;
 	}
-	dsim->irq = ret;
 
 	init_completion(&dsim_wr_comp);
 	init_completion(&dsim_rd_comp);

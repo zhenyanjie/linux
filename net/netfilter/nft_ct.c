@@ -54,6 +54,7 @@ static void nft_ct_get_eval(const struct nft_expr *expr,
 	const struct nf_conn_help *help;
 	const struct nf_conntrack_tuple *tuple;
 	const struct nf_conntrack_helper *helper;
+	long diff;
 	unsigned int state;
 
 	ct = nf_ct_get(pkt->skb, &ctinfo);
@@ -93,7 +94,10 @@ static void nft_ct_get_eval(const struct nft_expr *expr,
 		return;
 #endif
 	case NFT_CT_EXPIRATION:
-		*dest = jiffies_to_msecs(nf_ct_expires(ct));
+		diff = (long)jiffies - (long)ct->timeout.expires;
+		if (diff < 0)
+			diff = 0;
+		*dest = jiffies_to_msecs(diff);
 		return;
 	case NFT_CT_HELPER:
 		if (ct->master == NULL)
@@ -192,14 +196,6 @@ static void nft_ct_set_eval(const struct nft_expr *expr,
 			ct->mark = value;
 			nf_conntrack_event_cache(IPCT_MARK, ct);
 		}
-		break;
-#endif
-#ifdef CONFIG_NF_CONNTRACK_LABELS
-	case NFT_CT_LABELS:
-		nf_connlabels_replace(ct,
-				      &regs->data[priv->sreg],
-				      &regs->data[priv->sreg],
-				      NF_CT_LABELS_MAX_SIZE / sizeof(u32));
 		break;
 #endif
 	default:
@@ -369,16 +365,6 @@ static int nft_ct_set_init(const struct nft_ctx *ctx,
 		len = FIELD_SIZEOF(struct nf_conn, mark);
 		break;
 #endif
-#ifdef CONFIG_NF_CONNTRACK_LABELS
-	case NFT_CT_LABELS:
-		if (tb[NFTA_CT_DIRECTION])
-			return -EINVAL;
-		len = NF_CT_LABELS_MAX_SIZE;
-		err = nf_connlabels_get(ctx->net, (len * BITS_PER_BYTE) - 1);
-		if (err)
-			return err;
-		break;
-#endif
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -398,18 +384,6 @@ static int nft_ct_set_init(const struct nft_ctx *ctx,
 static void nft_ct_destroy(const struct nft_ctx *ctx,
 			   const struct nft_expr *expr)
 {
-	struct nft_ct *priv = nft_expr_priv(expr);
-
-	switch (priv->key) {
-#ifdef CONFIG_NF_CONNTRACK_LABELS
-	case NFT_CT_LABELS:
-		nf_connlabels_put(ctx->net);
-		break;
-#endif
-	default:
-		break;
-	}
-
 	nft_ct_l3proto_module_put(ctx->afi->family);
 }
 
@@ -510,8 +484,6 @@ static struct nft_expr_type nft_ct_type __read_mostly = {
 
 static int __init nft_ct_module_init(void)
 {
-	BUILD_BUG_ON(NF_CT_LABELS_MAX_SIZE > NFT_REG_SIZE);
-
 	return nft_register_expr(&nft_ct_type);
 }
 

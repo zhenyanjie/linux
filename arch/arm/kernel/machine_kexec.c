@@ -143,8 +143,10 @@ void (*kexec_reinit)(void);
 
 void machine_kexec(struct kimage *image)
 {
-	unsigned long page_list, reboot_entry_phys;
-	void (*reboot_entry)(void);
+	unsigned long page_list;
+	unsigned long reboot_code_buffer_phys;
+	unsigned long reboot_entry = (unsigned long)relocate_new_kernel;
+	unsigned long reboot_entry_phys;
 	void *reboot_code_buffer;
 
 	/*
@@ -157,6 +159,9 @@ void machine_kexec(struct kimage *image)
 
 	page_list = image->head & PAGE_MASK;
 
+	/* we need both effective and real address here */
+	reboot_code_buffer_phys =
+	    page_to_pfn(image->control_code_page) << PAGE_SHIFT;
 	reboot_code_buffer = page_address(image->control_code_page);
 
 	/* Prepare parameters for reboot_code_buffer*/
@@ -169,11 +174,10 @@ void machine_kexec(struct kimage *image)
 
 	/* copy our kernel relocation code to the control code page */
 	reboot_entry = fncpy(reboot_code_buffer,
-			     &relocate_new_kernel,
+			     reboot_entry,
 			     relocate_new_kernel_size);
-
-	/* get the identity mapping physical address for the reboot code */
-	reboot_entry_phys = virt_to_idmap(reboot_entry);
+	reboot_entry_phys = (unsigned long)reboot_entry +
+		(reboot_code_buffer_phys - (unsigned long)reboot_code_buffer);
 
 	pr_info("Bye!\n");
 

@@ -32,6 +32,8 @@ enum mctrl_gpio_idx {
 	UART_GPIO_RI = UART_GPIO_RNG,
 	UART_GPIO_RTS,
 	UART_GPIO_DTR,
+	UART_GPIO_OUT1,
+	UART_GPIO_OUT2,
 	UART_GPIO_MAX,
 };
 
@@ -60,7 +62,7 @@ struct gpio_desc *mctrl_gpio_to_gpiod(struct mctrl_gpios *gpios,
 				      enum mctrl_gpio_idx gidx);
 
 /*
- * Request and set direction of modem control line GPIOs and set up irq
+ * Request and set direction of modem control lines GPIOs and sets up irq
  * handling.
  * devm_* functions are used, so there's no need to call mctrl_gpio_free().
  * Returns a pointer to the allocated mctrl structure if ok, -ENOMEM on
@@ -69,7 +71,7 @@ struct gpio_desc *mctrl_gpio_to_gpiod(struct mctrl_gpios *gpios,
 struct mctrl_gpios *mctrl_gpio_init(struct uart_port *port, unsigned int idx);
 
 /*
- * Request and set direction of modem control line GPIOs.
+ * Request and set direction of modem control lines GPIOs.
  * devm_* functions are used, so there's no need to call mctrl_gpio_free().
  * Returns a pointer to the allocated mctrl structure if ok, -ENOMEM on
  * allocation error.

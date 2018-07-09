@@ -119,8 +119,7 @@ static int da9063_wdt_set_timeout(struct watchdog_device *wdd,
 	return ret;
 }
 
-static int da9063_wdt_restart(struct watchdog_device *wdd, unsigned long action,
-			      void *data)
+static int da9063_wdt_restart(struct watchdog_device *wdd)
 {
 	struct da9063_watchdog *wdt = watchdog_get_drvdata(wdd);
 	int ret;

@@ -54,7 +54,6 @@
 #define TEGRA_APBDMA_CSR_ONCE			BIT(27)
 #define TEGRA_APBDMA_CSR_FLOW			BIT(21)
 #define TEGRA_APBDMA_CSR_REQ_SEL_SHIFT		16
-#define TEGRA_APBDMA_CSR_REQ_SEL_MASK		0x1F
 #define TEGRA_APBDMA_CSR_WCOUNT_MASK		0xFFFC
 
 /* STATUS register */
@@ -114,8 +113,6 @@
 
 /* Channel base address offset from APBDMA base address */
 #define TEGRA_APBDMA_CHANNEL_BASE_ADD_OFFSET	0x1000
-
-#define TEGRA_APBDMA_SLAVE_ID_INVALID	(TEGRA_APBDMA_CSR_REQ_SEL_MASK + 1)
 
 struct tegra_dma;
 
@@ -356,11 +353,8 @@ static int tegra_dma_slave_config(struct dma_chan *dc,
 	}
 
 	memcpy(&tdc->dma_sconfig, sconfig, sizeof(*sconfig));
-	if (tdc->slave_id == TEGRA_APBDMA_SLAVE_ID_INVALID) {
-		if (sconfig->slave_id > TEGRA_APBDMA_CSR_REQ_SEL_MASK)
-			return -EINVAL;
+	if (!tdc->slave_id)
 		tdc->slave_id = sconfig->slave_id;
-	}
 	tdc->config_init = true;
 	return 0;
 }
@@ -1242,7 +1236,7 @@ static void tegra_dma_free_chan_resources(struct dma_chan *dc)
 	}
 	pm_runtime_put(tdma->dev);
 
-	tdc->slave_id = TEGRA_APBDMA_SLAVE_ID_INVALID;
+	tdc->slave_id = 0;
 }
 
 static struct dma_chan *tegra_dma_of_xlate(struct of_phandle_args *dma_spec,
@@ -1251,11 +1245,6 @@ static struct dma_chan *tegra_dma_of_xlate(struct of_phandle_args *dma_spec,
 	struct tegra_dma *tdma = ofdma->of_dma_data;
 	struct dma_chan *chan;
 	struct tegra_dma_channel *tdc;
-
-	if (dma_spec->args[0] > TEGRA_APBDMA_CSR_REQ_SEL_MASK) {
-		dev_err(tdma->dev, "Invalid slave id: %d\n", dma_spec->args[0]);
-		return NULL;
-	}
 
 	chan = dma_get_any_slave_channel(&tdma->dma_dev);
 	if (!chan)
@@ -1303,19 +1292,40 @@ static const struct tegra_dma_chip_data tegra148_dma_chip_data = {
 	.support_separate_wcount_reg = true,
 };
 
+
+static const struct of_device_id tegra_dma_of_match[] = {
+	{
+		.compatible = "nvidia,tegra148-apbdma",
+		.data = &tegra148_dma_chip_data,
+	}, {
+		.compatible = "nvidia,tegra114-apbdma",
+		.data = &tegra114_dma_chip_data,
+	}, {
+		.compatible = "nvidia,tegra30-apbdma",
+		.data = &tegra30_dma_chip_data,
+	}, {
+		.compatible = "nvidia,tegra20-apbdma",
+		.data = &tegra20_dma_chip_data,
+	}, {
+	},
+};
+MODULE_DEVICE_TABLE(of, tegra_dma_of_match);
+
 static int tegra_dma_probe(struct platform_device *pdev)
 {
 	struct resource	*res;
 	struct tegra_dma *tdma;
 	int ret;
 	int i;
-	const struct tegra_dma_chip_data *cdata;
+	const struct tegra_dma_chip_data *cdata = NULL;
+	const struct of_device_id *match;
 
-	cdata = of_device_get_match_data(&pdev->dev);
-	if (!cdata) {
-		dev_err(&pdev->dev, "Error: No device match data found\n");
+	match = of_match_device(tegra_dma_of_match, &pdev->dev);
+	if (!match) {
+		dev_err(&pdev->dev, "Error: No device match found\n");
 		return -ENODEV;
 	}
+	cdata = match->data;
 
 	tdma = devm_kzalloc(&pdev->dev, sizeof(*tdma) + cdata->nr_channels *
 			sizeof(struct tegra_dma_channel), GFP_KERNEL);
@@ -1400,7 +1410,6 @@ static int tegra_dma_probe(struct platform_device *pdev)
 				&tdma->dma_dev.channels);
 		tdc->tdma = tdma;
 		tdc->id = i;
-		tdc->slave_id = TEGRA_APBDMA_SLAVE_ID_INVALID;
 
 		tasklet_init(&tdc->tasklet, tegra_dma_tasklet,
 				(unsigned long)tdc);
@@ -1602,24 +1611,6 @@ static const struct dev_pm_ops tegra_dma_dev_pm_ops = {
 			   NULL)
 	SET_SYSTEM_SLEEP_PM_OPS(tegra_dma_pm_suspend, tegra_dma_pm_resume)
 };
-
-static const struct of_device_id tegra_dma_of_match[] = {
-	{
-		.compatible = "nvidia,tegra148-apbdma",
-		.data = &tegra148_dma_chip_data,
-	}, {
-		.compatible = "nvidia,tegra114-apbdma",
-		.data = &tegra114_dma_chip_data,
-	}, {
-		.compatible = "nvidia,tegra30-apbdma",
-		.data = &tegra30_dma_chip_data,
-	}, {
-		.compatible = "nvidia,tegra20-apbdma",
-		.data = &tegra20_dma_chip_data,
-	}, {
-	},
-};
-MODULE_DEVICE_TABLE(of, tegra_dma_of_match);
 
 static struct platform_driver tegra_dmac_driver = {
 	.driver = {

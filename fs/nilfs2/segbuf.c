@@ -13,7 +13,11 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * Written by Ryusuke Konishi.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * Written by Ryusuke Konishi <ryusuke@osrg.net>
  *
  */
 
@@ -129,7 +133,7 @@ int nilfs_segbuf_extend_payload(struct nilfs_segment_buffer *segbuf,
 	return 0;
 }
 
-int nilfs_segbuf_reset(struct nilfs_segment_buffer *segbuf, unsigned int flags,
+int nilfs_segbuf_reset(struct nilfs_segment_buffer *segbuf, unsigned flags,
 		       time_t ctime, __u64 cno)
 {
 	int err;
@@ -236,7 +240,7 @@ nilfs_segbuf_fill_in_super_root_crc(struct nilfs_segment_buffer *segbuf,
 {
 	struct nilfs_super_root *raw_sr;
 	struct the_nilfs *nilfs = segbuf->sb_super->s_fs_info;
-	unsigned int srsize;
+	unsigned srsize;
 	u32 crc;
 
 	raw_sr = (struct nilfs_super_root *)segbuf->sb_super_root->b_data;

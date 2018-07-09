@@ -86,7 +86,7 @@ static int create_gpio_led(const struct gpio_led *template,
 		 * still uses GPIO numbers. Ultimately we would like to get
 		 * rid of this block completely.
 		 */
-		unsigned long flags = GPIOF_OUT_INIT_LOW;
+		unsigned long flags = 0;
 
 		/* skip leds that aren't available */
 		if (!gpio_is_valid(template->gpio)) {
@@ -104,8 +104,8 @@ static int create_gpio_led(const struct gpio_led *template,
 			return ret;
 
 		led_dat->gpiod = gpio_to_desc(template->gpio);
-		if (!led_dat->gpiod)
-			return -EINVAL;
+		if (IS_ERR(led_dat->gpiod))
+			return PTR_ERR(led_dat->gpiod);
 	}
 
 	led_dat->cdev.name = template->name;
@@ -127,8 +127,6 @@ static int create_gpio_led(const struct gpio_led *template,
 	led_dat->cdev.brightness = state ? LED_FULL : LED_OFF;
 	if (!template->retain_state_suspended)
 		led_dat->cdev.flags |= LED_CORE_SUSPENDRESUME;
-	if (template->panic_indicator)
-		led_dat->cdev.flags |= LED_PANIC_INDICATOR;
 
 	ret = gpiod_direction_output(led_dat->gpiod, state);
 	if (ret < 0)
@@ -202,8 +200,6 @@ static struct gpio_leds_priv *gpio_leds_create(struct platform_device *pdev)
 
 		if (fwnode_property_present(child, "retain-state-suspended"))
 			led.retain_state_suspended = 1;
-		if (fwnode_property_present(child, "panic-indicator"))
-			led.panic_indicator = 1;
 
 		ret = create_gpio_led(&led, &priv->leds[priv->num_leds],
 				      dev, NULL);

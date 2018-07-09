@@ -83,7 +83,6 @@ static int octeon_gpio_probe(struct platform_device *pdev)
 	struct octeon_gpio *gpio;
 	struct gpio_chip *chip;
 	struct resource *res_mem;
-	void __iomem *reg_base;
 	int err = 0;
 
 	gpio = devm_kzalloc(&pdev->dev, sizeof(*gpio), GFP_KERNEL);
@@ -92,11 +91,21 @@ static int octeon_gpio_probe(struct platform_device *pdev)
 	chip = &gpio->chip;
 
 	res_mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	reg_base = devm_ioremap_resource(&pdev->dev, res_mem);
-	if (IS_ERR(reg_base))
-		return PTR_ERR(reg_base);
+	if (res_mem == NULL) {
+		dev_err(&pdev->dev, "found no memory resource\n");
+		err = -ENXIO;
+		goto out;
+	}
+	if (!devm_request_mem_region(&pdev->dev, res_mem->start,
+					resource_size(res_mem),
+				     res_mem->name)) {
+		dev_err(&pdev->dev, "request_mem_region failed\n");
+		err = -ENXIO;
+		goto out;
+	}
+	gpio->register_base = (u64)devm_ioremap(&pdev->dev, res_mem->start,
+						resource_size(res_mem));
 
-	gpio->register_base = (u64)reg_base;
 	pdev->dev.platform_data = chip;
 	chip->label = "octeon-gpio";
 	chip->parent = &pdev->dev;
@@ -108,15 +117,23 @@ static int octeon_gpio_probe(struct platform_device *pdev)
 	chip->get = octeon_gpio_get;
 	chip->direction_output = octeon_gpio_dir_out;
 	chip->set = octeon_gpio_set;
-	err = devm_gpiochip_add_data(&pdev->dev, chip, gpio);
+	err = gpiochip_add_data(chip, gpio);
 	if (err)
-		return err;
+		goto out;
 
 	dev_info(&pdev->dev, "OCTEON GPIO driver probed.\n");
+out:
+	return err;
+}
+
+static int octeon_gpio_remove(struct platform_device *pdev)
+{
+	struct gpio_chip *chip = dev_get_platdata(&pdev->dev);
+	gpiochip_remove(chip);
 	return 0;
 }
 
-static const struct of_device_id octeon_gpio_match[] = {
+static struct of_device_id octeon_gpio_match[] = {
 	{
 		.compatible = "cavium,octeon-3860-gpio",
 	},
@@ -130,6 +147,7 @@ static struct platform_driver octeon_gpio_driver = {
 		.of_match_table = octeon_gpio_match,
 	},
 	.probe		= octeon_gpio_probe,
+	.remove		= octeon_gpio_remove,
 };
 
 module_platform_driver(octeon_gpio_driver);

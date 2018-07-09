@@ -67,7 +67,7 @@ static int ucb1400_gpio_probe(struct platform_device *dev)
 	ucb->gc.set = ucb1400_gpio_set;
 	ucb->gc.can_sleep = true;
 
-	err = devm_gpiochip_add_data(&dev->dev, &ucb->gc, ucb);
+	err = gpiochip_add_data(&ucb->gc, ucb);
 	if (err)
 		goto err;
 
@@ -90,6 +90,7 @@ static int ucb1400_gpio_remove(struct platform_device *dev)
 			return err;
 	}
 
+	gpiochip_remove(&ucb->gc);
 	return err;
 }
 

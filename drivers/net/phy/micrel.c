@@ -623,19 +623,18 @@ static u64 kszphy_get_stat(struct phy_device *phydev, int i)
 {
 	struct kszphy_hw_stat stat = kszphy_hw_stats[i];
 	struct kszphy_priv *priv = phydev->priv;
-	int val;
-	u64 ret;
+	u64 val;
 
 	val = phy_read(phydev, stat.reg);
 	if (val < 0) {
-		ret = UINT64_MAX;
+		val = UINT64_MAX;
 	} else {
 		val = val & ((1 << stat.bits) - 1);
 		priv->stats[i] += val;
-		ret = priv->stats[i];
+		val = priv->stats[i];
 	}
 
-	return ret;
+	return val;
 }
 
 static void kszphy_get_stats(struct phy_device *phydev,
@@ -726,7 +725,7 @@ static int kszphy_probe(struct phy_device *phydev)
 static struct phy_driver ksphy_driver[] = {
 {
 	.phy_id		= PHY_ID_KS8737,
-	.phy_id_mask	= MICREL_PHY_ID_MASK,
+	.phy_id_mask	= 0x00fffff0,
 	.name		= "Micrel KS8737",
 	.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause),
 	.flags		= PHY_HAS_MAGICANEG | PHY_HAS_INTERRUPT,
@@ -781,7 +780,7 @@ static struct phy_driver ksphy_driver[] = {
 	.resume		= genphy_resume,
 }, {
 	.phy_id		= PHY_ID_KSZ8041,
-	.phy_id_mask	= MICREL_PHY_ID_MASK,
+	.phy_id_mask	= 0x00fffff0,
 	.name		= "Micrel KSZ8041",
 	.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause
 				| SUPPORTED_Asym_Pause),
@@ -800,7 +799,7 @@ static struct phy_driver ksphy_driver[] = {
 	.resume		= genphy_resume,
 }, {
 	.phy_id		= PHY_ID_KSZ8041RNLI,
-	.phy_id_mask	= MICREL_PHY_ID_MASK,
+	.phy_id_mask	= 0x00fffff0,
 	.name		= "Micrel KSZ8041RNLI",
 	.features	= PHY_BASIC_FEATURES |
 			  SUPPORTED_Pause | SUPPORTED_Asym_Pause,
@@ -819,7 +818,7 @@ static struct phy_driver ksphy_driver[] = {
 	.resume		= genphy_resume,
 }, {
 	.phy_id		= PHY_ID_KSZ8051,
-	.phy_id_mask	= MICREL_PHY_ID_MASK,
+	.phy_id_mask	= 0x00fffff0,
 	.name		= "Micrel KSZ8051",
 	.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause
 				| SUPPORTED_Asym_Pause),
@@ -857,7 +856,7 @@ static struct phy_driver ksphy_driver[] = {
 }, {
 	.phy_id		= PHY_ID_KSZ8081,
 	.name		= "Micrel KSZ8081 or KSZ8091",
-	.phy_id_mask	= MICREL_PHY_ID_MASK,
+	.phy_id_mask	= 0x00fffff0,
 	.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause),
 	.flags		= PHY_HAS_MAGICANEG | PHY_HAS_INTERRUPT,
 	.driver_data	= &ksz8081_type,
@@ -875,7 +874,7 @@ static struct phy_driver ksphy_driver[] = {
 }, {
 	.phy_id		= PHY_ID_KSZ8061,
 	.name		= "Micrel KSZ8061",
-	.phy_id_mask	= MICREL_PHY_ID_MASK,
+	.phy_id_mask	= 0x00fffff0,
 	.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause),
 	.flags		= PHY_HAS_MAGICANEG | PHY_HAS_INTERRUPT,
 	.config_init	= kszphy_config_init,
@@ -909,7 +908,7 @@ static struct phy_driver ksphy_driver[] = {
 	.write_mmd_indirect = ksz9021_wr_mmd_phyreg,
 }, {
 	.phy_id		= PHY_ID_KSZ9031,
-	.phy_id_mask	= MICREL_PHY_ID_MASK,
+	.phy_id_mask	= 0x00fffff0,
 	.name		= "Micrel KSZ9031 Gigabit PHY",
 	.features	= (PHY_GBIT_FEATURES | SUPPORTED_Pause),
 	.flags		= PHY_HAS_MAGICANEG | PHY_HAS_INTERRUPT,
@@ -926,7 +925,7 @@ static struct phy_driver ksphy_driver[] = {
 	.resume		= genphy_resume,
 }, {
 	.phy_id		= PHY_ID_KSZ8873MLL,
-	.phy_id_mask	= MICREL_PHY_ID_MASK,
+	.phy_id_mask	= 0x00fffff0,
 	.name		= "Micrel KSZ8873MLL Switch",
 	.features	= (SUPPORTED_Pause | SUPPORTED_Asym_Pause),
 	.flags		= PHY_HAS_MAGICANEG,
@@ -940,7 +939,7 @@ static struct phy_driver ksphy_driver[] = {
 	.resume		= genphy_resume,
 }, {
 	.phy_id		= PHY_ID_KSZ886X,
-	.phy_id_mask	= MICREL_PHY_ID_MASK,
+	.phy_id_mask	= 0x00fffff0,
 	.name		= "Micrel KSZ886X Switch",
 	.features	= (PHY_BASIC_FEATURES | SUPPORTED_Pause),
 	.flags		= PHY_HAS_MAGICANEG | PHY_HAS_INTERRUPT,
@@ -962,17 +961,17 @@ MODULE_LICENSE("GPL");
 
 static struct mdio_device_id __maybe_unused micrel_tbl[] = {
 	{ PHY_ID_KSZ9021, 0x000ffffe },
-	{ PHY_ID_KSZ9031, MICREL_PHY_ID_MASK },
+	{ PHY_ID_KSZ9031, 0x00fffff0 },
 	{ PHY_ID_KSZ8001, 0x00ffffff },
-	{ PHY_ID_KS8737, MICREL_PHY_ID_MASK },
+	{ PHY_ID_KS8737, 0x00fffff0 },
 	{ PHY_ID_KSZ8021, 0x00ffffff },
 	{ PHY_ID_KSZ8031, 0x00ffffff },
-	{ PHY_ID_KSZ8041, MICREL_PHY_ID_MASK },
-	{ PHY_ID_KSZ8051, MICREL_PHY_ID_MASK },
-	{ PHY_ID_KSZ8061, MICREL_PHY_ID_MASK },
-	{ PHY_ID_KSZ8081, MICREL_PHY_ID_MASK },
-	{ PHY_ID_KSZ8873MLL, MICREL_PHY_ID_MASK },
-	{ PHY_ID_KSZ886X, MICREL_PHY_ID_MASK },
+	{ PHY_ID_KSZ8041, 0x00fffff0 },
+	{ PHY_ID_KSZ8051, 0x00fffff0 },
+	{ PHY_ID_KSZ8061, 0x00fffff0 },
+	{ PHY_ID_KSZ8081, 0x00fffff0 },
+	{ PHY_ID_KSZ8873MLL, 0x00fffff0 },
+	{ PHY_ID_KSZ886X, 0x00fffff0 },
 	{ }
 };
 

@@ -478,11 +478,10 @@ void auxtrace_heap__pop(struct auxtrace_heap *heap)
 			 heap_array[last].ordinal);
 }
 
-size_t auxtrace_record__info_priv_size(struct auxtrace_record *itr,
-				       struct perf_evlist *evlist)
+size_t auxtrace_record__info_priv_size(struct auxtrace_record *itr)
 {
 	if (itr)
-		return itr->info_priv_size(itr, evlist);
+		return itr->info_priv_size(itr);
 	return 0;
 }
 
@@ -853,7 +852,7 @@ int perf_event__synthesize_auxtrace_info(struct auxtrace_record *itr,
 	int err;
 
 	pr_debug2("Synthesizing auxtrace information\n");
-	priv_size = auxtrace_record__info_priv_size(itr, session->evlist);
+	priv_size = auxtrace_record__info_priv_size(itr);
 	ev = zalloc(sizeof(struct auxtrace_info_event) + priv_size);
 	if (!ev)
 		return -ENOMEM;
@@ -940,7 +939,6 @@ void itrace_synth_opts__set_default(struct itrace_synth_opts *synth_opts)
 	synth_opts->period = PERF_ITRACE_DEFAULT_PERIOD;
 	synth_opts->callchain_sz = PERF_ITRACE_DEFAULT_CALLCHAIN_SZ;
 	synth_opts->last_branch_sz = PERF_ITRACE_DEFAULT_LAST_BRANCH_SZ;
-	synth_opts->initial_skip = 0;
 }
 
 /*
@@ -1064,12 +1062,6 @@ int itrace_parse_synth_opts(const struct option *opt, const char *str,
 					goto out_err;
 				synth_opts->last_branch_sz = val;
 			}
-			break;
-		case 's':
-			synth_opts->initial_skip = strtoul(p, &endptr, 10);
-			if (p == endptr)
-				goto out_err;
-			p = endptr;
 			break;
 		case ' ':
 		case ',':

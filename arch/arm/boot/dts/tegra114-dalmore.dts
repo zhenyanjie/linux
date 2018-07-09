@@ -18,10 +18,6 @@
 		serial0 = &uartd;
 	};
 
-	chosen {
-		stdout-path = "serial0:115200n8";
-	};
-
 	memory {
 		reg = <0x80000000 0x40000000>;
 	};
@@ -1168,7 +1164,7 @@
 			label = "Power";
 			gpios = <&gpio TEGRA_GPIO(Q, 0) GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_POWER>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 
 		volume_down {

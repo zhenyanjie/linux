@@ -68,7 +68,6 @@ enum itrace_period_type {
  * @last_branch_sz: branch context size
  * @period: 'instructions' events period
  * @period_type: 'instructions' events period type
- * @initial_skip: skip N events at the beginning.
  */
 struct itrace_synth_opts {
 	bool			set;
@@ -87,7 +86,6 @@ struct itrace_synth_opts {
 	unsigned int		last_branch_sz;
 	unsigned long long	period;
 	enum itrace_period_type	period_type;
-	unsigned long		initial_skip;
 };
 
 /**
@@ -295,8 +293,7 @@ struct auxtrace_record {
 	int (*recording_options)(struct auxtrace_record *itr,
 				 struct perf_evlist *evlist,
 				 struct record_opts *opts);
-	size_t (*info_priv_size)(struct auxtrace_record *itr,
-				 struct perf_evlist *evlist);
+	size_t (*info_priv_size)(struct auxtrace_record *itr);
 	int (*info_fill)(struct auxtrace_record *itr,
 			 struct perf_session *session,
 			 struct auxtrace_info_event *auxtrace_info,
@@ -432,8 +429,7 @@ int auxtrace_parse_snapshot_options(struct auxtrace_record *itr,
 int auxtrace_record__options(struct auxtrace_record *itr,
 			     struct perf_evlist *evlist,
 			     struct record_opts *opts);
-size_t auxtrace_record__info_priv_size(struct auxtrace_record *itr,
-				       struct perf_evlist *evlist);
+size_t auxtrace_record__info_priv_size(struct auxtrace_record *itr);
 int auxtrace_record__info_fill(struct auxtrace_record *itr,
 			       struct perf_session *session,
 			       struct auxtrace_info_event *auxtrace_info,
@@ -519,7 +515,7 @@ static inline void auxtrace__free(struct perf_session *session)
 
 static inline struct auxtrace_record *
 auxtrace_record__init(struct perf_evlist *evlist __maybe_unused,
-		      int *err)
+		      int *err __maybe_unused)
 {
 	*err = 0;
 	return NULL;

@@ -94,7 +94,6 @@ static void __init socfpga_smp_prepare_cpus(unsigned int max_cpus)
 	scu_enable(socfpga_scu_base_addr);
 }
 
-#ifdef CONFIG_HOTPLUG_CPU
 /*
  * platform-specific code to shutdown a CPU
  *
@@ -117,7 +116,6 @@ static int socfpga_cpu_kill(unsigned int cpu)
 {
 	return 1;
 }
-#endif
 
 static const struct smp_operations socfpga_smp_ops __initconst = {
 	.smp_prepare_cpus	= socfpga_smp_prepare_cpus,

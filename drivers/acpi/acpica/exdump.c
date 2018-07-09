@@ -55,9 +55,9 @@ ACPI_MODULE_NAME("exdump")
  */
 #if defined(ACPI_DEBUG_OUTPUT) || defined(ACPI_DEBUGGER)
 /* Local prototypes */
-static void acpi_ex_out_string(const char *title, const char *value);
+static void acpi_ex_out_string(char *title, char *value);
 
-static void acpi_ex_out_pointer(const char *title, const void *value);
+static void acpi_ex_out_pointer(char *title, void *value);
 
 static void
 acpi_ex_dump_object(union acpi_operand_object *obj_desc,
@@ -365,7 +365,8 @@ acpi_ex_dump_object(union acpi_operand_object *obj_desc,
 		    struct acpi_exdump_info *info)
 {
 	u8 *target;
-	const char *name;
+	char *name;
+	const char *reference_name;
 	u8 count;
 	union acpi_operand_object *start;
 	union acpi_operand_object *data = NULL;
@@ -458,9 +459,9 @@ acpi_ex_dump_object(union acpi_operand_object *obj_desc,
 
 		case ACPI_EXD_REFERENCE:
 
+			reference_name = acpi_ut_get_reference_name(obj_desc);
 			acpi_ex_out_string("Class Name",
-					   acpi_ut_get_reference_name
-					   (obj_desc));
+					   ACPI_CAST_PTR(char, reference_name));
 			acpi_ex_dump_reference_obj(obj_desc);
 			break;
 
@@ -933,12 +934,12 @@ acpi_ex_dump_operands(union acpi_operand_object **operands,
  *
  ******************************************************************************/
 
-static void acpi_ex_out_string(const char *title, const char *value)
+static void acpi_ex_out_string(char *title, char *value)
 {
 	acpi_os_printf("%20s : %s\n", title, value);
 }
 
-static void acpi_ex_out_pointer(const char *title, const void *value)
+static void acpi_ex_out_pointer(char *title, void *value)
 {
 	acpi_os_printf("%20s : %p\n", title, value);
 }

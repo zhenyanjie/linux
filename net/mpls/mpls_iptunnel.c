@@ -227,6 +227,5 @@ static void __exit mpls_iptunnel_exit(void)
 }
 module_exit(mpls_iptunnel_exit);
 
-MODULE_ALIAS_RTNL_LWT(MPLS);
 MODULE_DESCRIPTION("MultiProtocol Label Switching IP Tunnels");
 MODULE_LICENSE("GPL v2");

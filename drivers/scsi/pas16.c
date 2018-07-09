@@ -1,3 +1,5 @@
+#define PSEUDO_DMA
+
 /*
  * This driver adapted from Drew Eckhardt's Trantor T128 driver
  *
@@ -75,6 +77,7 @@
 
 #include <scsi/scsi_host.h>
 #include "pas16.h"
+#define AUTOPROBE_IRQ
 #include "NCR5380.h"
 
 
@@ -374,7 +377,7 @@ static int __init pas16_detect(struct scsi_host_template *tpnt)
 		
 	instance->io_port = io_port;
 
-	if (NCR5380_init(instance, FLAG_DMA_FIXUP | FLAG_LATE_DMA_SETUP))
+	if (NCR5380_init(instance, 0))
 		goto out_unregister;
 
 	NCR5380_maybe_reset_bus(instance);
@@ -457,7 +460,7 @@ static int pas16_biosparam(struct scsi_device *sdev, struct block_device *dev,
 }
 
 /*
- * Function : int pas16_pread (struct Scsi_Host *instance,
+ * Function : int NCR5380_pread (struct Scsi_Host *instance, 
  *	unsigned char *dst, int len)
  *
  * Purpose : Fast 5380 pseudo-dma read function, transfers len bytes to 
@@ -469,14 +472,14 @@ static int pas16_biosparam(struct scsi_device *sdev, struct block_device *dev,
  * 	timeout.
  */
 
-static inline int pas16_pread(struct Scsi_Host *instance,
-                              unsigned char *dst, int len)
-{
+static inline int NCR5380_pread (struct Scsi_Host *instance, unsigned char *dst,
+    int len) {
     register unsigned char  *d = dst;
     register unsigned short reg = (unsigned short) (instance->io_port + 
 	P_DATA_REG_OFFSET);
     register int i = len;
     int ii = 0;
+    struct NCR5380_hostdata *hostdata = shost_priv(instance);
 
     while ( !(inb(instance->io_port + P_STATUS_REG_OFFSET) & P_ST_RDY) )
 	 ++ii;
@@ -489,11 +492,13 @@ static inline int pas16_pread(struct Scsi_Host *instance,
 	    instance->host_no);
 	return -1;
     }
+    if (ii > hostdata->spin_max_r)
+        hostdata->spin_max_r = ii;
     return 0;
 }
 
 /*
- * Function : int pas16_pwrite (struct Scsi_Host *instance,
+ * Function : int NCR5380_pwrite (struct Scsi_Host *instance, 
  *	unsigned char *src, int len)
  *
  * Purpose : Fast 5380 pseudo-dma write function, transfers len bytes from
@@ -505,13 +510,13 @@ static inline int pas16_pread(struct Scsi_Host *instance,
  * 	timeout.
  */
 
-static inline int pas16_pwrite(struct Scsi_Host *instance,
-                               unsigned char *src, int len)
-{
+static inline int NCR5380_pwrite (struct Scsi_Host *instance, unsigned char *src,
+    int len) {
     register unsigned char *s = src;
     register unsigned short reg = (instance->io_port + P_DATA_REG_OFFSET);
     register int i = len;
     int ii = 0;
+    struct NCR5380_hostdata *hostdata = shost_priv(instance);
 
     while ( !((inb(instance->io_port + P_STATUS_REG_OFFSET)) & P_ST_RDY) )
 	 ++ii;
@@ -524,6 +529,8 @@ static inline int pas16_pwrite(struct Scsi_Host *instance,
 	    instance->host_no);
 	return -1;
     }
+    if (ii > hostdata->spin_max_w)
+        hostdata->spin_max_w = ii;
     return 0;
 }
 
@@ -543,6 +550,8 @@ static struct scsi_host_template driver_template = {
 	.detect			= pas16_detect,
 	.release		= pas16_release,
 	.proc_name		= "pas16",
+	.show_info		= pas16_show_info,
+	.write_info		= pas16_write_info,
 	.info			= pas16_info,
 	.queuecommand		= pas16_queue_command,
 	.eh_abort_handler	= pas16_abort,

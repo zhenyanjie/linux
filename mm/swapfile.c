@@ -48,12 +48,6 @@ static sector_t map_swap_entry(swp_entry_t, struct block_device**);
 DEFINE_SPINLOCK(swap_lock);
 static unsigned int nr_swapfiles;
 atomic_long_t nr_swap_pages;
-/*
- * Some modules use swappable objects and may try to swap them out under
- * memory pressure (via the shrinker). Before doing so, they may wish to
- * check to see if any swap space is available.
- */
-EXPORT_SYMBOL_GPL(nr_swap_pages);
 /* protected with swap_lock. reading in vm_swap_full() doesn't need lock */
 long total_swap_pages;
 static int least_priority;
@@ -119,7 +113,7 @@ __try_to_reclaim_swap(struct swap_info_struct *si, unsigned long offset)
 		ret = try_to_free_swap(page);
 		unlock_page(page);
 	}
-	put_page(page);
+	page_cache_release(page);
 	return ret;
 }
 
@@ -1001,7 +995,7 @@ int free_swap_and_cache(swp_entry_t entry)
 			page = find_get_page(swap_address_space(entry),
 						entry.val);
 			if (page && !trylock_page(page)) {
-				put_page(page);
+				page_cache_release(page);
 				page = NULL;
 			}
 		}
@@ -1018,7 +1012,7 @@ int free_swap_and_cache(swp_entry_t entry)
 			SetPageDirty(page);
 		}
 		unlock_page(page);
-		put_page(page);
+		page_cache_release(page);
 	}
 	return p != NULL;
 }
@@ -1519,7 +1513,7 @@ int try_to_unuse(unsigned int type, bool frontswap,
 		}
 		if (retval) {
 			unlock_page(page);
-			put_page(page);
+			page_cache_release(page);
 			break;
 		}
 
@@ -1571,7 +1565,7 @@ int try_to_unuse(unsigned int type, bool frontswap,
 		 */
 		SetPageDirty(page);
 		unlock_page(page);
-		put_page(page);
+		page_cache_release(page);
 
 		/*
 		 * Make sure that we aren't completely killing
@@ -2533,7 +2527,8 @@ SYSCALL_DEFINE2(swapon, const char __user *, specialfile, int, swap_flags)
 		  (swap_flags & SWAP_FLAG_PRIO_MASK) >> SWAP_FLAG_PRIO_SHIFT;
 	enable_swap_info(p, prio, swap_map, cluster_info, frontswap_map);
 
-	pr_info("Adding %uk swap on %s.  Priority:%d extents:%d across:%lluk %s%s%s%s%s\n",
+	pr_info("Adding %uk swap on %s.  "
+			"Priority:%d extents:%d across:%lluk %s%s%s%s%s\n",
 		p->pages<<(PAGE_SHIFT-10), name->name, p->prio,
 		nr_extents, (unsigned long long)span<<(PAGE_SHIFT-10),
 		(p->flags & SWP_SOLIDSTATE) ? "SS" : "",
@@ -2575,7 +2570,7 @@ bad_swap:
 out:
 	if (page && !IS_ERR(page)) {
 		kunmap(page);
-		put_page(page);
+		page_cache_release(page);
 	}
 	if (name)
 		putname(name);
@@ -2724,6 +2719,7 @@ int swapcache_prepare(swp_entry_t entry)
 struct swap_info_struct *page_swap_info(struct page *page)
 {
 	swp_entry_t swap = { .val = page_private(page) };
+	BUG_ON(!PageSwapCache(page));
 	return swap_info[swp_type(swap)];
 }
 

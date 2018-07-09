@@ -8,8 +8,6 @@
  *  BIG FAT DISCLAIMER: Work in progress code. Possibly *dangerous*
  */
 
-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
-
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
@@ -155,7 +153,7 @@ static unsigned int pentium_core_get_frequency(void)
 		fsb = 333333;
 		break;
 	default:
-		pr_err("PCORE - MSR_FSB_FREQ undefined value\n");
+		printk(KERN_ERR "PCORE - MSR_FSB_FREQ undefined value");
 	}
 
 	rdmsr(MSR_IA32_EBL_CR_POWERON, msr_lo, msr_tmp);
@@ -455,8 +453,11 @@ unsigned int speedstep_get_freqs(enum speedstep_processor processor,
 		 */
 		if (*transition_latency > 10000000 ||
 		    *transition_latency < 50000) {
-			pr_warn("frequency transition measured seems out of range (%u nSec), falling back to a safe one of %u nSec\n",
-				*transition_latency, 500000);
+			printk(KERN_WARNING PFX "frequency transition "
+					"measured seems out of range (%u "
+					"nSec), falling back to a safe one of"
+					"%u nSec.\n",
+					*transition_latency, 500000);
 			*transition_latency = 500000;
 		}
 	}

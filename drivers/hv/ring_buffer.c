@@ -33,21 +33,25 @@
 void hv_begin_read(struct hv_ring_buffer_info *rbi)
 {
 	rbi->ring_buffer->interrupt_mask = 1;
-	virt_mb();
+	mb();
 }
 
 u32 hv_end_read(struct hv_ring_buffer_info *rbi)
 {
+	u32 read;
+	u32 write;
 
 	rbi->ring_buffer->interrupt_mask = 0;
-	virt_mb();
+	mb();
 
 	/*
 	 * Now check to see if the ring buffer is still empty.
 	 * If it is not, we raced and we need to process new
 	 * incoming messages.
 	 */
-	return hv_get_bytes_to_read(rbi);
+	hv_get_ringbuffer_availbytes(rbi, &read, &write);
+
+	return read;
 }
 
 /*
@@ -68,17 +72,69 @@ u32 hv_end_read(struct hv_ring_buffer_info *rbi)
 
 static bool hv_need_to_signal(u32 old_write, struct hv_ring_buffer_info *rbi)
 {
-	virt_mb();
-	if (READ_ONCE(rbi->ring_buffer->interrupt_mask))
+	mb();
+	if (rbi->ring_buffer->interrupt_mask)
 		return false;
 
 	/* check interrupt_mask before read_index */
-	virt_rmb();
+	rmb();
 	/*
 	 * This is the only case we need to signal when the
 	 * ring transitions from being empty to non-empty.
 	 */
-	if (old_write == READ_ONCE(rbi->ring_buffer->read_index))
+	if (old_write == rbi->ring_buffer->read_index)
+		return true;
+
+	return false;
+}
+
+/*
+ * To optimize the flow management on the send-side,
+ * when the sender is blocked because of lack of
+ * sufficient space in the ring buffer, potential the
+ * consumer of the ring buffer can signal the producer.
+ * This is controlled by the following parameters:
+ *
+ * 1. pending_send_sz: This is the size in bytes that the
+ *    producer is trying to send.
+ * 2. The feature bit feat_pending_send_sz set to indicate if
+ *    the consumer of the ring will signal when the ring
+ *    state transitions from being full to a state where
+ *    there is room for the producer to send the pending packet.
+ */
+
+static bool hv_need_to_signal_on_read(struct hv_ring_buffer_info *rbi)
+{
+	u32 cur_write_sz;
+	u32 r_size;
+	u32 write_loc;
+	u32 read_loc = rbi->ring_buffer->read_index;
+	u32 pending_sz;
+
+	/*
+	 * Issue a full memory barrier before making the signaling decision.
+	 * Here is the reason for having this barrier:
+	 * If the reading of the pend_sz (in this function)
+	 * were to be reordered and read before we commit the new read
+	 * index (in the calling function)  we could
+	 * have a problem. If the host were to set the pending_sz after we
+	 * have sampled pending_sz and go to sleep before we commit the
+	 * read index, we could miss sending the interrupt. Issue a full
+	 * memory barrier to address this.
+	 */
+	mb();
+
+	pending_sz = rbi->ring_buffer->pending_send_sz;
+	write_loc = rbi->ring_buffer->write_index;
+	/* If the other end is not blocked on write don't bother. */
+	if (pending_sz == 0)
+		return false;
+
+	r_size = rbi->ring_datasize;
+	cur_write_sz = write_loc >= read_loc ? r_size - (write_loc - read_loc) :
+			read_loc - write_loc;
+
+	if (cur_write_sz >= pending_sz)
 		return true;
 
 	return false;
@@ -132,8 +188,16 @@ hv_set_next_read_location(struct hv_ring_buffer_info *ring_info,
 		    u32 next_read_location)
 {
 	ring_info->ring_buffer->read_index = next_read_location;
-	ring_info->priv_read_index = next_read_location;
 }
+
+
+/* Get the start of the ring buffer. */
+static inline void *
+hv_get_ring_buffer(struct hv_ring_buffer_info *ring_info)
+{
+	return (void *)ring_info->ring_buffer->buffer;
+}
+
 
 /* Get the size of the ring buffer. */
 static inline u32
@@ -264,26 +328,28 @@ void hv_ringbuffer_cleanup(struct hv_ring_buffer_info *ring_info)
 
 /* Write to the ring buffer. */
 int hv_ringbuffer_write(struct hv_ring_buffer_info *outring_info,
-		    struct kvec *kv_list, u32 kv_count, bool *signal, bool lock)
+		    struct kvec *kv_list, u32 kv_count, bool *signal)
 {
 	int i = 0;
 	u32 bytes_avail_towrite;
+	u32 bytes_avail_toread;
 	u32 totalbytes_towrite = 0;
 
 	u32 next_write_location;
 	u32 old_write;
 	u64 prev_indices = 0;
-	unsigned long flags = 0;
+	unsigned long flags;
 
 	for (i = 0; i < kv_count; i++)
 		totalbytes_towrite += kv_list[i].iov_len;
 
 	totalbytes_towrite += sizeof(u64);
 
-	if (lock)
-		spin_lock_irqsave(&outring_info->ring_lock, flags);
+	spin_lock_irqsave(&outring_info->ring_lock, flags);
 
-	bytes_avail_towrite = hv_get_bytes_to_write(outring_info);
+	hv_get_ringbuffer_availbytes(outring_info,
+				&bytes_avail_toread,
+				&bytes_avail_towrite);
 
 	/*
 	 * If there is only room for the packet, assume it is full.
@@ -291,8 +357,7 @@ int hv_ringbuffer_write(struct hv_ring_buffer_info *outring_info,
 	 * is empty since the read index == write index.
 	 */
 	if (bytes_avail_towrite <= totalbytes_towrite) {
-		if (lock)
-			spin_unlock_irqrestore(&outring_info->ring_lock, flags);
+		spin_unlock_irqrestore(&outring_info->ring_lock, flags);
 		return -EAGAIN;
 	}
 
@@ -317,14 +382,13 @@ int hv_ringbuffer_write(struct hv_ring_buffer_info *outring_info,
 					     sizeof(u64));
 
 	/* Issue a full memory barrier before updating the write index */
-	virt_mb();
+	mb();
 
 	/* Now, update the write location */
 	hv_set_next_write_location(outring_info, next_write_location);
 
 
-	if (lock)
-		spin_unlock_irqrestore(&outring_info->ring_lock, flags);
+	spin_unlock_irqrestore(&outring_info->ring_lock, flags);
 
 	*signal = hv_need_to_signal(old_write, outring_info);
 	return 0;
@@ -334,9 +398,11 @@ int hv_ringbuffer_read(struct hv_ring_buffer_info *inring_info,
 		       void *buffer, u32 buflen, u32 *buffer_actual_len,
 		       u64 *requestid, bool *signal, bool raw)
 {
+	u32 bytes_avail_towrite;
 	u32 bytes_avail_toread;
 	u32 next_read_location = 0;
 	u64 prev_indices = 0;
+	unsigned long flags;
 	struct vmpacket_descriptor desc;
 	u32 offset;
 	u32 packetlen;
@@ -345,18 +411,22 @@ int hv_ringbuffer_read(struct hv_ring_buffer_info *inring_info,
 	if (buflen <= 0)
 		return -EINVAL;
 
+	spin_lock_irqsave(&inring_info->ring_lock, flags);
 
 	*buffer_actual_len = 0;
 	*requestid = 0;
 
-	bytes_avail_toread = hv_get_bytes_to_read(inring_info);
+	hv_get_ringbuffer_availbytes(inring_info,
+				&bytes_avail_toread,
+				&bytes_avail_towrite);
+
 	/* Make sure there is something to read */
 	if (bytes_avail_toread < sizeof(desc)) {
 		/*
 		 * No error is set when there is even no header, drivers are
 		 * supposed to analyze buffer_actual_len.
 		 */
-		return ret;
+		goto out_unlock;
 	}
 
 	next_read_location = hv_get_next_read_location(inring_info);
@@ -369,11 +439,15 @@ int hv_ringbuffer_read(struct hv_ring_buffer_info *inring_info,
 	*buffer_actual_len = packetlen;
 	*requestid = desc.trans_id;
 
-	if (bytes_avail_toread < packetlen + offset)
-		return -EAGAIN;
+	if (bytes_avail_toread < packetlen + offset) {
+		ret = -EAGAIN;
+		goto out_unlock;
+	}
 
-	if (packetlen > buflen)
-		return -ENOBUFS;
+	if (packetlen > buflen) {
+		ret = -ENOBUFS;
+		goto out_unlock;
+	}
 
 	next_read_location =
 		hv_get_next_readlocation_withoffset(inring_info, offset);
@@ -393,12 +467,14 @@ int hv_ringbuffer_read(struct hv_ring_buffer_info *inring_info,
 	 * the writer may start writing to the read area once the read index
 	 * is updated.
 	 */
-	virt_mb();
+	mb();
 
 	/* Update the read index */
 	hv_set_next_read_location(inring_info, next_read_location);
 
 	*signal = hv_need_to_signal_on_read(inring_info);
 
+out_unlock:
+	spin_unlock_irqrestore(&inring_info->ring_lock, flags);
 	return ret;
 }

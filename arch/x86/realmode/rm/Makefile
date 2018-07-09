@@ -6,11 +6,7 @@
 # for more details.
 #
 #
-KASAN_SANITIZE			:= n
-OBJECT_FILES_NON_STANDARD	:= y
-
-# Prevents link failures: __sanitizer_cov_trace_pc() is not linked in.
-KCOV_INSTRUMENT		:= n
+KASAN_SANITIZE := n
 
 always := realmode.bin realmode.relocs
 
@@ -59,6 +55,7 @@ OBJCOPYFLAGS_realmode.bin := -O binary
 targets += realmode.bin
 $(obj)/realmode.bin: $(obj)/realmode.elf $(obj)/realmode.relocs FORCE
 	$(call if_changed,objcopy)
+	@:
 
 quiet_cmd_relocs = RELOCS  $@
       cmd_relocs = arch/x86/tools/relocs --realmode $< > $@

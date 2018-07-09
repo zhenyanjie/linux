@@ -350,12 +350,10 @@ out:
 }
 EXPORT_SYMBOL_GPL(ipu_dmfc_alloc_bandwidth);
 
-void ipu_dmfc_config_wait4eot(struct dmfc_channel *dmfc, int width)
+int ipu_dmfc_init_channel(struct dmfc_channel *dmfc, int width)
 {
 	struct ipu_dmfc_priv *priv = dmfc->priv;
 	u32 dmfc_gen1;
-
-	mutex_lock(&priv->mutex);
 
 	dmfc_gen1 = readl(priv->base + DMFC_GENERAL1);
 
@@ -366,9 +364,9 @@ void ipu_dmfc_config_wait4eot(struct dmfc_channel *dmfc, int width)
 
 	writel(dmfc_gen1, priv->base + DMFC_GENERAL1);
 
-	mutex_unlock(&priv->mutex);
+	return 0;
 }
-EXPORT_SYMBOL_GPL(ipu_dmfc_config_wait4eot);
+EXPORT_SYMBOL_GPL(ipu_dmfc_init_channel);
 
 struct dmfc_channel *ipu_dmfc_get(struct ipu_soc *ipu, int ipu_channel)
 {

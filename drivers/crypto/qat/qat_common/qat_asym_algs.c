@@ -340,24 +340,6 @@ static int qat_rsa_enc(struct akcipher_request *req)
 
 	if (!ret)
 		return -EINPROGRESS;
-
-	if (!dma_mapping_error(dev, qat_req->phy_out))
-		dma_unmap_single(dev, qat_req->phy_out,
-				 sizeof(struct qat_rsa_output_params),
-				 DMA_TO_DEVICE);
-unmap_in_params:
-	if (!dma_mapping_error(dev, qat_req->phy_in))
-		dma_unmap_single(dev, qat_req->phy_in,
-				 sizeof(struct qat_rsa_input_params),
-				 DMA_TO_DEVICE);
-unmap_dst:
-	if (qat_req->dst_align)
-		dma_free_coherent(dev, ctx->key_sz, qat_req->dst_align,
-				  qat_req->out.enc.c);
-	else
-		if (!dma_mapping_error(dev, qat_req->out.enc.c))
-			dma_unmap_single(dev, qat_req->out.enc.c, ctx->key_sz,
-					 DMA_FROM_DEVICE);
 unmap_src:
 	if (qat_req->src_align)
 		dma_free_coherent(dev, ctx->key_sz, qat_req->src_align,
@@ -366,6 +348,23 @@ unmap_src:
 		if (!dma_mapping_error(dev, qat_req->in.enc.m))
 			dma_unmap_single(dev, qat_req->in.enc.m, ctx->key_sz,
 					 DMA_TO_DEVICE);
+unmap_dst:
+	if (qat_req->dst_align)
+		dma_free_coherent(dev, ctx->key_sz, qat_req->dst_align,
+				  qat_req->out.enc.c);
+	else
+		if (!dma_mapping_error(dev, qat_req->out.enc.c))
+			dma_unmap_single(dev, qat_req->out.enc.c, ctx->key_sz,
+					 DMA_FROM_DEVICE);
+unmap_in_params:
+	if (!dma_mapping_error(dev, qat_req->phy_in))
+		dma_unmap_single(dev, qat_req->phy_in,
+				 sizeof(struct qat_rsa_input_params),
+				 DMA_TO_DEVICE);
+	if (!dma_mapping_error(dev, qat_req->phy_out))
+		dma_unmap_single(dev, qat_req->phy_out,
+				 sizeof(struct qat_rsa_output_params),
+				 DMA_TO_DEVICE);
 	return ret;
 }
 
@@ -473,24 +472,6 @@ static int qat_rsa_dec(struct akcipher_request *req)
 
 	if (!ret)
 		return -EINPROGRESS;
-
-	if (!dma_mapping_error(dev, qat_req->phy_out))
-		dma_unmap_single(dev, qat_req->phy_out,
-				 sizeof(struct qat_rsa_output_params),
-				 DMA_TO_DEVICE);
-unmap_in_params:
-	if (!dma_mapping_error(dev, qat_req->phy_in))
-		dma_unmap_single(dev, qat_req->phy_in,
-				 sizeof(struct qat_rsa_input_params),
-				 DMA_TO_DEVICE);
-unmap_dst:
-	if (qat_req->dst_align)
-		dma_free_coherent(dev, ctx->key_sz, qat_req->dst_align,
-				  qat_req->out.dec.m);
-	else
-		if (!dma_mapping_error(dev, qat_req->out.dec.m))
-			dma_unmap_single(dev, qat_req->out.dec.m, ctx->key_sz,
-					 DMA_FROM_DEVICE);
 unmap_src:
 	if (qat_req->src_align)
 		dma_free_coherent(dev, ctx->key_sz, qat_req->src_align,
@@ -499,6 +480,23 @@ unmap_src:
 		if (!dma_mapping_error(dev, qat_req->in.dec.c))
 			dma_unmap_single(dev, qat_req->in.dec.c, ctx->key_sz,
 					 DMA_TO_DEVICE);
+unmap_dst:
+	if (qat_req->dst_align)
+		dma_free_coherent(dev, ctx->key_sz, qat_req->dst_align,
+				  qat_req->out.dec.m);
+	else
+		if (!dma_mapping_error(dev, qat_req->out.dec.m))
+			dma_unmap_single(dev, qat_req->out.dec.m, ctx->key_sz,
+					 DMA_FROM_DEVICE);
+unmap_in_params:
+	if (!dma_mapping_error(dev, qat_req->phy_in))
+		dma_unmap_single(dev, qat_req->phy_in,
+				 sizeof(struct qat_rsa_input_params),
+				 DMA_TO_DEVICE);
+	if (!dma_mapping_error(dev, qat_req->phy_out))
+		dma_unmap_single(dev, qat_req->phy_out,
+				 sizeof(struct qat_rsa_output_params),
+				 DMA_TO_DEVICE);
 	return ret;
 }
 
@@ -593,7 +591,7 @@ int qat_rsa_get_d(void *context, size_t hdrlen, unsigned char tag,
 
 	ret = -ENOMEM;
 	ctx->d = dma_zalloc_coherent(dev, ctx->key_sz, &ctx->dma_d, GFP_KERNEL);
-	if (!ctx->d)
+	if (!ctx->n)
 		goto err;
 
 	memcpy(ctx->d + (ctx->key_sz - vlen), ptr, vlen);
@@ -711,7 +709,7 @@ static void qat_rsa_exit_tfm(struct crypto_akcipher *tfm)
 	}
 	qat_crypto_put_instance(ctx->inst);
 	ctx->n = NULL;
-	ctx->e = NULL;
+	ctx->d = NULL;
 	ctx->d = NULL;
 }
 

@@ -71,9 +71,9 @@
 struct workqueue_struct *rds_wq;
 EXPORT_SYMBOL_GPL(rds_wq);
 
-void rds_connect_path_complete(struct rds_connection *conn, int curr)
+void rds_connect_complete(struct rds_connection *conn)
 {
-	if (!rds_conn_transition(conn, curr, RDS_CONN_UP)) {
+	if (!rds_conn_transition(conn, RDS_CONN_CONNECTING, RDS_CONN_UP)) {
 		printk(KERN_WARNING "%s: Cannot transition to state UP, "
 				"current state is %d\n",
 				__func__,
@@ -89,12 +89,6 @@ void rds_connect_path_complete(struct rds_connection *conn, int curr)
 	set_bit(0, &conn->c_map_queued);
 	queue_delayed_work(rds_wq, &conn->c_send_w, 0);
 	queue_delayed_work(rds_wq, &conn->c_recv_w, 0);
-}
-EXPORT_SYMBOL_GPL(rds_connect_path_complete);
-
-void rds_connect_complete(struct rds_connection *conn)
-{
-	rds_connect_path_complete(conn, RDS_CONN_CONNECTING);
 }
 EXPORT_SYMBOL_GPL(rds_connect_complete);
 

@@ -29,10 +29,10 @@
 #include <linux/kref.h>
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <asm/byteorder.h>
-#include <linux/atomic.h>
-#include <linux/io.h>
+#include <asm/atomic.h>
+#include <asm/io.h>
 #include <linux/semaphore.h>
 #include <linux/sem.h>
 #include <linux/sched.h>

@@ -72,13 +72,13 @@ static int check_dev_ioctl_version(int cmd, struct autofs_dev_ioctl *param)
 {
 	int err = 0;
 
-	if ((param->ver_major != AUTOFS_DEV_IOCTL_VERSION_MAJOR) ||
-	    (param->ver_minor > AUTOFS_DEV_IOCTL_VERSION_MINOR)) {
-		pr_warn("ioctl control interface version mismatch: "
-			"kernel(%u.%u), user(%u.%u), cmd(%d)\n",
-			AUTOFS_DEV_IOCTL_VERSION_MAJOR,
-			AUTOFS_DEV_IOCTL_VERSION_MINOR,
-			param->ver_major, param->ver_minor, cmd);
+	if ((AUTOFS_DEV_IOCTL_VERSION_MAJOR != param->ver_major) ||
+	    (AUTOFS_DEV_IOCTL_VERSION_MINOR < param->ver_minor)) {
+		AUTOFS_WARN("ioctl control interface version mismatch: "
+		     "kernel(%u.%u), user(%u.%u), cmd(%d)",
+		     AUTOFS_DEV_IOCTL_VERSION_MAJOR,
+		     AUTOFS_DEV_IOCTL_VERSION_MINOR,
+		     param->ver_major, param->ver_minor, cmd);
 		err = -EINVAL;
 	}
 
@@ -93,8 +93,7 @@ static int check_dev_ioctl_version(int cmd, struct autofs_dev_ioctl *param)
  * Copy parameter control struct, including a possible path allocated
  * at the end of the struct.
  */
-static struct autofs_dev_ioctl *
-		copy_dev_ioctl(struct autofs_dev_ioctl __user *in)
+static struct autofs_dev_ioctl *copy_dev_ioctl(struct autofs_dev_ioctl __user *in)
 {
 	struct autofs_dev_ioctl tmp, *res;
 
@@ -117,6 +116,7 @@ static struct autofs_dev_ioctl *
 static inline void free_dev_ioctl(struct autofs_dev_ioctl *param)
 {
 	kfree(param);
+	return;
 }
 
 /*
@@ -129,24 +129,24 @@ static int validate_dev_ioctl(int cmd, struct autofs_dev_ioctl *param)
 
 	err = check_dev_ioctl_version(cmd, param);
 	if (err) {
-		pr_warn("invalid device control module version "
-			"supplied for cmd(0x%08x)\n", cmd);
+		AUTOFS_WARN("invalid device control module version "
+		     "supplied for cmd(0x%08x)", cmd);
 		goto out;
 	}
 
 	if (param->size > sizeof(*param)) {
 		err = invalid_str(param->path, param->size - sizeof(*param));
 		if (err) {
-			pr_warn(
-			  "path string terminator missing for cmd(0x%08x)\n",
+			AUTOFS_WARN(
+			  "path string terminator missing for cmd(0x%08x)",
 			  cmd);
 			goto out;
 		}
 
 		err = check_name(param->path);
 		if (err) {
-			pr_warn("invalid path supplied for cmd(0x%08x)\n",
-				cmd);
+			AUTOFS_WARN("invalid path supplied for cmd(0x%08x)",
+				    cmd);
 			goto out;
 		}
 	}
@@ -197,9 +197,7 @@ static int find_autofs_mount(const char *pathname,
 			     void *data)
 {
 	struct path path;
-	int err;
-
-	err = kern_path_mountpoint(AT_FDCWD, pathname, &path, 0);
+	int err = kern_path_mountpoint(AT_FDCWD, pathname, &path, 0);
 	if (err)
 		return err;
 	err = -ENOENT;
@@ -227,7 +225,6 @@ static int test_by_dev(struct path *path, void *p)
 static int test_by_type(struct path *path, void *p)
 {
 	struct autofs_info *ino = autofs4_dentry_ino(path->dentry);
-
 	return ino && ino->sbi->type & *(unsigned *)p;
 }
 
@@ -373,7 +370,7 @@ static int autofs_dev_ioctl_setpipefd(struct file *fp,
 		new_pid = get_task_pid(current, PIDTYPE_PGID);
 
 		if (ns_of_pid(new_pid) != ns_of_pid(sbi->oz_pgrp)) {
-			pr_warn("not allowed to change PID namespace\n");
+			AUTOFS_WARN("Not allowed to change PID namespace");
 			err = -EINVAL;
 			goto out;
 		}
@@ -459,10 +456,8 @@ static int autofs_dev_ioctl_requester(struct file *fp,
 		err = 0;
 		autofs4_expire_wait(path.dentry, 0);
 		spin_lock(&sbi->fs_lock);
-		param->requester.uid =
-			from_kuid_munged(current_user_ns(), ino->uid);
-		param->requester.gid =
-			from_kgid_munged(current_user_ns(), ino->gid);
+		param->requester.uid = from_kuid_munged(current_user_ns(), ino->uid);
+		param->requester.gid = from_kgid_munged(current_user_ns(), ino->gid);
 		spin_unlock(&sbi->fs_lock);
 	}
 	path_put(&path);
@@ -624,8 +619,7 @@ static ioctl_fn lookup_dev_ioctl(unsigned int cmd)
 }
 
 /* ioctl dispatcher */
-static int _autofs_dev_ioctl(unsigned int command,
-			     struct autofs_dev_ioctl __user *user)
+static int _autofs_dev_ioctl(unsigned int command, struct autofs_dev_ioctl __user *user)
 {
 	struct autofs_dev_ioctl *param;
 	struct file *fp;
@@ -661,7 +655,7 @@ static int _autofs_dev_ioctl(unsigned int command,
 
 	fn = lookup_dev_ioctl(cmd);
 	if (!fn) {
-		pr_warn("unknown command 0x%08x\n", command);
+		AUTOFS_WARN("unknown command 0x%08x", command);
 		return -ENOTTY;
 	}
 
@@ -717,7 +711,6 @@ out:
 static long autofs_dev_ioctl(struct file *file, uint command, ulong u)
 {
 	int err;
-
 	err = _autofs_dev_ioctl(command, (struct autofs_dev_ioctl __user *) u);
 	return (long) err;
 }
@@ -740,8 +733,8 @@ static const struct file_operations _dev_ioctl_fops = {
 
 static struct miscdevice _autofs_dev_ioctl_misc = {
 	.minor		= AUTOFS_MINOR,
-	.name		= AUTOFS_DEVICE_NAME,
-	.fops		= &_dev_ioctl_fops
+	.name  		= AUTOFS_DEVICE_NAME,
+	.fops  		= &_dev_ioctl_fops
 };
 
 MODULE_ALIAS_MISCDEV(AUTOFS_MINOR);
@@ -754,7 +747,7 @@ int __init autofs_dev_ioctl_init(void)
 
 	r = misc_register(&_autofs_dev_ioctl_misc);
 	if (r) {
-		pr_err("misc_register failed for control device\n");
+		AUTOFS_ERROR("misc_register failed for control device");
 		return r;
 	}
 
@@ -764,4 +757,6 @@ int __init autofs_dev_ioctl_init(void)
 void autofs_dev_ioctl_exit(void)
 {
 	misc_deregister(&_autofs_dev_ioctl_misc);
+	return;
 }
+

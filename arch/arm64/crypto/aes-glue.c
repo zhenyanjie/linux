@@ -15,7 +15,6 @@
 #include <crypto/algapi.h>
 #include <linux/module.h>
 #include <linux/cpufeature.h>
-#include <crypto/xts.h>
 
 #include "aes-ce-setkey.h"
 
@@ -85,10 +84,6 @@ static int xts_set_key(struct crypto_tfm *tfm, const u8 *in_key,
 {
 	struct crypto_aes_xts_ctx *ctx = crypto_tfm_ctx(tfm);
 	int ret;
-
-	ret = xts_check_key(tfm, in_key, key_len);
-	if (ret)
-		return ret;
 
 	ret = aes_expandkey(&ctx->key1, in_key, key_len / 2);
 	if (!ret)
@@ -216,7 +211,7 @@ static int ctr_encrypt(struct blkcipher_desc *desc, struct scatterlist *dst,
 		err = blkcipher_walk_done(desc, &walk,
 					  walk.nbytes % AES_BLOCK_SIZE);
 	}
-	if (walk.nbytes % AES_BLOCK_SIZE) {
+	if (nbytes) {
 		u8 *tdst = walk.dst.virt.addr + blocks * AES_BLOCK_SIZE;
 		u8 *tsrc = walk.src.virt.addr + blocks * AES_BLOCK_SIZE;
 		u8 __aligned(8) tail[AES_BLOCK_SIZE];

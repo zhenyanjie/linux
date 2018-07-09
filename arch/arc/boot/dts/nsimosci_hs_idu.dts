@@ -7,10 +7,11 @@
  */
 /dts-v1/;
 
-/include/ "skeleton_hs_idu.dtsi"
+/include/ "skeleton.dtsi"
 
 / {
 	compatible = "snps,nsimosci_hs";
+	clock-frequency = <5000000>;	/* 5 MHZ */
 	#address-cells = <1>;
 	#size-cells = <1>;
 	interrupt-parent = <&core_intc>;
@@ -31,12 +32,6 @@
 
 		/* child and parent address space 1:1 mapped */
 		ranges;
-
-		core_clk: core_clk {
-			#clock-cells = <0>;
-			compatible = "fixed-clock";
-			clock-frequency = <5000000>;
-		};
 
 		core_intc: core-interrupt-controller {
 			compatible = "snps,archs-intc";
@@ -90,10 +85,11 @@
 		};
 
 		eth0: ethernet@f0003000 {
-			compatible = "ezchip,nps-mgt-enet";
+			compatible = "snps,oscilan";
 			reg = <0xf0003000 0x44>;
 			interrupt-parent = <&idu_intc>;
-			interrupts = <1 2>;
+			interrupts = <1 2>, <2 2>;
+			interrupt-names = "rx", "tx";
 		};
 
 		arcpct0: pct {

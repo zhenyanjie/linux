@@ -102,8 +102,7 @@ static int fdp_nci_create_conn(struct nci_dev *ndev)
 	if (r)
 		return r;
 
-	return nci_get_conn_info_by_dest_type_params(ndev,
-						     FDP_PATCH_CONN_DEST, NULL);
+	return nci_get_conn_info_by_id(ndev, 0);
 }
 
 static inline int fdp_nci_get_versions(struct nci_dev *ndev)
@@ -353,7 +352,7 @@ static int fdp_nci_patch_otp(struct nci_dev *ndev)
 {
 	struct fdp_nci_info *info = nci_get_drvdata(ndev);
 	struct device *dev = &info->phy->i2c_dev->dev;
-	int conn_id;
+	u8 conn_id;
 	int r = 0;
 
 	if (info->otp_version >= info->otp_patch_version)
@@ -424,7 +423,7 @@ static int fdp_nci_patch_ram(struct nci_dev *ndev)
 {
 	struct fdp_nci_info *info = nci_get_drvdata(ndev);
 	struct device *dev = &info->phy->i2c_dev->dev;
-	int conn_id;
+	u8 conn_id;
 	int r = 0;
 
 	if (info->ram_version >= info->ram_patch_version)

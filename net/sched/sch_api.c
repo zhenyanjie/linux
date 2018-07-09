@@ -607,10 +607,6 @@ void qdisc_watchdog_schedule_ns(struct qdisc_watchdog *wd, u64 expires, bool thr
 	if (throttle)
 		qdisc_throttled(wd->qdisc);
 
-	if (wd->last_expires == expires)
-		return;
-
-	wd->last_expires = expires;
 	hrtimer_start(&wd->timer,
 		      ns_to_ktime(expires),
 		      HRTIMER_MODE_ABS_PINNED);
@@ -1369,8 +1365,7 @@ static int tc_fill_qdisc(struct sk_buff *skb, struct Qdisc *q, u32 clid,
 		goto nla_put_failure;
 
 	if (gnet_stats_start_copy_compat(skb, TCA_STATS2, TCA_STATS, TCA_XSTATS,
-					 qdisc_root_sleeping_lock(q), &d,
-					 TCA_PAD) < 0)
+					 qdisc_root_sleeping_lock(q), &d) < 0)
 		goto nla_put_failure;
 
 	if (q->ops->dump_stats && q->ops->dump_stats(q, &d) < 0)
@@ -1684,8 +1679,7 @@ static int tc_fill_tclass(struct sk_buff *skb, struct Qdisc *q,
 		goto nla_put_failure;
 
 	if (gnet_stats_start_copy_compat(skb, TCA_STATS2, TCA_STATS, TCA_XSTATS,
-					 qdisc_root_sleeping_lock(q), &d,
-					 TCA_PAD) < 0)
+					 qdisc_root_sleeping_lock(q), &d) < 0)
 		goto nla_put_failure;
 
 	if (cl_ops->dump_stats && cl_ops->dump_stats(q, cl, &d) < 0)
@@ -1849,7 +1843,7 @@ reclassify:
 			return err;
 	}
 
-	return TC_ACT_UNSPEC; /* signal: continue lookup */
+	return -1;
 #ifdef CONFIG_NET_CLS_ACT
 reset:
 	if (unlikely(limit++ >= MAX_REC_LOOP)) {

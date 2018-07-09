@@ -167,10 +167,13 @@ static struct kset *esrt_kset;
 static int esre_create_sysfs_entry(void *esre, int entry_num)
 {
 	struct esre_entry *entry;
+	char name[20];
 
 	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
 	if (!entry)
 		return -ENOMEM;
+
+	sprintf(name, "entry%d", entry_num);
 
 	entry->kobj.kset = esrt_kset;
 
@@ -179,7 +182,7 @@ static int esre_create_sysfs_entry(void *esre, int entry_num)
 
 		entry->esre.esre1 = esre;
 		rc = kobject_init_and_add(&entry->kobj, &esre1_ktype, NULL,
-					  "entry%d", entry_num);
+					  "%s", name);
 		if (rc) {
 			kfree(entry);
 			return rc;

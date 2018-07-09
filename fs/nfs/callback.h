@@ -37,11 +37,10 @@ enum nfs4_callback_opnum {
 	OP_CB_ILLEGAL = 10044,
 };
 
-struct nfs4_slot;
 struct cb_process_state {
 	__be32			drc_status;
 	struct nfs_client	*clp;
-	struct nfs4_slot	*slot;
+	u32			slotid;
 	u32			minorversion;
 	struct net		*net;
 };

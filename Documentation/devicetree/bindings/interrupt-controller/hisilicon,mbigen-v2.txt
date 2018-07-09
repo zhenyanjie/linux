@@ -21,8 +21,6 @@ Mbigen main node required properties:
 - reg: Specifies the base physical address and size of the Mbigen
   registers.
 
-Mbigen sub node required properties:
-------------------------------------------
 - interrupt controller: Identifies the node as an interrupt controller
 
 - msi-parent: Specifies the MSI controller this mbigen use.
@@ -47,23 +45,13 @@ Mbigen sub node required properties:
 
 Examples:
 
-	mbigen_chip_dsa {
+	mbigen_device_gmac:intc {
 			compatible = "hisilicon,mbigen-v2";
 			reg = <0x0 0xc0080000 0x0 0x10000>;
-
-			mbigen_gmac:intc_gmac {
-				interrupt-controller;
-				msi-parent = <&its_dsa 0x40b1c>;
-				num-pins = <9>;
-				#interrupt-cells = <2>;
-			};
-
-			mbigen_i2c:intc_i2c {
-				interrupt-controller;
-				msi-parent = <&its_dsa 0x40b0e>;
-				num-pins = <2>;
-				#interrupt-cells = <2>;
-			};
+			interrupt-controller;
+			msi-parent = <&its_dsa 0x40b1c>;
+			num-pins = <9>;
+			#interrupt-cells = <2>;
 	};
 
 Devices connect to mbigen required properties:

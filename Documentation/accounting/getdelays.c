@@ -505,8 +505,6 @@ int main(int argc, char *argv[])
 						if (!loop)
 							goto done;
 						break;
-					case TASKSTATS_TYPE_NULL:
-						break;
 					default:
 						fprintf(stderr, "Unknown nested"
 							" nla_type %d\n",
@@ -514,8 +512,7 @@ int main(int argc, char *argv[])
 						break;
 					}
 					len2 += NLA_ALIGN(na->nla_len);
-					na = (struct nlattr *)((char *)na +
-							       NLA_ALIGN(na->nla_len));
+					na = (struct nlattr *) ((char *) na + len2);
 				}
 				break;
 

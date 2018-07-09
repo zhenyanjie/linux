@@ -14,7 +14,6 @@
 #include <linux/ioport.h>
 #include <linux/delay.h>
 #include <linux/platform_device.h>
-#include <linux/gpio/driver.h>
 #include <linux/gpio.h>
 #include <linux/mtd/physmap.h>
 
@@ -336,7 +335,7 @@ static void __init rbtx4938_mtd_init(void)
 
 static void __init rbtx4938_arch_init(void)
 {
-	gpiochip_add_data(&rbtx4938_spi_gpio_chip, NULL);
+	gpiochip_add(&rbtx4938_spi_gpio_chip);
 	rbtx4938_pci_setup();
 	rbtx4938_spi_init();
 }

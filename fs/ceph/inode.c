@@ -8,10 +8,8 @@
 #include <linux/kernel.h>
 #include <linux/writeback.h>
 #include <linux/vmalloc.h>
-#include <linux/xattr.h>
 #include <linux/posix_acl.h>
 #include <linux/random.h>
-#include <linux/sort.h>
 
 #include "super.h"
 #include "mds_client.h"
@@ -94,10 +92,10 @@ const struct inode_operations ceph_file_iops = {
 	.permission = ceph_permission,
 	.setattr = ceph_setattr,
 	.getattr = ceph_getattr,
-	.setxattr = generic_setxattr,
-	.getxattr = generic_getxattr,
+	.setxattr = ceph_setxattr,
+	.getxattr = ceph_getxattr,
 	.listxattr = ceph_listxattr,
-	.removexattr = generic_removexattr,
+	.removexattr = ceph_removexattr,
 	.get_acl = ceph_get_acl,
 	.set_acl = ceph_set_acl,
 };
@@ -255,9 +253,6 @@ static int ceph_fill_dirfrag(struct inode *inode,
 		diri_auth = ci->i_auth_cap->mds;
 	spin_unlock(&ci->i_ceph_lock);
 
-	if (mds == -1) /* CDIR_AUTH_PARENT */
-		mds = diri_auth;
-
 	mutex_lock(&ci->i_fragtree_mutex);
 	if (ndist == 0 && mds == diri_auth) {
 		/* no delegation info needed. */
@@ -304,38 +299,20 @@ out:
 	return err;
 }
 
-static int frag_tree_split_cmp(const void *l, const void *r)
-{
-	struct ceph_frag_tree_split *ls = (struct ceph_frag_tree_split*)l;
-	struct ceph_frag_tree_split *rs = (struct ceph_frag_tree_split*)r;
-	return ceph_frag_compare(ls->frag, rs->frag);
-}
-
-static bool is_frag_child(u32 f, struct ceph_inode_frag *frag)
-{
-	if (!frag)
-		return f == ceph_frag_make(0, 0);
-	if (ceph_frag_bits(f) != ceph_frag_bits(frag->frag) + frag->split_by)
-		return false;
-	return ceph_frag_contains_value(frag->frag, ceph_frag_value(f));
-}
-
 static int ceph_fill_fragtree(struct inode *inode,
 			      struct ceph_frag_tree_head *fragtree,
 			      struct ceph_mds_reply_dirfrag *dirinfo)
 {
 	struct ceph_inode_info *ci = ceph_inode(inode);
-	struct ceph_inode_frag *frag, *prev_frag = NULL;
+	struct ceph_inode_frag *frag;
 	struct rb_node *rb_node;
-	unsigned i, split_by, nsplits;
-	u32 id;
+	int i;
+	u32 id, nsplits;
 	bool update = false;
 
 	mutex_lock(&ci->i_fragtree_mutex);
 	nsplits = le32_to_cpu(fragtree->nsplits);
-	if (nsplits != ci->i_fragtree_nsplits) {
-		update = true;
-	} else if (nsplits) {
+	if (nsplits) {
 		i = prandom_u32() % nsplits;
 		id = le32_to_cpu(fragtree->splits[i].frag);
 		if (!__ceph_find_frag(ci, id))
@@ -354,22 +331,10 @@ static int ceph_fill_fragtree(struct inode *inode,
 	if (!update)
 		goto out_unlock;
 
-	if (nsplits > 1) {
-		sort(fragtree->splits, nsplits, sizeof(fragtree->splits[0]),
-		     frag_tree_split_cmp, NULL);
-	}
-
 	dout("fill_fragtree %llx.%llx\n", ceph_vinop(inode));
 	rb_node = rb_first(&ci->i_fragtree);
 	for (i = 0; i < nsplits; i++) {
 		id = le32_to_cpu(fragtree->splits[i].frag);
-		split_by = le32_to_cpu(fragtree->splits[i].by);
-		if (split_by == 0 || ceph_frag_bits(id) + split_by > 24) {
-			pr_err("fill_fragtree %llx.%llx invalid split %d/%u, "
-			       "frag %x split by %d\n", ceph_vinop(inode),
-			       i, nsplits, id, split_by);
-			continue;
-		}
 		frag = NULL;
 		while (rb_node) {
 			frag = rb_entry(rb_node, struct ceph_inode_frag, node);
@@ -381,14 +346,8 @@ static int ceph_fill_fragtree(struct inode *inode,
 				break;
 			}
 			rb_node = rb_next(rb_node);
-			/* delete stale split/leaf node */
-			if (frag->split_by > 0 ||
-			    !is_frag_child(frag->frag, prev_frag)) {
-				rb_erase(&frag->node, &ci->i_fragtree);
-				if (frag->split_by > 0)
-					ci->i_fragtree_nsplits--;
-				kfree(frag);
-			}
+			rb_erase(&frag->node, &ci->i_fragtree);
+			kfree(frag);
 			frag = NULL;
 		}
 		if (!frag) {
@@ -396,23 +355,14 @@ static int ceph_fill_fragtree(struct inode *inode,
 			if (IS_ERR(frag))
 				continue;
 		}
-		if (frag->split_by == 0)
-			ci->i_fragtree_nsplits++;
-		frag->split_by = split_by;
+		frag->split_by = le32_to_cpu(fragtree->splits[i].by);
 		dout(" frag %x split by %d\n", frag->frag, frag->split_by);
-		prev_frag = frag;
 	}
 	while (rb_node) {
 		frag = rb_entry(rb_node, struct ceph_inode_frag, node);
 		rb_node = rb_next(rb_node);
-		/* delete stale split/leaf node */
-		if (frag->split_by > 0 ||
-		    !is_frag_child(frag->frag, prev_frag)) {
-			rb_erase(&frag->node, &ci->i_fragtree);
-			if (frag->split_by > 0)
-				ci->i_fragtree_nsplits--;
-			kfree(frag);
-		}
+		rb_erase(&frag->node, &ci->i_fragtree);
+		kfree(frag);
 	}
 out_unlock:
 	mutex_unlock(&ci->i_fragtree_mutex);
@@ -562,7 +512,6 @@ void ceph_destroy_inode(struct inode *inode)
 		rb_erase(n, &ci->i_fragtree);
 		kfree(frag);
 	}
-	ci->i_fragtree_nsplits = 0;
 
 	__ceph_destroy_xattrs(ci);
 	if (ci->i_xattrs.blob)
@@ -583,11 +532,6 @@ int ceph_drop_inode(struct inode *inode)
 	return 1;
 }
 
-static inline blkcnt_t calc_inode_blocks(u64 size)
-{
-	return (size + (1<<9) - 1) >> 9;
-}
-
 /*
  * Helpers to fill in size, ctime, mtime, and atime.  We have to be
  * careful because either the client or MDS may have more up to date
@@ -605,12 +549,8 @@ int ceph_fill_file_size(struct inode *inode, int issued,
 	if (ceph_seq_cmp(truncate_seq, ci->i_truncate_seq) > 0 ||
 	    (truncate_seq == ci->i_truncate_seq && size > inode->i_size)) {
 		dout("size %lld -> %llu\n", inode->i_size, size);
-		if (size > 0 && S_ISDIR(inode->i_mode)) {
-			pr_err("fill_file_size non-zero size for directory\n");
-			size = 0;
-		}
 		i_size_write(inode, size);
-		inode->i_blocks = calc_inode_blocks(size);
+		inode->i_blocks = (size + (1<<9) - 1) >> 9;
 		ci->i_reported_size = size;
 		if (truncate_seq != ci->i_truncate_seq) {
 			dout("truncate_seq %u -> %u\n",
@@ -869,13 +809,9 @@ static int fill_inode(struct inode *inode, struct page *locked_page,
 
 			spin_unlock(&ci->i_ceph_lock);
 
-			if (symlen != i_size_read(inode)) {
-				pr_err("fill_inode %llx.%llx BAD symlink "
-					"size %lld\n", ceph_vinop(inode),
-					i_size_read(inode));
-				i_size_write(inode, symlen);
-				inode->i_blocks = calc_inode_blocks(symlen);
-			}
+			err = -EINVAL;
+			if (WARN_ON(symlen != i_size_read(inode)))
+				goto out;
 
 			err = -ENOMEM;
 			sym = kstrndup(iinfo->symlink, symlen, GFP_NOFS);
@@ -1041,8 +977,13 @@ out_unlock:
 /*
  * splice a dentry to an inode.
  * caller must hold directory i_mutex for this to be safe.
+ *
+ * we will only rehash the resulting dentry if @prehash is
+ * true; @prehash will be set to false (for the benefit of
+ * the caller) if we fail.
  */
-static struct dentry *splice_dentry(struct dentry *dn, struct inode *in)
+static struct dentry *splice_dentry(struct dentry *dn, struct inode *in,
+				    bool *prehash)
 {
 	struct dentry *realdn;
 
@@ -1055,6 +996,8 @@ static struct dentry *splice_dentry(struct dentry *dn, struct inode *in)
 	if (IS_ERR(realdn)) {
 		pr_err("splice_dentry error %ld %p inode %p ino %llx.%llx\n",
 		       PTR_ERR(realdn), dn, in, ceph_vinop(in));
+		if (prehash)
+			*prehash = false; /* don't rehash on error */
 		dn = realdn; /* note realdn contains the error */
 		goto out;
 	} else if (realdn) {
@@ -1070,6 +1013,8 @@ static struct dentry *splice_dentry(struct dentry *dn, struct inode *in)
 		dout("dn %p attached to %p ino %llx.%llx\n",
 		     dn, d_inode(dn), ceph_vinop(d_inode(dn)));
 	}
+	if ((!prehash || *prehash) && d_unhashed(dn))
+		d_rehash(dn);
 out:
 	return dn;
 }
@@ -1302,8 +1247,10 @@ retry_lookup:
 				dout("d_delete %p\n", dn);
 				d_delete(dn);
 			} else {
+				dout("d_instantiate %p NULL\n", dn);
+				d_instantiate(dn, NULL);
 				if (have_lease && d_unhashed(dn))
-					d_add(dn, NULL);
+					d_rehash(dn);
 				update_dentry_lease(dn, rinfo->dlease,
 						    session,
 						    req->r_request_started);
@@ -1315,7 +1262,7 @@ retry_lookup:
 		if (d_really_is_negative(dn)) {
 			ceph_dir_clear_ordered(dir);
 			ihold(in);
-			dn = splice_dentry(dn, in);
+			dn = splice_dentry(dn, in, &have_lease);
 			if (IS_ERR(dn)) {
 				err = PTR_ERR(dn);
 				goto done;
@@ -1325,7 +1272,6 @@ retry_lookup:
 			dout(" %p links to %p %llx.%llx, not %llx.%llx\n",
 			     dn, d_inode(dn), ceph_vinop(d_inode(dn)),
 			     ceph_vinop(in));
-			d_invalidate(dn);
 			have_lease = false;
 		}
 
@@ -1346,7 +1292,7 @@ retry_lookup:
 		dout(" linking snapped dir %p to dn %p\n", in, dn);
 		ceph_dir_clear_ordered(dir);
 		ihold(in);
-		dn = splice_dentry(dn, in);
+		dn = splice_dentry(dn, in, NULL);
 		if (IS_ERR(dn)) {
 			err = PTR_ERR(dn);
 			goto done;
@@ -1368,13 +1314,12 @@ static int readdir_prepopulate_inodes_only(struct ceph_mds_request *req,
 	int i, err = 0;
 
 	for (i = 0; i < rinfo->dir_nr; i++) {
-		struct ceph_mds_reply_dir_entry *rde = rinfo->dir_entries + i;
 		struct ceph_vino vino;
 		struct inode *in;
 		int rc;
 
-		vino.ino = le64_to_cpu(rde->inode.in->ino);
-		vino.snap = le64_to_cpu(rde->inode.in->snapid);
+		vino.ino = le64_to_cpu(rinfo->dir_in[i].in->ino);
+		vino.snap = le64_to_cpu(rinfo->dir_in[i].in->snapid);
 
 		in = ceph_get_inode(req->r_dentry->d_sb, vino);
 		if (IS_ERR(in)) {
@@ -1382,14 +1327,14 @@ static int readdir_prepopulate_inodes_only(struct ceph_mds_request *req,
 			dout("new_inode badness got %d\n", err);
 			continue;
 		}
-		rc = fill_inode(in, NULL, &rde->inode, NULL, session,
+		rc = fill_inode(in, NULL, &rinfo->dir_in[i], NULL, session,
 				req->r_request_started, -1,
 				&req->r_caps_reservation);
 		if (rc < 0) {
 			pr_err("fill_inode badness on %p got %d\n", in, rc);
 			err = rc;
+			continue;
 		}
-		iput(in);
 	}
 
 	return err;
@@ -1399,7 +1344,7 @@ void ceph_readdir_cache_release(struct ceph_readdir_cache_control *ctl)
 {
 	if (ctl->page) {
 		kunmap(ctl->page);
-		put_page(ctl->page);
+		page_cache_release(ctl->page);
 		ctl->page = NULL;
 	}
 }
@@ -1409,26 +1354,21 @@ static int fill_readdir_cache(struct inode *dir, struct dentry *dn,
 			      struct ceph_mds_request *req)
 {
 	struct ceph_inode_info *ci = ceph_inode(dir);
-	unsigned nsize = PAGE_SIZE / sizeof(struct dentry*);
+	unsigned nsize = PAGE_CACHE_SIZE / sizeof(struct dentry*);
 	unsigned idx = ctl->index % nsize;
 	pgoff_t pgoff = ctl->index / nsize;
 
 	if (!ctl->page || pgoff != page_index(ctl->page)) {
 		ceph_readdir_cache_release(ctl);
-		if (idx == 0)
-			ctl->page = grab_cache_page(&dir->i_data, pgoff);
-		else
-			ctl->page = find_lock_page(&dir->i_data, pgoff);
+		ctl->page  = grab_cache_page(&dir->i_data, pgoff);
 		if (!ctl->page) {
 			ctl->index = -1;
-			return idx == 0 ? -ENOMEM : 0;
+			return -ENOMEM;
 		}
 		/* reading/filling the cache are serialized by
 		 * i_mutex, no need to use page lock */
 		unlock_page(ctl->page);
 		ctl->dentries = kmap(ctl->page);
-		if (idx == 0)
-			memset(ctl->dentries, 0, PAGE_SIZE);
 	}
 
 	if (req->r_dir_release_cnt == atomic64_read(&ci->i_release_count) &&
@@ -1447,35 +1387,29 @@ int ceph_readdir_prepopulate(struct ceph_mds_request *req,
 			     struct ceph_mds_session *session)
 {
 	struct dentry *parent = req->r_dentry;
-	struct ceph_inode_info *ci = ceph_inode(d_inode(parent));
 	struct ceph_mds_reply_info_parsed *rinfo = &req->r_reply_info;
 	struct qstr dname;
 	struct dentry *dn;
 	struct inode *in;
-	int err = 0, skipped = 0, ret, i;
+	int err = 0, ret, i;
 	struct inode *snapdir = NULL;
 	struct ceph_mds_request_head *rhead = req->r_request->front.iov_base;
+	struct ceph_dentry_info *di;
 	u32 frag = le32_to_cpu(rhead->args.readdir.frag);
-	u32 last_hash = 0;
-	u32 fpos_offset;
 	struct ceph_readdir_cache_control cache_ctl = {};
 
 	if (req->r_aborted)
 		return readdir_prepopulate_inodes_only(req, session);
-
-	if (rinfo->hash_order && req->r_path2) {
-		last_hash = ceph_str_hash(ci->i_dir_layout.dl_dir_hash,
-					  req->r_path2, strlen(req->r_path2));
-		last_hash = ceph_frag_value(last_hash);
-	}
 
 	if (rinfo->dir_dir &&
 	    le32_to_cpu(rinfo->dir_dir->frag) != frag) {
 		dout("readdir_prepopulate got new frag %x -> %x\n",
 		     frag, le32_to_cpu(rinfo->dir_dir->frag));
 		frag = le32_to_cpu(rinfo->dir_dir->frag);
-		if (!rinfo->hash_order)
+		if (ceph_frag_is_leftmost(frag))
 			req->r_readdir_offset = 2;
+		else
+			req->r_readdir_offset = 0;
 	}
 
 	if (le32_to_cpu(rinfo->head->op) == CEPH_MDS_OP_LSSNAP) {
@@ -1493,37 +1427,24 @@ int ceph_readdir_prepopulate(struct ceph_mds_request *req,
 	if (ceph_frag_is_leftmost(frag) && req->r_readdir_offset == 2) {
 		/* note dir version at start of readdir so we can tell
 		 * if any dentries get dropped */
+		struct ceph_inode_info *ci = ceph_inode(d_inode(parent));
 		req->r_dir_release_cnt = atomic64_read(&ci->i_release_count);
 		req->r_dir_ordered_cnt = atomic64_read(&ci->i_ordered_count);
 		req->r_readdir_cache_idx = 0;
 	}
 
 	cache_ctl.index = req->r_readdir_cache_idx;
-	fpos_offset = req->r_readdir_offset;
 
 	/* FIXME: release caps/leases if error occurs */
 	for (i = 0; i < rinfo->dir_nr; i++) {
-		struct ceph_mds_reply_dir_entry *rde = rinfo->dir_entries + i;
 		struct ceph_vino vino;
 
-		dname.name = rde->name;
-		dname.len = rde->name_len;
+		dname.name = rinfo->dir_dname[i];
+		dname.len = rinfo->dir_dname_len[i];
 		dname.hash = full_name_hash(dname.name, dname.len);
 
-		vino.ino = le64_to_cpu(rde->inode.in->ino);
-		vino.snap = le64_to_cpu(rde->inode.in->snapid);
-
-		if (rinfo->hash_order) {
-			u32 hash = ceph_str_hash(ci->i_dir_layout.dl_dir_hash,
-						 rde->name, rde->name_len);
-			hash = ceph_frag_value(hash);
-			if (hash != last_hash)
-				fpos_offset = 2;
-			last_hash = hash;
-			rde->offset = ceph_make_fpos(hash, fpos_offset++, true);
-		} else {
-			rde->offset = ceph_make_fpos(frag, fpos_offset++, false);
-		}
+		vino.ino = le64_to_cpu(rinfo->dir_in[i].in->ino);
+		vino.snap = le64_to_cpu(rinfo->dir_in[i].in->snapid);
 
 retry_lookup:
 		dn = d_lookup(parent, &dname);
@@ -1569,7 +1490,7 @@ retry_lookup:
 			}
 		}
 
-		ret = fill_inode(in, NULL, &rde->inode, NULL, session,
+		ret = fill_inode(in, NULL, &rinfo->dir_in[i], NULL, session,
 				 req->r_request_started, -1,
 				 &req->r_caps_reservation);
 		if (ret < 0) {
@@ -1582,17 +1503,7 @@ retry_lookup:
 		}
 
 		if (d_really_is_negative(dn)) {
-			struct dentry *realdn;
-
-			if (ceph_security_xattr_deadlock(in)) {
-				dout(" skip splicing dn %p to inode %p"
-				     " (security xattr deadlock)\n", dn, in);
-				iput(in);
-				skipped++;
-				goto next_item;
-			}
-
-			realdn = splice_dentry(dn, in);
+			struct dentry *realdn = splice_dentry(dn, in, NULL);
 			if (IS_ERR(realdn)) {
 				err = PTR_ERR(realdn);
 				d_drop(dn);
@@ -1602,12 +1513,14 @@ retry_lookup:
 			dn = realdn;
 		}
 
-		ceph_dentry(dn)->offset = rde->offset;
+		di = dn->d_fsdata;
+		di->offset = ceph_make_fpos(frag, i + req->r_readdir_offset);
 
-		update_dentry_lease(dn, rde->lease, req->r_session,
+		update_dentry_lease(dn, rinfo->dir_dlease[i],
+				    req->r_session,
 				    req->r_request_started);
 
-		if (err == 0 && skipped == 0 && cache_ctl.index >= 0) {
+		if (err == 0 && cache_ctl.index >= 0) {
 			ret = fill_readdir_cache(d_inode(parent), dn,
 						 &cache_ctl, req);
 			if (ret < 0)
@@ -1618,7 +1531,7 @@ next_item:
 			dput(dn);
 	}
 out:
-	if (err == 0 && skipped == 0) {
+	if (err == 0) {
 		req->r_did_prepopulate = true;
 		req->r_readdir_cache_idx = cache_ctl.index;
 	}
@@ -1639,7 +1552,7 @@ int ceph_inode_set_size(struct inode *inode, loff_t size)
 	spin_lock(&ci->i_ceph_lock);
 	dout("set_size %p %llu -> %llu\n", inode, inode->i_size, size);
 	i_size_write(inode, size);
-	inode->i_blocks = calc_inode_blocks(size);
+	inode->i_blocks = (size + (1 << 9) - 1) >> 9;
 
 	/* tell the MDS if we are approaching max_size */
 	if ((size << 1) >= ci->i_max_size &&
@@ -1701,21 +1614,10 @@ static void ceph_invalidate_work(struct work_struct *work)
 	struct ceph_inode_info *ci = container_of(work, struct ceph_inode_info,
 						  i_pg_inv_work);
 	struct inode *inode = &ci->vfs_inode;
-	struct ceph_fs_client *fsc = ceph_inode_to_client(inode);
 	u32 orig_gen;
 	int check = 0;
 
 	mutex_lock(&ci->i_truncate_mutex);
-
-	if (ACCESS_ONCE(fsc->mount_state) == CEPH_MOUNT_SHUTDOWN) {
-		pr_warn_ratelimited("invalidate_pages %p %lld forced umount\n",
-				    inode, ceph_ino(inode));
-		mapping_set_error(inode->i_mapping, -EIO);
-		truncate_pagecache(inode, 0);
-		mutex_unlock(&ci->i_truncate_mutex);
-		goto out;
-	}
-
 	spin_lock(&ci->i_ceph_lock);
 	dout("invalidate_pages %p gen %d revoking %d\n", inode,
 	     ci->i_rdcache_gen, ci->i_rdcache_revoking);
@@ -1729,9 +1631,7 @@ static void ceph_invalidate_work(struct work_struct *work)
 	orig_gen = ci->i_rdcache_gen;
 	spin_unlock(&ci->i_ceph_lock);
 
-	if (invalidate_inode_pages2(inode->i_mapping) < 0) {
-		pr_err("invalidate_pages %p fails\n", inode);
-	}
+	truncate_pagecache(inode, 0);
 
 	spin_lock(&ci->i_ceph_lock);
 	if (orig_gen == ci->i_rdcache_gen &&
@@ -1861,18 +1761,22 @@ static const struct inode_operations ceph_symlink_iops = {
 	.get_link = simple_get_link,
 	.setattr = ceph_setattr,
 	.getattr = ceph_getattr,
-	.setxattr = generic_setxattr,
-	.getxattr = generic_getxattr,
+	.setxattr = ceph_setxattr,
+	.getxattr = ceph_getxattr,
 	.listxattr = ceph_listxattr,
-	.removexattr = generic_removexattr,
+	.removexattr = ceph_removexattr,
 };
 
-int __ceph_setattr(struct inode *inode, struct iattr *attr)
+/*
+ * setattr
+ */
+int ceph_setattr(struct dentry *dentry, struct iattr *attr)
 {
+	struct inode *inode = d_inode(dentry);
 	struct ceph_inode_info *ci = ceph_inode(inode);
 	const unsigned int ia_valid = attr->ia_valid;
 	struct ceph_mds_request *req;
-	struct ceph_mds_client *mdsc = ceph_sb_to_client(inode->i_sb)->mdsc;
+	struct ceph_mds_client *mdsc = ceph_sb_to_client(dentry->d_sb)->mdsc;
 	struct ceph_cap_flush *prealloc_cf;
 	int issued;
 	int release = 0, dirtied = 0;
@@ -2010,7 +1914,8 @@ int __ceph_setattr(struct inode *inode, struct iattr *attr)
 		if ((issued & CEPH_CAP_FILE_EXCL) &&
 		    attr->ia_size > inode->i_size) {
 			i_size_write(inode, attr->ia_size);
-			inode->i_blocks = calc_inode_blocks(attr->ia_size);
+			inode->i_blocks =
+				(attr->ia_size + (1 << 9) - 1) >> 9;
 			inode->i_ctime = attr->ia_ctime;
 			ci->i_reported_size = attr->ia_size;
 			dirtied |= CEPH_CAP_FILE_EXCL;
@@ -2056,7 +1961,7 @@ int __ceph_setattr(struct inode *inode, struct iattr *attr)
 	if (dirtied) {
 		inode_dirty_flags = __ceph_mark_dirty_caps(ci, dirtied,
 							   &prealloc_cf);
-		inode->i_ctime = current_fs_time(inode->i_sb);
+		inode->i_ctime = CURRENT_TIME;
 	}
 
 	release &= issued;
@@ -2093,14 +1998,6 @@ out_put:
 	ceph_mdsc_put_request(req);
 	ceph_free_cap_flush(prealloc_cf);
 	return err;
-}
-
-/*
- * setattr
- */
-int ceph_setattr(struct dentry *dentry, struct iattr *attr)
-{
-	return __ceph_setattr(d_inode(dentry), attr);
 }
 
 /*

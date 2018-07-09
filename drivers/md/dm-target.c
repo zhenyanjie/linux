@@ -150,8 +150,7 @@ static void io_err_release_clone_rq(struct request *clone)
 
 static struct target_type error_target = {
 	.name = "error",
-	.version = {1, 4, 0},
-	.features = DM_TARGET_WILDCARD,
+	.version = {1, 3, 0},
 	.ctr  = io_err_ctr,
 	.dtr  = io_err_dtr,
 	.map  = io_err_map,

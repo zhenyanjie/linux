@@ -47,9 +47,6 @@
 #include <asm/debug.h>
 #include <asm/hw_breakpoint.h>
 
-#include <asm/opal.h>
-#include <asm/firmware.h>
-
 #ifdef CONFIG_PPC64
 #include <asm/hvcall.h>
 #include <asm/paca.h>
@@ -86,7 +83,6 @@ static char tmpstr[128];
 
 static long bus_error_jmp[JMP_BUF_LEN];
 static int catch_memory_errors;
-static int catch_spr_faults;
 static long *xmon_fault_jmp[NR_CPUS];
 
 /* Breakpoint stuff */
@@ -123,16 +119,6 @@ static void dump(void);
 static void prdump(unsigned long, long);
 static int ppc_inst_dump(unsigned long, long, int);
 static void dump_log_buf(void);
-
-#ifdef CONFIG_PPC_POWERNV
-static void dump_opal_msglog(void);
-#else
-static inline void dump_opal_msglog(void)
-{
-	printf("Machine is not running OPAL firmware.\n");
-}
-#endif
-
 static void backtrace(struct pt_regs *);
 static void excprint(struct pt_regs *);
 static void prregs(struct pt_regs *);
@@ -148,7 +134,7 @@ void getstring(char *, int);
 static void flush_input(void);
 static int inchar(void);
 static void take_input(char *);
-static int  read_spr(int, unsigned long *);
+static unsigned long read_spr(int);
 static void write_spr(int, unsigned long);
 static void super_regs(void);
 static void remove_bpts(void);
@@ -164,7 +150,6 @@ static int  cpu_cmd(void);
 static void csum(void);
 static void bootcmds(void);
 static void proccall(void);
-static void show_tasks(void);
 void dump_segments(void);
 static void symbol_lookup(void);
 static void xmon_show_stack(unsigned long sp, unsigned long lr,
@@ -217,10 +202,6 @@ Commands:\n\
   df	dump float values\n\
   dd	dump double values\n\
   dl    dump the kernel log buffer\n"
-#ifdef CONFIG_PPC_POWERNV
-  "\
-  do    dump the OPAL message log\n"
-#endif
 #ifdef CONFIG_PPC64
   "\
   dp[#]	dump paca for current cpu, or cpu #\n\
@@ -240,7 +221,6 @@ Commands:\n\
   mz	zero a block of memory\n\
   mi	show information about memory allocation\n\
   p 	call a procedure\n\
-  P 	list processes/tasks\n\
   r	print registers\n\
   s	single step\n"
 #ifdef CONFIG_SPU_BASE
@@ -251,12 +231,9 @@ Commands:\n\
   sdi #	disassemble spu local store for spu # (in hex)\n"
 #endif
 "  S	print special registers\n\
-  Sa    print all SPRs\n\
-  Sr #	read SPR #\n\
-  Sw #v write v to SPR #\n\
   t	print backtrace\n\
   x	exit monitor and recover\n\
-  X	exit monitor and don't recover\n"
+  X	exit monitor and dont recover\n"
 #if defined(CONFIG_PPC64) && !defined(CONFIG_PPC_BOOK3E)
 "  u	dump segment table or SLB\n"
 #elif defined(CONFIG_PPC_STD_MMU_32)
@@ -446,12 +423,6 @@ static int xmon_core(struct pt_regs *regs, int fromipi)
 #ifdef CONFIG_SMP
 	cpu = smp_processor_id();
 	if (cpumask_test_cpu(cpu, &cpus_in_xmon)) {
-		/*
-		 * We catch SPR read/write faults here because the 0x700, 0xf60
-		 * etc. handlers don't call debugger_fault_handler().
-		 */
-		if (catch_spr_faults)
-			longjmp(bus_error_jmp, 1);
 		get_output_lock();
 		excprint(regs);
 		printf("cpu 0x%x: Exception %lx %s in xmon, "
@@ -978,9 +949,6 @@ cmds(struct pt_regs *excp)
 			break;
 		case 'p':
 			proccall();
-			break;
-		case 'P':
-			show_tasks();
 			break;
 #ifdef CONFIG_PPC_STD_MMU
 		case 'u':
@@ -1645,87 +1613,89 @@ static void cacheflush(void)
 	catch_memory_errors = 0;
 }
 
-extern unsigned long xmon_mfspr(int spr, unsigned long default_value);
-extern void xmon_mtspr(int spr, unsigned long value);
-
-static int
-read_spr(int n, unsigned long *vp)
+static unsigned long
+read_spr(int n)
 {
+	unsigned int instrs[2];
+	unsigned long (*code)(void);
 	unsigned long ret = -1UL;
-	int ok = 0;
+#ifdef CONFIG_PPC64
+	unsigned long opd[3];
+
+	opd[0] = (unsigned long)instrs;
+	opd[1] = 0;
+	opd[2] = 0;
+	code = (unsigned long (*)(void)) opd;
+#else
+	code = (unsigned long (*)(void)) instrs;
+#endif
+
+	/* mfspr r3,n; blr */
+	instrs[0] = 0x7c6002a6 + ((n & 0x1F) << 16) + ((n & 0x3e0) << 6);
+	instrs[1] = 0x4e800020;
+	store_inst(instrs);
+	store_inst(instrs+1);
 
 	if (setjmp(bus_error_jmp) == 0) {
-		catch_spr_faults = 1;
+		catch_memory_errors = 1;
 		sync();
 
-		ret = xmon_mfspr(n, *vp);
+		ret = code();
 
 		sync();
-		*vp = ret;
-		ok = 1;
+		/* wait a little while to see if we get a machine check */
+		__delay(200);
+		n = size;
 	}
-	catch_spr_faults = 0;
 
-	return ok;
+	return ret;
 }
 
 static void
 write_spr(int n, unsigned long val)
 {
+	unsigned int instrs[2];
+	unsigned long (*code)(unsigned long);
+#ifdef CONFIG_PPC64
+	unsigned long opd[3];
+
+	opd[0] = (unsigned long)instrs;
+	opd[1] = 0;
+	opd[2] = 0;
+	code = (unsigned long (*)(unsigned long)) opd;
+#else
+	code = (unsigned long (*)(unsigned long)) instrs;
+#endif
+
+	instrs[0] = 0x7c6003a6 + ((n & 0x1F) << 16) + ((n & 0x3e0) << 6);
+	instrs[1] = 0x4e800020;
+	store_inst(instrs);
+	store_inst(instrs+1);
+
 	if (setjmp(bus_error_jmp) == 0) {
-		catch_spr_faults = 1;
+		catch_memory_errors = 1;
 		sync();
 
-		xmon_mtspr(n, val);
+		code(val);
 
 		sync();
-	} else {
-		printf("SPR 0x%03x (%4d) Faulted during write\n", n, n);
+		/* wait a little while to see if we get a machine check */
+		__delay(200);
+		n = size;
 	}
-	catch_spr_faults = 0;
 }
 
 static unsigned long regno;
 extern char exc_prolog;
 extern char dec_exc;
 
-static void dump_one_spr(int spr, bool show_unimplemented)
-{
-	unsigned long val;
-
-	val = 0xdeadbeef;
-	if (!read_spr(spr, &val)) {
-		printf("SPR 0x%03x (%4d) Faulted during read\n", spr, spr);
-		return;
-	}
-
-	if (val == 0xdeadbeef) {
-		/* Looks like read was a nop, confirm */
-		val = 0x0badcafe;
-		if (!read_spr(spr, &val)) {
-			printf("SPR 0x%03x (%4d) Faulted during read\n", spr, spr);
-			return;
-		}
-
-		if (val == 0x0badcafe) {
-			if (show_unimplemented)
-				printf("SPR 0x%03x (%4d) Unimplemented\n", spr, spr);
-			return;
-		}
-	}
-
-	printf("SPR 0x%03x (%4d) = 0x%lx\n", spr, spr, val);
-}
-
 static void super_regs(void)
 {
 	int cmd;
-	int spr;
+	unsigned long val;
 
 	cmd = skipbl();
-
-	switch (cmd) {
-	case '\n': {
+	if (cmd == '\n') {
 		unsigned long sp, toc;
 		asm("mr %0,1" : "=r" (sp) :);
 		asm("mr %0,2" : "=r" (toc) :);
@@ -1738,29 +1708,21 @@ static void super_regs(void)
 		       mfspr(SPRN_DEC), mfspr(SPRN_SPRG2));
 		printf("sp   = "REG"  sprg3= "REG"\n", sp, mfspr(SPRN_SPRG3));
 		printf("toc  = "REG"  dar  = "REG"\n", toc, mfspr(SPRN_DAR));
+
 		return;
 	}
-	case 'w': {
-		unsigned long val;
-		scanhex(&regno);
-		val = 0;
-		read_spr(regno, &val);
+
+	scanhex(&regno);
+	switch (cmd) {
+	case 'w':
+		val = read_spr(regno);
 		scanhex(&val);
 		write_spr(regno, val);
-		dump_one_spr(regno, true);
-		break;
-	}
+		/* fall through */
 	case 'r':
-		scanhex(&regno);
-		dump_one_spr(regno, true);
-		break;
-	case 'a':
-		/* dump ALL SPRs */
-		for (spr = 1; spr < 1024; ++spr)
-			dump_one_spr(spr, false);
+		printf("spr %lx = %lx\n", regno, read_spr(regno));
 		break;
 	}
-
 	scannl();
 }
 
@@ -2291,8 +2253,6 @@ dump(void)
 		last_cmd = "di\n";
 	} else if (c == 'l') {
 		dump_log_buf();
-	} else if (c == 'o') {
-		dump_opal_msglog();
 	} else if (c == 'r') {
 		scanhex(&ndump);
 		if (ndump == 0)
@@ -2435,45 +2395,6 @@ dump_log_buf(void)
 	catch_memory_errors = 0;
 }
 
-#ifdef CONFIG_PPC_POWERNV
-static void dump_opal_msglog(void)
-{
-	unsigned char buf[128];
-	ssize_t res;
-	loff_t pos = 0;
-
-	if (!firmware_has_feature(FW_FEATURE_OPAL)) {
-		printf("Machine is not running OPAL firmware.\n");
-		return;
-	}
-
-	if (setjmp(bus_error_jmp) != 0) {
-		printf("Error dumping OPAL msglog!\n");
-		return;
-	}
-
-	catch_memory_errors = 1;
-	sync();
-
-	xmon_start_pagination();
-	while ((res = opal_msglog_copy(buf, pos, sizeof(buf) - 1))) {
-		if (res < 0) {
-			printf("Error dumping OPAL msglog! Error: %zd\n", res);
-			break;
-		}
-		buf[res] = '\0';
-		printf("%s", buf);
-		pos += res;
-	}
-	xmon_end_pagination();
-
-	sync();
-	/* wait a little while to see if we get a machine check */
-	__delay(200);
-	catch_memory_errors = 0;
-}
-#endif
-
 /*
  * Memory operations - move, set, print differences
  */
@@ -2585,61 +2506,6 @@ memzcan(void)
 	}
 	if (ook)
 		printf("%.8x\n", a - mskip);
-}
-
-static void show_task(struct task_struct *tsk)
-{
-	char state;
-
-	/*
-	 * Cloned from kdb_task_state_char(), which is not entirely
-	 * appropriate for calling from xmon. This could be moved
-	 * to a common, generic, routine used by both.
-	 */
-	state = (tsk->state == 0) ? 'R' :
-		(tsk->state < 0) ? 'U' :
-		(tsk->state & TASK_UNINTERRUPTIBLE) ? 'D' :
-		(tsk->state & TASK_STOPPED) ? 'T' :
-		(tsk->state & TASK_TRACED) ? 'C' :
-		(tsk->exit_state & EXIT_ZOMBIE) ? 'Z' :
-		(tsk->exit_state & EXIT_DEAD) ? 'E' :
-		(tsk->state & TASK_INTERRUPTIBLE) ? 'S' : '?';
-
-	printf("%p %016lx %6d %6d %c %2d %s\n", tsk,
-		tsk->thread.ksp,
-		tsk->pid, tsk->parent->pid,
-		state, task_thread_info(tsk)->cpu,
-		tsk->comm);
-}
-
-static void show_tasks(void)
-{
-	unsigned long tskv;
-	struct task_struct *tsk = NULL;
-
-	printf("     task_struct     ->thread.ksp    PID   PPID S  P CMD\n");
-
-	if (scanhex(&tskv))
-		tsk = (struct task_struct *)tskv;
-
-	if (setjmp(bus_error_jmp) != 0) {
-		catch_memory_errors = 0;
-		printf("*** Error dumping task %p\n", tsk);
-		return;
-	}
-
-	catch_memory_errors = 1;
-	sync();
-
-	if (tsk)
-		show_task(tsk);
-	else
-		for_each_process(tsk)
-			show_task(tsk);
-
-	sync();
-	__delay(200);
-	catch_memory_errors = 0;
 }
 
 static void proccall(void)
@@ -2929,7 +2795,7 @@ static void xmon_print_symbol(unsigned long address, const char *mid,
 	printf("%s", after);
 }
 
-#ifdef CONFIG_PPC_STD_MMU_64
+#ifdef CONFIG_PPC_BOOK3S_64
 void dump_segments(void)
 {
 	int i;

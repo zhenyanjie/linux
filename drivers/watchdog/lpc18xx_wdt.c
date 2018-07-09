@@ -153,8 +153,7 @@ static int lpc18xx_wdt_start(struct watchdog_device *wdt_dev)
 	return 0;
 }
 
-static int lpc18xx_wdt_restart(struct watchdog_device *wdt_dev,
-			       unsigned long action, void *data)
+static int lpc18xx_wdt_restart(struct watchdog_device *wdt_dev)
 {
 	struct lpc18xx_wdt_dev *lpc18xx_wdt = watchdog_get_drvdata(wdt_dev);
 	unsigned long flags;

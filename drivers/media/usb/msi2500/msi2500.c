@@ -839,6 +839,8 @@ static int msi2500_set_usb_adc(struct msi2500_dev *dev)
 		goto err;
 
 	ret = msi2500_ctrl_msg(dev, CMD_WREG, reg3);
+	if (ret)
+		goto err;
 err:
 	return ret;
 }

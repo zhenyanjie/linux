@@ -53,7 +53,7 @@ struct lynx_accel {
 	/* base virtual address of de data port */
 	volatile unsigned char __iomem *dpPortBase;
 
-	/* function pointers */
+	/* function fointers */
 	void (*de_init)(struct lynx_accel *);
 
 	int (*de_wait)(void);/* see if hardware ready to work */
@@ -79,7 +79,7 @@ struct sm750_dev {
 	struct fb_info *fbinfo[2];
 	struct lynx_accel accel;
 	int accel_off;
-	int fb_count;
+	int dual;
 	int mtrr_off;
 	struct{
 		int vram;

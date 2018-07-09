@@ -49,19 +49,15 @@
 /* UBI name used for character devices, sysfs, etc */
 #define UBI_NAME_STR "ubi"
 
-struct ubi_device;
-
 /* Normal UBI messages */
-__printf(2, 3)
-void ubi_msg(const struct ubi_device *ubi, const char *fmt, ...);
-
+#define ubi_msg(ubi, fmt, ...) pr_notice(UBI_NAME_STR "%d: " fmt "\n", \
+					 ubi->ubi_num, ##__VA_ARGS__)
 /* UBI warning messages */
-__printf(2, 3)
-void ubi_warn(const struct ubi_device *ubi, const char *fmt, ...);
-
+#define ubi_warn(ubi, fmt, ...) pr_warn(UBI_NAME_STR "%d warning: %s: " fmt "\n", \
+					ubi->ubi_num, __func__, ##__VA_ARGS__)
 /* UBI error messages */
-__printf(2, 3)
-void ubi_err(const struct ubi_device *ubi, const char *fmt, ...);
+#define ubi_err(ubi, fmt, ...) pr_err(UBI_NAME_STR "%d error: %s: " fmt "\n", \
+				      ubi->ubi_num, __func__, ##__VA_ARGS__)
 
 /* Background thread name pattern */
 #define UBI_BGT_NAME_PATTERN "ubi_bgt%dd"

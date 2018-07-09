@@ -298,7 +298,8 @@ nvkm_disp_ctor(const struct nvkm_disp_func *func, struct nvkm_device *device,
 	disp->func = func;
 	disp->head.nr = heads;
 
-	ret = nvkm_engine_ctor(&nvkm_disp, device, index, true, &disp->engine);
+	ret = nvkm_engine_ctor(&nvkm_disp, device, index, 0,
+			       true, &disp->engine);
 	if (ret)
 		return ret;
 

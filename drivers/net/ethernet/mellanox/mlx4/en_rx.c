@@ -61,7 +61,7 @@ static int mlx4_alloc_pages(struct mlx4_en_priv *priv,
 		gfp_t gfp = _gfp;
 
 		if (order)
-			gfp |= __GFP_COMP | __GFP_NOWARN | __GFP_NOMEMALLOC;
+			gfp |= __GFP_COMP | __GFP_NOWARN;
 		page = alloc_pages(gfp, order);
 		if (likely(page))
 			break;
@@ -82,7 +82,8 @@ static int mlx4_alloc_pages(struct mlx4_en_priv *priv,
 	/* Not doing get_page() for each frag is a big win
 	 * on asymetric workloads. Note we can not use atomic_set().
 	 */
-	page_ref_add(page, page_alloc->page_size / frag_info->frag_stride - 1);
+	atomic_add(page_alloc->page_size / frag_info->frag_stride - 1,
+		   &page->_count);
 	return 0;
 }
 
@@ -126,9 +127,7 @@ out:
 			dma_unmap_page(priv->ddev, page_alloc[i].dma,
 				page_alloc[i].page_size, PCI_DMA_FROMDEVICE);
 			page = page_alloc[i].page;
-			/* Revert changes done by mlx4_alloc_pages */
-			page_ref_sub(page, page_alloc[i].page_size /
-					   priv->frag_info[i].frag_stride - 1);
+			atomic_set(&page->_count, 1);
 			put_page(page);
 		}
 	}
@@ -166,7 +165,7 @@ static int mlx4_en_init_allocator(struct mlx4_en_priv *priv,
 
 		en_dbg(DRV, priv, "  frag %d allocator: - size:%d frags:%d\n",
 		       i, ring->page_alloc[i].page_size,
-		       page_ref_count(ring->page_alloc[i].page));
+		       atomic_read(&ring->page_alloc[i].page->_count));
 	}
 	return 0;
 
@@ -178,9 +177,7 @@ out:
 		dma_unmap_page(priv->ddev, page_alloc->dma,
 			       page_alloc->page_size, PCI_DMA_FROMDEVICE);
 		page = page_alloc->page;
-		/* Revert changes done by mlx4_alloc_pages */
-		page_ref_sub(page, page_alloc->page_size /
-				   priv->frag_info[i].frag_stride - 1);
+		atomic_set(&page->_count, 1);
 		put_page(page);
 		page_alloc->page = NULL;
 	}
@@ -394,11 +391,17 @@ int mlx4_en_create_rx_ring(struct mlx4_en_priv *priv,
 
 	/* Allocate HW buffers on provided NUMA node */
 	set_dev_node(&mdev->dev->persist->pdev->dev, node);
-	err = mlx4_alloc_hwq_res(mdev->dev, &ring->wqres, ring->buf_size);
+	err = mlx4_alloc_hwq_res(mdev->dev, &ring->wqres,
+				 ring->buf_size, 2 * PAGE_SIZE);
 	set_dev_node(&mdev->dev->persist->pdev->dev, mdev->dev->numa_node);
 	if (err)
 		goto err_info;
 
+	err = mlx4_en_map_buffer(&ring->wqres.buf);
+	if (err) {
+		en_err(priv, "Failed to map RX buffer\n");
+		goto err_hwq;
+	}
 	ring->buf = ring->wqres.buf.direct.buf;
 
 	ring->hwtstamp_rx_filter = priv->hwtstamp_config.rx_filter;
@@ -406,6 +409,8 @@ int mlx4_en_create_rx_ring(struct mlx4_en_priv *priv,
 	*pring = ring;
 	return 0;
 
+err_hwq:
+	mlx4_free_hwq_res(mdev->dev, &ring->wqres, ring->buf_size);
 err_info:
 	vfree(ring->rx_info);
 	ring->rx_info = NULL;
@@ -509,11 +514,15 @@ void mlx4_en_destroy_rx_ring(struct mlx4_en_priv *priv,
 	struct mlx4_en_dev *mdev = priv->mdev;
 	struct mlx4_en_rx_ring *ring = *pring;
 
+	mlx4_en_unmap_buffer(&ring->wqres.buf);
 	mlx4_free_hwq_res(mdev->dev, &ring->wqres, size * stride + TXBB_SIZE);
 	vfree(ring->rx_info);
 	ring->rx_info = NULL;
 	kfree(ring);
 	*pring = NULL;
+#ifdef CONFIG_RFS_ACCEL
+	mlx4_en_cleanup_filters(priv);
+#endif
 }
 
 void mlx4_en_deactivate_rx_ring(struct mlx4_en_priv *priv,
@@ -931,7 +940,7 @@ int mlx4_en_process_rx_cq(struct net_device *dev, struct mlx4_en_cq *cq, int bud
 		/* GRO not possible, complete processing here */
 		skb = mlx4_en_rx_skb(priv, rx_desc, frags, length);
 		if (!skb) {
-			ring->dropped++;
+			priv->stats.rx_dropped++;
 			goto next;
 		}
 

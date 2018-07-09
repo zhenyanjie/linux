@@ -74,6 +74,7 @@ struct mmc_spi_platform_data *mmc_spi_get_pdata(struct spi_device *spi)
 	const u32 *voltage_ranges;
 	int num_ranges;
 	int i;
+	int ret = -EINVAL;
 
 	if (dev->platform_data || !np)
 		return dev->platform_data;
@@ -96,6 +97,7 @@ struct mmc_spi_platform_data *mmc_spi_get_pdata(struct spi_device *spi)
 		mask = mmc_vddrange_to_ocrmask(be32_to_cpu(voltage_ranges[j]),
 					       be32_to_cpu(voltage_ranges[j + 1]));
 		if (!mask) {
+			ret = -EINVAL;
 			dev_err(dev, "OF: voltage-range #%d is invalid\n", i);
 			goto err_ocr;
 		}

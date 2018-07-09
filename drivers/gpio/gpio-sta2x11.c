@@ -20,7 +20,7 @@
  *
  */
 
-#include <linux/init.h>
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/gpio.h>
@@ -409,7 +409,7 @@ static int gsta_probe(struct platform_device *dev)
 		goto err_free_descs;
 	}
 
-	err = devm_gpiochip_add_data(&dev->dev, &chip->gpio, chip);
+	err = gpiochip_add_data(&chip->gpio, chip);
 	if (err < 0) {
 		dev_err(&dev->dev, "sta2x11 gpio: Can't register (%i)\n",
 			-err);
@@ -432,4 +432,8 @@ static struct platform_driver sta2x11_gpio_platform_driver = {
 	},
 	.probe = gsta_probe,
 };
-builtin_platform_driver(sta2x11_gpio_platform_driver);
+
+module_platform_driver(sta2x11_gpio_platform_driver);
+
+MODULE_LICENSE("GPL v2");
+MODULE_DESCRIPTION("sta2x11_gpio GPIO driver");

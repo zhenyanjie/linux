@@ -37,32 +37,27 @@ static const struct xhci_driver_overrides xhci_plat_overrides __initconst = {
 	.start = xhci_plat_start,
 };
 
-static void xhci_priv_plat_start(struct usb_hcd *hcd)
-{
-	struct xhci_plat_priv *priv = hcd_to_xhci_priv(hcd);
-
-	if (priv->plat_start)
-		priv->plat_start(hcd);
-}
-
-static int xhci_priv_init_quirk(struct usb_hcd *hcd)
-{
-	struct xhci_plat_priv *priv = hcd_to_xhci_priv(hcd);
-
-	if (!priv->init_quirk)
-		return 0;
-
-	return priv->init_quirk(hcd);
-}
-
 static void xhci_plat_quirks(struct device *dev, struct xhci_hcd *xhci)
 {
+	struct usb_hcd *hcd = xhci_to_hcd(xhci);
+
 	/*
 	 * As of now platform drivers don't provide MSI support so we ensure
 	 * here that the generic code does not try to make a pci_dev from our
 	 * dev struct in order to setup MSI
 	 */
 	xhci->quirks |= XHCI_PLAT;
+
+	/*
+	 * On R-Car Gen2 and Gen3, the AC64 bit (bit 0) of HCCPARAMS1 is set
+	 * to 1. However, these SoCs don't support 64-bit address memory
+	 * pointers. So, this driver clears the AC64 bit of xhci->hcc_params
+	 * to call dma_set_coherent_mask(dev, DMA_BIT_MASK(32)) in
+	 * xhci_gen_setup().
+	 */
+	if (xhci_plat_type_is(hcd, XHCI_PLAT_TYPE_RENESAS_RCAR_GEN2) ||
+	    xhci_plat_type_is(hcd, XHCI_PLAT_TYPE_RENESAS_RCAR_GEN3))
+		xhci->quirks |= XHCI_NO_64BIT_SUPPORT;
 }
 
 /* called during probe() after chip reset completes */
@@ -70,35 +65,38 @@ static int xhci_plat_setup(struct usb_hcd *hcd)
 {
 	int ret;
 
-
-	ret = xhci_priv_init_quirk(hcd);
-	if (ret)
-		return ret;
+	if (xhci_plat_type_is(hcd, XHCI_PLAT_TYPE_RENESAS_RCAR_GEN2) ||
+	    xhci_plat_type_is(hcd, XHCI_PLAT_TYPE_RENESAS_RCAR_GEN3)) {
+		ret = xhci_rcar_init_quirk(hcd);
+		if (ret)
+			return ret;
+	}
 
 	return xhci_gen_setup(hcd, xhci_plat_quirks);
 }
 
 static int xhci_plat_start(struct usb_hcd *hcd)
 {
-	xhci_priv_plat_start(hcd);
+	if (xhci_plat_type_is(hcd, XHCI_PLAT_TYPE_RENESAS_RCAR_GEN2) ||
+	    xhci_plat_type_is(hcd, XHCI_PLAT_TYPE_RENESAS_RCAR_GEN3))
+		xhci_rcar_start(hcd);
+
 	return xhci_run(hcd);
 }
 
 #ifdef CONFIG_OF
 static const struct xhci_plat_priv xhci_plat_marvell_armada = {
-	.init_quirk = xhci_mvebu_mbus_init_quirk,
+	.type = XHCI_PLAT_TYPE_MARVELL_ARMADA,
 };
 
 static const struct xhci_plat_priv xhci_plat_renesas_rcar_gen2 = {
+	.type = XHCI_PLAT_TYPE_RENESAS_RCAR_GEN2,
 	.firmware_name = XHCI_RCAR_FIRMWARE_NAME_V1,
-	.init_quirk = xhci_rcar_init_quirk,
-	.plat_start = xhci_rcar_start,
 };
 
 static const struct xhci_plat_priv xhci_plat_renesas_rcar_gen3 = {
+	.type = XHCI_PLAT_TYPE_RENESAS_RCAR_GEN3,
 	.firmware_name = XHCI_RCAR_FIRMWARE_NAME_V2,
-	.init_quirk = xhci_rcar_init_quirk,
-	.plat_start = xhci_rcar_start,
 };
 
 static const struct of_device_id usb_xhci_of_match[] = {
@@ -125,13 +123,7 @@ static const struct of_device_id usb_xhci_of_match[] = {
 		.compatible = "renesas,xhci-r8a7795",
 		.data = &xhci_plat_renesas_rcar_gen3,
 	}, {
-		.compatible = "renesas,rcar-gen2-xhci",
-		.data = &xhci_plat_renesas_rcar_gen2,
-	}, {
-		.compatible = "renesas,rcar-gen3-xhci",
-		.data = &xhci_plat_renesas_rcar_gen3,
 	},
-	{},
 };
 MODULE_DEVICE_TABLE(of, usb_xhci_of_match);
 #endif
@@ -196,9 +188,6 @@ static int xhci_plat_probe(struct platform_device *pdev)
 		ret = clk_prepare_enable(clk);
 		if (ret)
 			goto put_hcd;
-	} else if (PTR_ERR(clk) == -EPROBE_DEFER) {
-		ret = -EPROBE_DEFER;
-		goto put_hcd;
 	}
 
 	xhci = hcd_to_xhci(hcd);
@@ -210,6 +199,12 @@ static int xhci_plat_probe(struct platform_device *pdev)
 		/* Just copy data for now */
 		if (priv_match)
 			*priv = *priv_match;
+	}
+
+	if (xhci_plat_type_is(hcd, XHCI_PLAT_TYPE_MARVELL_ARMADA)) {
+		ret = xhci_mvebu_mbus_init_quirk(pdev);
+		if (ret)
+			goto disable_clk;
 	}
 
 	device_wakeup_enable(hcd->self.controller);

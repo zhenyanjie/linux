@@ -56,7 +56,6 @@
 #include <asm/pgtable.h>
 #include <asm/ptrace.h>
 #include <asm/sections.h>
-#include <asm/siginfo.h>
 #include <asm/tlbdebug.h>
 #include <asm/traps.h>
 #include <asm/uaccess.h>
@@ -399,8 +398,11 @@ void __noreturn die(const char *str, struct pt_regs *regs)
 	if (in_interrupt())
 		panic("Fatal exception in interrupt");
 
-	if (panic_on_oops)
+	if (panic_on_oops) {
+		printk(KERN_EMERG "Fatal exception: panic in 5 seconds");
+		ssleep(5);
 		panic("Fatal exception");
+	}
 
 	if (regs && kexec_should_crash(current))
 		crash_kexec(regs);
@@ -869,7 +871,7 @@ out:
 	exception_exit(prev_state);
 }
 
-void do_trap_or_bp(struct pt_regs *regs, unsigned int code, int si_code,
+void do_trap_or_bp(struct pt_regs *regs, unsigned int code,
 	const char *str)
 {
 	siginfo_t info = { 0 };
@@ -926,13 +928,7 @@ void do_trap_or_bp(struct pt_regs *regs, unsigned int code, int si_code,
 	default:
 		scnprintf(b, sizeof(b), "%s instruction in kernel code", str);
 		die_if_kernel(b, regs);
-		if (si_code) {
-			info.si_signo = SIGTRAP;
-			info.si_code = si_code;
-			force_sig_info(SIGTRAP, &info, current);
-		} else {
-			force_sig(SIGTRAP, current);
-		}
+		force_sig(SIGTRAP, current);
 	}
 }
 
@@ -1016,7 +1012,7 @@ asmlinkage void do_bp(struct pt_regs *regs)
 		break;
 	}
 
-	do_trap_or_bp(regs, bcode, TRAP_BRKPT, "Break");
+	do_trap_or_bp(regs, bcode, "Break");
 
 out:
 	set_fs(seg);
@@ -1058,7 +1054,7 @@ asmlinkage void do_tr(struct pt_regs *regs)
 			tcode = (opcode >> 6) & ((1 << 10) - 1);
 	}
 
-	do_trap_or_bp(regs, tcode, 0, "Trap");
+	do_trap_or_bp(regs, tcode, "Trap");
 
 out:
 	set_fs(seg);
@@ -1119,7 +1115,19 @@ no_r2_instr:
 	if (unlikely(compute_return_epc(regs) < 0))
 		goto out;
 
-	if (!get_isa16_mode(regs->cp0_epc)) {
+	if (get_isa16_mode(regs->cp0_epc)) {
+		unsigned short mmop[2] = { 0 };
+
+		if (unlikely(get_user(mmop[0], (u16 __user *)epc + 0) < 0))
+			status = SIGSEGV;
+		if (unlikely(get_user(mmop[1], (u16 __user *)epc + 1) < 0))
+			status = SIGSEGV;
+		opcode = mmop[0];
+		opcode = (opcode << 16) | mmop[1];
+
+		if (status < 0)
+			status = simulate_rdhwr_mm(regs, opcode);
+	} else {
 		if (unlikely(get_user(opcode, epc) < 0))
 			status = SIGSEGV;
 
@@ -1134,18 +1142,6 @@ no_r2_instr:
 
 		if (status < 0)
 			status = simulate_fp(regs, opcode, old_epc, old31);
-	} else if (cpu_has_mmips) {
-		unsigned short mmop[2] = { 0 };
-
-		if (unlikely(get_user(mmop[0], (u16 __user *)epc + 0) < 0))
-			status = SIGSEGV;
-		if (unlikely(get_user(mmop[1], (u16 __user *)epc + 1) < 0))
-			status = SIGSEGV;
-		opcode = mmop[0];
-		opcode = (opcode << 16) | mmop[1];
-
-		if (status < 0)
-			status = simulate_rdhwr_mm(regs, opcode);
 	}
 
 	if (status < 0)
@@ -1353,6 +1349,7 @@ asmlinkage void do_cpu(struct pt_regs *regs)
 	unsigned long fcr31;
 	unsigned int cpid;
 	int status, err;
+	unsigned long __maybe_unused flags;
 	int sig;
 
 	prev_state = exception_enter();
@@ -1495,15 +1492,17 @@ asmlinkage void do_mdmx(struct pt_regs *regs)
  */
 asmlinkage void do_watch(struct pt_regs *regs)
 {
-	siginfo_t info = { .si_signo = SIGTRAP, .si_code = TRAP_HWBKPT };
 	enum ctx_state prev_state;
+	u32 cause;
 
 	prev_state = exception_enter();
 	/*
 	 * Clear WP (bit 22) bit of cause register so we don't loop
 	 * forever.
 	 */
-	clear_c0_cause(CAUSEF_WP);
+	cause = read_c0_cause();
+	cause &= ~(1 << 22);
+	write_c0_cause(cause);
 
 	/*
 	 * If the current thread has the watch registers loaded, save
@@ -1513,7 +1512,7 @@ asmlinkage void do_watch(struct pt_regs *regs)
 	if (test_tsk_thread_flag(current, TIF_LOAD_WATCH)) {
 		mips_read_watch_registers();
 		local_irq_enable();
-		force_sig_info(SIGTRAP, &info, current);
+		force_sig(SIGTRAP, current);
 	} else {
 		mips_clear_watch_registers();
 		local_irq_enable();
@@ -1640,7 +1639,6 @@ static inline void parity_protection_init(void)
 	case CPU_P5600:
 	case CPU_QEMU_GENERIC:
 	case CPU_I6400:
-	case CPU_P6600:
 		{
 #define ERRCTL_PE	0x80000000
 #define ERRCTL_L2P	0x00800000
@@ -1771,8 +1769,7 @@ asmlinkage void do_ftlb(void)
 
 	/* For the moment, report the problem and hang. */
 	if ((cpu_has_mips_r2_r6) &&
-	    (((current_cpu_data.processor_id & 0xff0000) == PRID_COMP_MIPS) ||
-	    ((current_cpu_data.processor_id & 0xff0000) == PRID_COMP_LOONGSON))) {
+	    ((current_cpu_data.processor_id & 0xff0000) == PRID_COMP_MIPS)) {
 		pr_err("FTLB error exception, cp0_ecc=0x%08x:\n",
 		       read_c0_ecc());
 		pr_err("cp0_errorepc == %0*lx\n", field, read_c0_errorepc());
@@ -2114,13 +2111,6 @@ void per_cpu_trap_init(bool is_boot_cpu)
 	 *  o read IntCtl.IPFDC to determine the fast debug channel interrupt
 	 */
 	if (cpu_has_mips_r2_r6) {
-		/*
-		 * We shouldn't trust a secondary core has a sane EBASE register
-		 * so use the one calculated by the boot CPU.
-		 */
-		if (!is_boot_cpu)
-			write_c0_ebase(ebase);
-
 		cp0_compare_irq_shift = CAUSEB_TI - CAUSEB_IP;
 		cp0_compare_irq = (read_c0_intctl() >> INTCTLB_IPTI) & 7;
 		cp0_perfcount_irq = (read_c0_intctl() >> INTCTLB_IPPCI) & 7;
@@ -2136,7 +2126,7 @@ void per_cpu_trap_init(bool is_boot_cpu)
 	}
 
 	if (!cpu_data[cpu].asid_cache)
-		cpu_data[cpu].asid_cache = asid_first_version(cpu);
+		cpu_data[cpu].asid_cache = ASID_FIRST_VERSION;
 
 	atomic_inc(&init_mm.mm_count);
 	current->active_mm = &init_mm;
@@ -2224,7 +2214,7 @@ void __init trap_init(void)
 
 	/*
 	 * Copy the generic exception handlers to their final destination.
-	 * This will be overridden later as suitable for a particular
+	 * This will be overriden later as suitable for a particular
 	 * configuration.
 	 */
 	set_handler(0x180, &except_vec3_generic, 0x80);

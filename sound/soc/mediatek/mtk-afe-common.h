@@ -87,7 +87,6 @@ struct mtk_afe_memif_data {
 	int irq_en_shift;
 	int irq_fs_shift;
 	int irq_clr_shift;
-	int msb_shift;
 };
 
 struct mtk_afe_memif {

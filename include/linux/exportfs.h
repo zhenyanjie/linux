@@ -97,12 +97,6 @@ enum fid_type {
 	FILEID_FAT_WITH_PARENT = 0x72,
 
 	/*
-	 * 128 bit child FID (struct lu_fid)
-	 * 128 bit parent FID (struct lu_fid)
-	 */
-	FILEID_LUSTRE = 0x97,
-
-	/*
 	 * Filesystems must not use 0xff file ID.
 	 */
 	FILEID_INVALID = 0xff,

@@ -12,7 +12,6 @@
 #include <linux/export.h>
 #include <linux/init.h>
 #include <linux/irq.h>
-#include <linux/irqchip.h>
 #include <linux/irqdomain.h>
 #include <linux/io.h>
 #include <linux/of.h>
@@ -211,5 +210,3 @@ void __init cp_intc_init(void)
 {
 	cp_intc_of_init(NULL, NULL);
 }
-
-IRQCHIP_DECLARE(cp_intc, "ti,cp-intc", cp_intc_of_init);

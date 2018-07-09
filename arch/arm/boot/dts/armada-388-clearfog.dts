@@ -78,9 +78,6 @@
 		internal-regs {
 			ethernet@30000 {
 				phy-mode = "sgmii";
-				buffer-manager = <&bm>;
-				bm,pool-long = <2>;
-				bm,pool-short = <1>;
 				status = "okay";
 
 				fixed-link {
@@ -91,9 +88,6 @@
 
 			ethernet@34000 {
 				phy-mode = "sgmii";
-				buffer-manager = <&bm>;
-				bm,pool-long = <3>;
-				bm,pool-short = <1>;
 				status = "okay";
 
 				fixed-link {
@@ -406,12 +400,12 @@
 
 			port@0 {
 				reg = <0>;
-				label = "lan5";
+				label = "lan1";
 			};
 
 			port@1 {
 				reg = <1>;
-				label = "lan4";
+				label = "lan2";
 			};
 
 			port@2 {
@@ -421,12 +415,12 @@
 
 			port@3 {
 				reg = <3>;
-				label = "lan2";
+				label = "lan4";
 			};
 
 			port@4 {
 				reg = <4>;
-				label = "lan1";
+				label = "lan5";
 			};
 
 			port@5 {

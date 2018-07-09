@@ -71,6 +71,7 @@ struct ftgmac100 {
 	struct napi_struct napi;
 
 	struct mii_bus *mii_bus;
+	struct phy_device *phydev;
 	int old_speed;
 };
 
@@ -806,7 +807,7 @@ err:
 static void ftgmac100_adjust_link(struct net_device *netdev)
 {
 	struct ftgmac100 *priv = netdev_priv(netdev);
-	struct phy_device *phydev = netdev->phydev;
+	struct phy_device *phydev = priv->phydev;
 	int ier;
 
 	if (phydev->speed == priv->old_speed)
@@ -849,6 +850,7 @@ static int ftgmac100_mii_probe(struct ftgmac100 *priv)
 		return PTR_ERR(phydev);
 	}
 
+	priv->phydev = phydev;
 	return 0;
 }
 
@@ -937,11 +939,27 @@ static void ftgmac100_get_drvinfo(struct net_device *netdev,
 	strlcpy(info->bus_info, dev_name(&netdev->dev), sizeof(info->bus_info));
 }
 
+static int ftgmac100_get_settings(struct net_device *netdev,
+				  struct ethtool_cmd *cmd)
+{
+	struct ftgmac100 *priv = netdev_priv(netdev);
+
+	return phy_ethtool_gset(priv->phydev, cmd);
+}
+
+static int ftgmac100_set_settings(struct net_device *netdev,
+				  struct ethtool_cmd *cmd)
+{
+	struct ftgmac100 *priv = netdev_priv(netdev);
+
+	return phy_ethtool_sset(priv->phydev, cmd);
+}
+
 static const struct ethtool_ops ftgmac100_ethtool_ops = {
+	.set_settings		= ftgmac100_set_settings,
+	.get_settings		= ftgmac100_get_settings,
 	.get_drvinfo		= ftgmac100_get_drvinfo,
 	.get_link		= ethtool_op_get_link,
-	.get_link_ksettings	= phy_ethtool_get_link_ksettings,
-	.set_link_ksettings	= phy_ethtool_set_link_ksettings,
 };
 
 /******************************************************************************
@@ -1067,7 +1085,7 @@ static int ftgmac100_open(struct net_device *netdev)
 	ftgmac100_init_hw(priv);
 	ftgmac100_start_hw(priv, 10);
 
-	phy_start(netdev->phydev);
+	phy_start(priv->phydev);
 
 	napi_enable(&priv->napi);
 	netif_start_queue(netdev);
@@ -1093,7 +1111,7 @@ static int ftgmac100_stop(struct net_device *netdev)
 
 	netif_stop_queue(netdev);
 	napi_disable(&priv->napi);
-	phy_stop(netdev->phydev);
+	phy_stop(priv->phydev);
 
 	ftgmac100_stop_hw(priv);
 	free_irq(priv->irq, netdev);
@@ -1134,7 +1152,9 @@ static int ftgmac100_hard_start_xmit(struct sk_buff *skb,
 /* optional */
 static int ftgmac100_do_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
 {
-	return phy_mii_ioctl(netdev->phydev, ifr, cmd);
+	struct ftgmac100 *priv = netdev_priv(netdev);
+
+	return phy_mii_ioctl(priv->phydev, ifr, cmd);
 }
 
 static const struct net_device_ops ftgmac100_netdev_ops = {
@@ -1255,7 +1275,7 @@ static int ftgmac100_probe(struct platform_device *pdev)
 	return 0;
 
 err_register_netdev:
-	phy_disconnect(netdev->phydev);
+	phy_disconnect(priv->phydev);
 err_mii_probe:
 	mdiobus_unregister(priv->mii_bus);
 err_register_mdiobus:
@@ -1281,7 +1301,7 @@ static int __exit ftgmac100_remove(struct platform_device *pdev)
 
 	unregister_netdev(netdev);
 
-	phy_disconnect(netdev->phydev);
+	phy_disconnect(priv->phydev);
 	mdiobus_unregister(priv->mii_bus);
 	mdiobus_free(priv->mii_bus);
 

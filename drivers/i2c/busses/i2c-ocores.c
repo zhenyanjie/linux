@@ -178,7 +178,10 @@ static void ocores_process(struct ocores_i2c *i2c)
 		if (i2c->nmsgs) {	/* end? */
 			/* send start? */
 			if (!(msg->flags & I2C_M_NOSTART)) {
-				u8 addr = i2c_8bit_addr_from_msg(msg);
+				u8 addr = (msg->addr << 1);
+
+				if (msg->flags & I2C_M_RD)
+					addr |= 1;
 
 				i2c->state = STATE_START;
 

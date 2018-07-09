@@ -19,7 +19,6 @@
 #include <linux/module.h>
 #include <linux/types.h>
 #include <linux/delay.h>
-#include <linux/ktime.h>
 
 #include <asm/uaccess.h>
 #include <asm/io.h>
@@ -114,7 +113,7 @@ isl38xx_trigger_device(int asleep, void __iomem *device_base)
 
 #if VERBOSE > SHOW_ERROR_MESSAGES
 	u32 counter = 0;
-	struct timespec64 current_ts64;
+	struct timeval current_time;
 	DEBUG(SHOW_FUNCTION_CALLS, "isl38xx trigger device\n");
 #endif
 
@@ -122,22 +121,22 @@ isl38xx_trigger_device(int asleep, void __iomem *device_base)
 	if (asleep) {
 		/* device is in powersave, trigger the device for wakeup */
 #if VERBOSE > SHOW_ERROR_MESSAGES
-		ktime_get_real_ts64(&current_ts64);
-		DEBUG(SHOW_TRACING, "%lld.%09ld Device wakeup triggered\n",
-		      (s64)current_ts64.tv_sec, current_ts64.tv_nsec);
+		do_gettimeofday(&current_time);
+		DEBUG(SHOW_TRACING, "%08li.%08li Device wakeup triggered\n",
+		      current_time.tv_sec, (long)current_time.tv_usec);
 
-		DEBUG(SHOW_TRACING, "%lld.%09ld Device register read %08x\n",
-		      (s64)current_ts64.tv_sec, current_ts64.tv_nsec,
+		DEBUG(SHOW_TRACING, "%08li.%08li Device register read %08x\n",
+		      current_time.tv_sec, (long)current_time.tv_usec,
 		      readl(device_base + ISL38XX_CTRL_STAT_REG));
 #endif
 
 		reg = readl(device_base + ISL38XX_INT_IDENT_REG);
 		if (reg == 0xabadface) {
 #if VERBOSE > SHOW_ERROR_MESSAGES
-			ktime_get_real_ts64(&current_ts64);
+			do_gettimeofday(&current_time);
 			DEBUG(SHOW_TRACING,
-			      "%lld.%09ld Device register abadface\n",
-			      (s64)current_ts64.tv_sec, current_ts64.tv_nsec);
+			      "%08li.%08li Device register abadface\n",
+			      current_time.tv_sec, (long)current_time.tv_usec);
 #endif
 			/* read the Device Status Register until Sleepmode bit is set */
 			while (reg = readl(device_base + ISL38XX_CTRL_STAT_REG),
@@ -150,13 +149,13 @@ isl38xx_trigger_device(int asleep, void __iomem *device_base)
 
 #if VERBOSE > SHOW_ERROR_MESSAGES
 			DEBUG(SHOW_TRACING,
-			      "%lld.%09ld Device register read %08x\n",
-			      (s64)current_ts64.tv_sec, current_ts64.tv_nsec,
+			      "%08li.%08li Device register read %08x\n",
+			      current_time.tv_sec, (long)current_time.tv_usec,
 			      readl(device_base + ISL38XX_CTRL_STAT_REG));
-			ktime_get_real_ts64(&current_ts64);
+			do_gettimeofday(&current_time);
 			DEBUG(SHOW_TRACING,
-			      "%lld.%09ld Device asleep counter %i\n",
-			      (s64)current_ts64.tv_sec, current_ts64.tv_nsec,
+			      "%08li.%08li Device asleep counter %i\n",
+			      current_time.tv_sec, (long)current_time.tv_usec,
 			      counter);
 #endif
 		}
@@ -169,9 +168,9 @@ isl38xx_trigger_device(int asleep, void __iomem *device_base)
 
 		/* perform another read on the Device Status Register */
 		reg = readl(device_base + ISL38XX_CTRL_STAT_REG);
-		ktime_get_real_ts64(&current_ts64);
-		DEBUG(SHOW_TRACING, "%lld.%00ld Device register read %08x\n",
-		      (s64)current_ts64.tv_sec, current_ts64.tv_nsec, reg);
+		do_gettimeofday(&current_time);
+		DEBUG(SHOW_TRACING, "%08li.%08li Device register read %08x\n",
+		      current_time.tv_sec, (long)current_time.tv_usec, reg);
 #endif
 	} else {
 		/* device is (still) awake  */

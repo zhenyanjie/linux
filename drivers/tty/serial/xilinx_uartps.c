@@ -50,24 +50,24 @@ module_param(rx_timeout, uint, S_IRUGO);
 MODULE_PARM_DESC(rx_timeout, "Rx timeout, 1-255");
 
 /* Register offsets for the UART. */
-#define CDNS_UART_CR		0x00  /* Control Register */
-#define CDNS_UART_MR		0x04  /* Mode Register */
-#define CDNS_UART_IER		0x08  /* Interrupt Enable */
-#define CDNS_UART_IDR		0x0C  /* Interrupt Disable */
-#define CDNS_UART_IMR		0x10  /* Interrupt Mask */
-#define CDNS_UART_ISR		0x14  /* Interrupt Status */
-#define CDNS_UART_BAUDGEN	0x18  /* Baud Rate Generator */
-#define CDNS_UART_RXTOUT		0x1C  /* RX Timeout */
-#define CDNS_UART_RXWM		0x20  /* RX FIFO Trigger Level */
-#define CDNS_UART_MODEMCR	0x24  /* Modem Control */
-#define CDNS_UART_MODEMSR	0x28  /* Modem Status */
-#define CDNS_UART_SR		0x2C  /* Channel Status */
-#define CDNS_UART_FIFO		0x30  /* FIFO */
-#define CDNS_UART_BAUDDIV	0x34  /* Baud Rate Divider */
-#define CDNS_UART_FLOWDEL	0x38  /* Flow Delay */
-#define CDNS_UART_IRRX_PWIDTH	0x3C  /* IR Min Received Pulse Width */
-#define CDNS_UART_IRTX_PWIDTH	0x40  /* IR Transmitted pulse Width */
-#define CDNS_UART_TXWM		0x44  /* TX FIFO Trigger Level */
+#define CDNS_UART_CR_OFFSET		0x00  /* Control Register */
+#define CDNS_UART_MR_OFFSET		0x04  /* Mode Register */
+#define CDNS_UART_IER_OFFSET		0x08  /* Interrupt Enable */
+#define CDNS_UART_IDR_OFFSET		0x0C  /* Interrupt Disable */
+#define CDNS_UART_IMR_OFFSET		0x10  /* Interrupt Mask */
+#define CDNS_UART_ISR_OFFSET		0x14  /* Interrupt Status */
+#define CDNS_UART_BAUDGEN_OFFSET	0x18  /* Baud Rate Generator */
+#define CDNS_UART_RXTOUT_OFFSET		0x1C  /* RX Timeout */
+#define CDNS_UART_RXWM_OFFSET		0x20  /* RX FIFO Trigger Level */
+#define CDNS_UART_MODEMCR_OFFSET	0x24  /* Modem Control */
+#define CDNS_UART_MODEMSR_OFFSET	0x28  /* Modem Status */
+#define CDNS_UART_SR_OFFSET		0x2C  /* Channel Status */
+#define CDNS_UART_FIFO_OFFSET		0x30  /* FIFO */
+#define CDNS_UART_BAUDDIV_OFFSET	0x34  /* Baud Rate Divider */
+#define CDNS_UART_FLOWDEL_OFFSET	0x38  /* Flow Delay */
+#define CDNS_UART_IRRX_PWIDTH_OFFSET	0x3C  /* IR Min Received Pulse Width */
+#define CDNS_UART_IRTX_PWIDTH_OFFSET	0x40  /* IR Transmitted pulse Width */
+#define CDNS_UART_TXWM_OFFSET		0x44  /* TX FIFO Trigger Level */
 
 /* Control Register Bit Definitions */
 #define CDNS_UART_CR_STOPBRK	0x00000100  /* Stop TX break */
@@ -126,10 +126,6 @@ MODULE_PARM_DESC(rx_timeout, "Rx timeout, 1-255");
 #define CDNS_UART_IXR_RXEMPTY	0x00000002 /* RX FIFO empty interrupt. */
 #define CDNS_UART_IXR_MASK	0x00001FFF /* Valid bit mask */
 
-#define CDNS_UART_RX_IRQS	(CDNS_UART_IXR_PARITY | CDNS_UART_IXR_FRAMING | \
-				 CDNS_UART_IXR_OVERRUN | CDNS_UART_IXR_RXTRIG | \
-				 CDNS_UART_IXR_TOUT)
-
 /* Goes in read_status_mask for break detection as the HW doesn't do it*/
 #define CDNS_UART_IXR_BRK	0x80000000
 
@@ -176,104 +172,6 @@ struct cdns_uart {
 #define to_cdns_uart(_nb) container_of(_nb, struct cdns_uart, \
 		clk_rate_change_nb);
 
-static void cdns_uart_handle_rx(struct uart_port *port, unsigned int isrstatus)
-{
-	/*
-	 * There is no hardware break detection, so we interpret framing
-	 * error with all-zeros data as a break sequence. Most of the time,
-	 * there's another non-zero byte at the end of the sequence.
-	 */
-	if (isrstatus & CDNS_UART_IXR_FRAMING) {
-		while (!(readl(port->membase + CDNS_UART_SR) &
-					CDNS_UART_SR_RXEMPTY)) {
-			if (!readl(port->membase + CDNS_UART_FIFO)) {
-				port->read_status_mask |= CDNS_UART_IXR_BRK;
-				isrstatus &= ~CDNS_UART_IXR_FRAMING;
-			}
-		}
-		writel(CDNS_UART_IXR_FRAMING, port->membase + CDNS_UART_ISR);
-	}
-
-	/* drop byte with parity error if IGNPAR specified */
-	if (isrstatus & port->ignore_status_mask & CDNS_UART_IXR_PARITY)
-		isrstatus &= ~(CDNS_UART_IXR_RXTRIG | CDNS_UART_IXR_TOUT);
-
-	isrstatus &= port->read_status_mask;
-	isrstatus &= ~port->ignore_status_mask;
-
-	if (!(isrstatus & (CDNS_UART_IXR_TOUT | CDNS_UART_IXR_RXTRIG)))
-		return;
-
-	while (!(readl(port->membase + CDNS_UART_SR) & CDNS_UART_SR_RXEMPTY)) {
-		u32 data;
-		char status = TTY_NORMAL;
-
-		data = readl(port->membase + CDNS_UART_FIFO);
-
-		/* Non-NULL byte after BREAK is garbage (99%) */
-		if (data && (port->read_status_mask & CDNS_UART_IXR_BRK)) {
-			port->read_status_mask &= ~CDNS_UART_IXR_BRK;
-			port->icount.brk++;
-			if (uart_handle_break(port))
-				continue;
-		}
-
-		if (uart_handle_sysrq_char(port, data))
-			continue;
-
-		port->icount.rx++;
-
-		if (isrstatus & CDNS_UART_IXR_PARITY) {
-			port->icount.parity++;
-			status = TTY_PARITY;
-		} else if (isrstatus & CDNS_UART_IXR_FRAMING) {
-			port->icount.frame++;
-			status = TTY_FRAME;
-		} else if (isrstatus & CDNS_UART_IXR_OVERRUN) {
-			port->icount.overrun++;
-		}
-
-		uart_insert_char(port, isrstatus, CDNS_UART_IXR_OVERRUN,
-				 data, status);
-	}
-	tty_flip_buffer_push(&port->state->port);
-}
-
-static void cdns_uart_handle_tx(struct uart_port *port)
-{
-	unsigned int numbytes;
-
-	if (uart_circ_empty(&port->state->xmit)) {
-		writel(CDNS_UART_IXR_TXEMPTY, port->membase + CDNS_UART_IDR);
-		return;
-	}
-
-	numbytes = port->fifosize;
-	while (numbytes && !uart_circ_empty(&port->state->xmit) &&
-	       !(readl(port->membase + CDNS_UART_SR) & CDNS_UART_SR_TXFULL)) {
-		/*
-		 * Get the data from the UART circular buffer
-		 * and write it to the cdns_uart's TX_FIFO
-		 * register.
-		 */
-		writel(port->state->xmit.buf[port->state->xmit.tail],
-			port->membase + CDNS_UART_FIFO);
-		port->icount.tx++;
-
-		/*
-		 * Adjust the tail of the UART buffer and wrap
-		 * the buffer if it reaches limit.
-		 */
-		port->state->xmit.tail =
-			(port->state->xmit.tail + 1) & (UART_XMIT_SIZE - 1);
-
-		numbytes--;
-	}
-
-	if (uart_circ_chars_pending(&port->state->xmit) < WAKEUP_CHARS)
-		uart_write_wakeup(port);
-}
-
 /**
  * cdns_uart_isr - Interrupt handler
  * @irq: Irq number
@@ -285,22 +183,129 @@ static irqreturn_t cdns_uart_isr(int irq, void *dev_id)
 {
 	struct uart_port *port = (struct uart_port *)dev_id;
 	unsigned long flags;
-	unsigned int isrstatus;
+	unsigned int isrstatus, numbytes;
+	unsigned int data;
+	char status = TTY_NORMAL;
 
 	spin_lock_irqsave(&port->lock, flags);
 
 	/* Read the interrupt status register to determine which
 	 * interrupt(s) is/are active.
 	 */
-	isrstatus = readl(port->membase + CDNS_UART_ISR);
+	isrstatus = readl(port->membase + CDNS_UART_ISR_OFFSET);
 
-	if (isrstatus & CDNS_UART_RX_IRQS)
-		cdns_uart_handle_rx(port, isrstatus);
+	/*
+	 * There is no hardware break detection, so we interpret framing
+	 * error with all-zeros data as a break sequence. Most of the time,
+	 * there's another non-zero byte at the end of the sequence.
+	 */
+	if (isrstatus & CDNS_UART_IXR_FRAMING) {
+		while (!(readl(port->membase + CDNS_UART_SR_OFFSET) &
+					CDNS_UART_SR_RXEMPTY)) {
+			if (!readl(port->membase + CDNS_UART_FIFO_OFFSET)) {
+				port->read_status_mask |= CDNS_UART_IXR_BRK;
+				isrstatus &= ~CDNS_UART_IXR_FRAMING;
+			}
+		}
+		writel(CDNS_UART_IXR_FRAMING,
+				port->membase + CDNS_UART_ISR_OFFSET);
+	}
 
-	if ((isrstatus & CDNS_UART_IXR_TXEMPTY) == CDNS_UART_IXR_TXEMPTY)
-		cdns_uart_handle_tx(port);
+	/* drop byte with parity error if IGNPAR specified */
+	if (isrstatus & port->ignore_status_mask & CDNS_UART_IXR_PARITY)
+		isrstatus &= ~(CDNS_UART_IXR_RXTRIG | CDNS_UART_IXR_TOUT);
 
-	writel(isrstatus, port->membase + CDNS_UART_ISR);
+	isrstatus &= port->read_status_mask;
+	isrstatus &= ~port->ignore_status_mask;
+
+	if ((isrstatus & CDNS_UART_IXR_TOUT) ||
+		(isrstatus & CDNS_UART_IXR_RXTRIG)) {
+		/* Receive Timeout Interrupt */
+		while (!(readl(port->membase + CDNS_UART_SR_OFFSET) &
+					CDNS_UART_SR_RXEMPTY)) {
+			data = readl(port->membase + CDNS_UART_FIFO_OFFSET);
+
+			/* Non-NULL byte after BREAK is garbage (99%) */
+			if (data && (port->read_status_mask &
+						CDNS_UART_IXR_BRK)) {
+				port->read_status_mask &= ~CDNS_UART_IXR_BRK;
+				port->icount.brk++;
+				if (uart_handle_break(port))
+					continue;
+			}
+
+#ifdef SUPPORT_SYSRQ
+			/*
+			 * uart_handle_sysrq_char() doesn't work if
+			 * spinlocked, for some reason
+			 */
+			 if (port->sysrq) {
+				spin_unlock(&port->lock);
+				if (uart_handle_sysrq_char(port,
+							(unsigned char)data)) {
+					spin_lock(&port->lock);
+					continue;
+				}
+				spin_lock(&port->lock);
+			}
+#endif
+
+			port->icount.rx++;
+
+			if (isrstatus & CDNS_UART_IXR_PARITY) {
+				port->icount.parity++;
+				status = TTY_PARITY;
+			} else if (isrstatus & CDNS_UART_IXR_FRAMING) {
+				port->icount.frame++;
+				status = TTY_FRAME;
+			} else if (isrstatus & CDNS_UART_IXR_OVERRUN) {
+				port->icount.overrun++;
+			}
+
+			uart_insert_char(port, isrstatus, CDNS_UART_IXR_OVERRUN,
+					data, status);
+		}
+		spin_unlock(&port->lock);
+		tty_flip_buffer_push(&port->state->port);
+		spin_lock(&port->lock);
+	}
+
+	/* Dispatch an appropriate handler */
+	if ((isrstatus & CDNS_UART_IXR_TXEMPTY) == CDNS_UART_IXR_TXEMPTY) {
+		if (uart_circ_empty(&port->state->xmit)) {
+			writel(CDNS_UART_IXR_TXEMPTY,
+					port->membase + CDNS_UART_IDR_OFFSET);
+		} else {
+			numbytes = port->fifosize;
+			/* Break if no more data available in the UART buffer */
+			while (numbytes--) {
+				if (uart_circ_empty(&port->state->xmit))
+					break;
+				/* Get the data from the UART circular buffer
+				 * and write it to the cdns_uart's TX_FIFO
+				 * register.
+				 */
+				writel(port->state->xmit.buf[
+						port->state->xmit.tail],
+					port->membase + CDNS_UART_FIFO_OFFSET);
+
+				port->icount.tx++;
+
+				/* Adjust the tail of the UART buffer and wrap
+				 * the buffer if it reaches limit.
+				 */
+				port->state->xmit.tail =
+					(port->state->xmit.tail + 1) &
+						(UART_XMIT_SIZE - 1);
+			}
+
+			if (uart_circ_chars_pending(
+					&port->state->xmit) < WAKEUP_CHARS)
+				uart_write_wakeup(port);
+		}
+	}
+
+	writel(isrstatus, port->membase + CDNS_UART_ISR_OFFSET);
 
 	/* be sure to release the lock and tty before leaving */
 	spin_unlock_irqrestore(&port->lock, flags);
@@ -390,14 +395,14 @@ static unsigned int cdns_uart_set_baud_rate(struct uart_port *port,
 			&div8);
 
 	/* Write new divisors to hardware */
-	mreg = readl(port->membase + CDNS_UART_MR);
+	mreg = readl(port->membase + CDNS_UART_MR_OFFSET);
 	if (div8)
 		mreg |= CDNS_UART_MR_CLKSEL;
 	else
 		mreg &= ~CDNS_UART_MR_CLKSEL;
-	writel(mreg, port->membase + CDNS_UART_MR);
-	writel(cd, port->membase + CDNS_UART_BAUDGEN);
-	writel(bdiv, port->membase + CDNS_UART_BAUDDIV);
+	writel(mreg, port->membase + CDNS_UART_MR_OFFSET);
+	writel(cd, port->membase + CDNS_UART_BAUDGEN_OFFSET);
+	writel(bdiv, port->membase + CDNS_UART_BAUDDIV_OFFSET);
 	cdns_uart->baud = baud;
 
 	return calc_baud;
@@ -444,9 +449,9 @@ static int cdns_uart_clk_notifier_cb(struct notifier_block *nb,
 		spin_lock_irqsave(&cdns_uart->port->lock, flags);
 
 		/* Disable the TX and RX to set baud rate */
-		ctrl_reg = readl(port->membase + CDNS_UART_CR);
+		ctrl_reg = readl(port->membase + CDNS_UART_CR_OFFSET);
 		ctrl_reg |= CDNS_UART_CR_TX_DIS | CDNS_UART_CR_RX_DIS;
-		writel(ctrl_reg, port->membase + CDNS_UART_CR);
+		writel(ctrl_reg, port->membase + CDNS_UART_CR_OFFSET);
 
 		spin_unlock_irqrestore(&cdns_uart->port->lock, flags);
 
@@ -471,11 +476,11 @@ static int cdns_uart_clk_notifier_cb(struct notifier_block *nb,
 			spin_lock_irqsave(&cdns_uart->port->lock, flags);
 
 		/* Set TX/RX Reset */
-		ctrl_reg = readl(port->membase + CDNS_UART_CR);
+		ctrl_reg = readl(port->membase + CDNS_UART_CR_OFFSET);
 		ctrl_reg |= CDNS_UART_CR_TXRST | CDNS_UART_CR_RXRST;
-		writel(ctrl_reg, port->membase + CDNS_UART_CR);
+		writel(ctrl_reg, port->membase + CDNS_UART_CR_OFFSET);
 
-		while (readl(port->membase + CDNS_UART_CR) &
+		while (readl(port->membase + CDNS_UART_CR_OFFSET) &
 				(CDNS_UART_CR_TXRST | CDNS_UART_CR_RXRST))
 			cpu_relax();
 
@@ -484,11 +489,11 @@ static int cdns_uart_clk_notifier_cb(struct notifier_block *nb,
 		 * enable bit and RX enable bit to enable the transmitter and
 		 * receiver.
 		 */
-		writel(rx_timeout, port->membase + CDNS_UART_RXTOUT);
-		ctrl_reg = readl(port->membase + CDNS_UART_CR);
+		writel(rx_timeout, port->membase + CDNS_UART_RXTOUT_OFFSET);
+		ctrl_reg = readl(port->membase + CDNS_UART_CR_OFFSET);
 		ctrl_reg &= ~(CDNS_UART_CR_TX_DIS | CDNS_UART_CR_RX_DIS);
 		ctrl_reg |= CDNS_UART_CR_TX_EN | CDNS_UART_CR_RX_EN;
-		writel(ctrl_reg, port->membase + CDNS_UART_CR);
+		writel(ctrl_reg, port->membase + CDNS_UART_CR_OFFSET);
 
 		spin_unlock_irqrestore(&cdns_uart->port->lock, flags);
 
@@ -505,28 +510,43 @@ static int cdns_uart_clk_notifier_cb(struct notifier_block *nb,
  */
 static void cdns_uart_start_tx(struct uart_port *port)
 {
-	unsigned int status;
+	unsigned int status, numbytes = port->fifosize;
 
-	if (uart_tx_stopped(port))
+	if (uart_circ_empty(&port->state->xmit) || uart_tx_stopped(port))
 		return;
 
-	/*
-	 * Set the TX enable bit and clear the TX disable bit to enable the
+	status = readl(port->membase + CDNS_UART_CR_OFFSET);
+	/* Set the TX enable bit and clear the TX disable bit to enable the
 	 * transmitter.
 	 */
-	status = readl(port->membase + CDNS_UART_CR);
-	status &= ~CDNS_UART_CR_TX_DIS;
-	status |= CDNS_UART_CR_TX_EN;
-	writel(status, port->membase + CDNS_UART_CR);
+	writel((status & ~CDNS_UART_CR_TX_DIS) | CDNS_UART_CR_TX_EN,
+			port->membase + CDNS_UART_CR_OFFSET);
 
-	if (uart_circ_empty(&port->state->xmit))
-		return;
+	while (numbytes-- && ((readl(port->membase + CDNS_UART_SR_OFFSET) &
+				CDNS_UART_SR_TXFULL)) != CDNS_UART_SR_TXFULL) {
+		/* Break if no more data available in the UART buffer */
+		if (uart_circ_empty(&port->state->xmit))
+			break;
 
-	cdns_uart_handle_tx(port);
+		/* Get the data from the UART circular buffer and
+		 * write it to the cdns_uart's TX_FIFO register.
+		 */
+		writel(port->state->xmit.buf[port->state->xmit.tail],
+				port->membase + CDNS_UART_FIFO_OFFSET);
+		port->icount.tx++;
 
-	writel(CDNS_UART_IXR_TXEMPTY, port->membase + CDNS_UART_ISR);
+		/* Adjust the tail of the UART buffer and wrap
+		 * the buffer if it reaches limit.
+		 */
+		port->state->xmit.tail = (port->state->xmit.tail + 1) &
+					(UART_XMIT_SIZE - 1);
+	}
+	writel(CDNS_UART_IXR_TXEMPTY, port->membase + CDNS_UART_ISR_OFFSET);
 	/* Enable the TX Empty interrupt */
-	writel(CDNS_UART_IXR_TXEMPTY, port->membase + CDNS_UART_IER);
+	writel(CDNS_UART_IXR_TXEMPTY, port->membase + CDNS_UART_IER_OFFSET);
+
+	if (uart_circ_chars_pending(&port->state->xmit) < WAKEUP_CHARS)
+		uart_write_wakeup(port);
 }
 
 /**
@@ -537,10 +557,10 @@ static void cdns_uart_stop_tx(struct uart_port *port)
 {
 	unsigned int regval;
 
-	regval = readl(port->membase + CDNS_UART_CR);
+	regval = readl(port->membase + CDNS_UART_CR_OFFSET);
 	regval |= CDNS_UART_CR_TX_DIS;
 	/* Disable the transmitter */
-	writel(regval, port->membase + CDNS_UART_CR);
+	writel(regval, port->membase + CDNS_UART_CR_OFFSET);
 }
 
 /**
@@ -551,13 +571,10 @@ static void cdns_uart_stop_rx(struct uart_port *port)
 {
 	unsigned int regval;
 
-	/* Disable RX IRQs */
-	writel(CDNS_UART_RX_IRQS, port->membase + CDNS_UART_IDR);
-
-	/* Disable the receiver */
-	regval = readl(port->membase + CDNS_UART_CR);
+	regval = readl(port->membase + CDNS_UART_CR_OFFSET);
 	regval |= CDNS_UART_CR_RX_DIS;
-	writel(regval, port->membase + CDNS_UART_CR);
+	/* Disable the receiver */
+	writel(regval, port->membase + CDNS_UART_CR_OFFSET);
 }
 
 /**
@@ -570,7 +587,7 @@ static unsigned int cdns_uart_tx_empty(struct uart_port *port)
 {
 	unsigned int status;
 
-	status = readl(port->membase + CDNS_UART_SR) &
+	status = readl(port->membase + CDNS_UART_SR_OFFSET) &
 				CDNS_UART_SR_TXEMPTY;
 	return status ? TIOCSER_TEMT : 0;
 }
@@ -588,15 +605,15 @@ static void cdns_uart_break_ctl(struct uart_port *port, int ctl)
 
 	spin_lock_irqsave(&port->lock, flags);
 
-	status = readl(port->membase + CDNS_UART_CR);
+	status = readl(port->membase + CDNS_UART_CR_OFFSET);
 
 	if (ctl == -1)
 		writel(CDNS_UART_CR_STARTBRK | status,
-				port->membase + CDNS_UART_CR);
+				port->membase + CDNS_UART_CR_OFFSET);
 	else {
 		if ((status & CDNS_UART_CR_STOPBRK) == 0)
 			writel(CDNS_UART_CR_STOPBRK | status,
-					port->membase + CDNS_UART_CR);
+					port->membase + CDNS_UART_CR_OFFSET);
 	}
 	spin_unlock_irqrestore(&port->lock, flags);
 }
@@ -619,18 +636,18 @@ static void cdns_uart_set_termios(struct uart_port *port,
 	spin_lock_irqsave(&port->lock, flags);
 
 	/* Wait for the transmit FIFO to empty before making changes */
-	if (!(readl(port->membase + CDNS_UART_CR) &
+	if (!(readl(port->membase + CDNS_UART_CR_OFFSET) &
 				CDNS_UART_CR_TX_DIS)) {
-		while (!(readl(port->membase + CDNS_UART_SR) &
+		while (!(readl(port->membase + CDNS_UART_SR_OFFSET) &
 				CDNS_UART_SR_TXEMPTY)) {
 			cpu_relax();
 		}
 	}
 
 	/* Disable the TX and RX to set baud rate */
-	ctrl_reg = readl(port->membase + CDNS_UART_CR);
+	ctrl_reg = readl(port->membase + CDNS_UART_CR_OFFSET);
 	ctrl_reg |= CDNS_UART_CR_TX_DIS | CDNS_UART_CR_RX_DIS;
-	writel(ctrl_reg, port->membase + CDNS_UART_CR);
+	writel(ctrl_reg, port->membase + CDNS_UART_CR_OFFSET);
 
 	/*
 	 * Min baud rate = 6bps and Max Baud Rate is 10Mbps for 100Mhz clk
@@ -649,20 +666,20 @@ static void cdns_uart_set_termios(struct uart_port *port,
 	uart_update_timeout(port, termios->c_cflag, baud);
 
 	/* Set TX/RX Reset */
-	ctrl_reg = readl(port->membase + CDNS_UART_CR);
+	ctrl_reg = readl(port->membase + CDNS_UART_CR_OFFSET);
 	ctrl_reg |= CDNS_UART_CR_TXRST | CDNS_UART_CR_RXRST;
-	writel(ctrl_reg, port->membase + CDNS_UART_CR);
+	writel(ctrl_reg, port->membase + CDNS_UART_CR_OFFSET);
 
 	/*
 	 * Clear the RX disable and TX disable bits and then set the TX enable
 	 * bit and RX enable bit to enable the transmitter and receiver.
 	 */
-	ctrl_reg = readl(port->membase + CDNS_UART_CR);
+	ctrl_reg = readl(port->membase + CDNS_UART_CR_OFFSET);
 	ctrl_reg &= ~(CDNS_UART_CR_TX_DIS | CDNS_UART_CR_RX_DIS);
 	ctrl_reg |= CDNS_UART_CR_TX_EN | CDNS_UART_CR_RX_EN;
-	writel(ctrl_reg, port->membase + CDNS_UART_CR);
+	writel(ctrl_reg, port->membase + CDNS_UART_CR_OFFSET);
 
-	writel(rx_timeout, port->membase + CDNS_UART_RXTOUT);
+	writel(rx_timeout, port->membase + CDNS_UART_RXTOUT_OFFSET);
 
 	port->read_status_mask = CDNS_UART_IXR_TXEMPTY | CDNS_UART_IXR_RXTRIG |
 			CDNS_UART_IXR_OVERRUN | CDNS_UART_IXR_TOUT;
@@ -682,7 +699,7 @@ static void cdns_uart_set_termios(struct uart_port *port,
 			CDNS_UART_IXR_TOUT | CDNS_UART_IXR_PARITY |
 			CDNS_UART_IXR_FRAMING | CDNS_UART_IXR_OVERRUN;
 
-	mode_reg = readl(port->membase + CDNS_UART_MR);
+	mode_reg = readl(port->membase + CDNS_UART_MR_OFFSET);
 
 	/* Handling Data Size */
 	switch (termios->c_cflag & CSIZE) {
@@ -723,7 +740,7 @@ static void cdns_uart_set_termios(struct uart_port *port,
 		cval |= CDNS_UART_MR_PARITY_NONE;
 	}
 	cval |= mode_reg & 1;
-	writel(cval, port->membase + CDNS_UART_MR);
+	writel(cval, port->membase + CDNS_UART_MR_OFFSET);
 
 	spin_unlock_irqrestore(&port->lock, flags);
 }
@@ -736,67 +753,63 @@ static void cdns_uart_set_termios(struct uart_port *port,
  */
 static int cdns_uart_startup(struct uart_port *port)
 {
-	int ret;
-	unsigned long flags;
-	unsigned int status = 0;
+	unsigned int retval = 0, status = 0;
 
-	spin_lock_irqsave(&port->lock, flags);
+	retval = request_irq(port->irq, cdns_uart_isr, 0, CDNS_UART_NAME,
+								(void *)port);
+	if (retval)
+		return retval;
 
 	/* Disable the TX and RX */
 	writel(CDNS_UART_CR_TX_DIS | CDNS_UART_CR_RX_DIS,
-			port->membase + CDNS_UART_CR);
+			port->membase + CDNS_UART_CR_OFFSET);
 
 	/* Set the Control Register with TX/RX Enable, TX/RX Reset,
 	 * no break chars.
 	 */
 	writel(CDNS_UART_CR_TXRST | CDNS_UART_CR_RXRST,
-			port->membase + CDNS_UART_CR);
+			port->membase + CDNS_UART_CR_OFFSET);
 
-	/*
-	 * Clear the RX disable bit and then set the RX enable bit to enable
-	 * the receiver.
+	status = readl(port->membase + CDNS_UART_CR_OFFSET);
+
+	/* Clear the RX disable and TX disable bits and then set the TX enable
+	 * bit and RX enable bit to enable the transmitter and receiver.
 	 */
-	status = readl(port->membase + CDNS_UART_CR);
-	status &= CDNS_UART_CR_RX_DIS;
-	status |= CDNS_UART_CR_RX_EN;
-	writel(status, port->membase + CDNS_UART_CR);
+	writel((status & ~(CDNS_UART_CR_TX_DIS | CDNS_UART_CR_RX_DIS))
+			| (CDNS_UART_CR_TX_EN | CDNS_UART_CR_RX_EN |
+			CDNS_UART_CR_STOPBRK),
+			port->membase + CDNS_UART_CR_OFFSET);
 
 	/* Set the Mode Register with normal mode,8 data bits,1 stop bit,
 	 * no parity.
 	 */
 	writel(CDNS_UART_MR_CHMODE_NORM | CDNS_UART_MR_STOPMODE_1_BIT
 		| CDNS_UART_MR_PARITY_NONE | CDNS_UART_MR_CHARLEN_8_BIT,
-		port->membase + CDNS_UART_MR);
+		port->membase + CDNS_UART_MR_OFFSET);
 
 	/*
 	 * Set the RX FIFO Trigger level to use most of the FIFO, but it
 	 * can be tuned with a module parameter
 	 */
-	writel(rx_trigger_level, port->membase + CDNS_UART_RXWM);
+	writel(rx_trigger_level, port->membase + CDNS_UART_RXWM_OFFSET);
 
 	/*
 	 * Receive Timeout register is enabled but it
 	 * can be tuned with a module parameter
 	 */
-	writel(rx_timeout, port->membase + CDNS_UART_RXTOUT);
+	writel(rx_timeout, port->membase + CDNS_UART_RXTOUT_OFFSET);
 
 	/* Clear out any pending interrupts before enabling them */
-	writel(readl(port->membase + CDNS_UART_ISR),
-			port->membase + CDNS_UART_ISR);
-
-	spin_unlock_irqrestore(&port->lock, flags);
-
-	ret = request_irq(port->irq, cdns_uart_isr, 0, CDNS_UART_NAME, port);
-	if (ret) {
-		dev_err(port->dev, "request_irq '%d' failed with %d\n",
-			port->irq, ret);
-		return ret;
-	}
+	writel(readl(port->membase + CDNS_UART_ISR_OFFSET),
+			port->membase + CDNS_UART_ISR_OFFSET);
 
 	/* Set the Interrupt Registers with desired interrupts */
-	writel(CDNS_UART_RX_IRQS, port->membase + CDNS_UART_IER);
+	writel(CDNS_UART_IXR_TXEMPTY | CDNS_UART_IXR_PARITY |
+		CDNS_UART_IXR_FRAMING | CDNS_UART_IXR_OVERRUN |
+		CDNS_UART_IXR_RXTRIG | CDNS_UART_IXR_TOUT,
+		port->membase + CDNS_UART_IER_OFFSET);
 
-	return 0;
+	return retval;
 }
 
 /**
@@ -806,21 +819,14 @@ static int cdns_uart_startup(struct uart_port *port)
 static void cdns_uart_shutdown(struct uart_port *port)
 {
 	int status;
-	unsigned long flags;
-
-	spin_lock_irqsave(&port->lock, flags);
 
 	/* Disable interrupts */
-	status = readl(port->membase + CDNS_UART_IMR);
-	writel(status, port->membase + CDNS_UART_IDR);
-	writel(0xffffffff, port->membase + CDNS_UART_ISR);
+	status = readl(port->membase + CDNS_UART_IMR_OFFSET);
+	writel(status, port->membase + CDNS_UART_IDR_OFFSET);
 
 	/* Disable the TX and RX */
 	writel(CDNS_UART_CR_TX_DIS | CDNS_UART_CR_RX_DIS,
-			port->membase + CDNS_UART_CR);
-
-	spin_unlock_irqrestore(&port->lock, flags);
-
+			port->membase + CDNS_UART_CR_OFFSET);
 	free_irq(port->irq, port);
 }
 
@@ -922,7 +928,7 @@ static void cdns_uart_set_mctrl(struct uart_port *port, unsigned int mctrl)
 {
 	u32 val;
 
-	val = readl(port->membase + CDNS_UART_MODEMCR);
+	val = readl(port->membase + CDNS_UART_MODEMCR_OFFSET);
 
 	val &= ~(CDNS_UART_MODEMCR_RTS | CDNS_UART_MODEMCR_DTR);
 
@@ -931,46 +937,55 @@ static void cdns_uart_set_mctrl(struct uart_port *port, unsigned int mctrl)
 	if (mctrl & TIOCM_DTR)
 		val |= CDNS_UART_MODEMCR_DTR;
 
-	writel(val, port->membase + CDNS_UART_MODEMCR);
+	writel(val, port->membase + CDNS_UART_MODEMCR_OFFSET);
 }
 
 #ifdef CONFIG_CONSOLE_POLL
 static int cdns_uart_poll_get_char(struct uart_port *port)
 {
+	u32 imr;
 	int c;
-	unsigned long flags;
 
-	spin_lock_irqsave(&port->lock, flags);
+	/* Disable all interrupts */
+	imr = readl(port->membase + CDNS_UART_IMR_OFFSET);
+	writel(imr, port->membase + CDNS_UART_IDR_OFFSET);
 
 	/* Check if FIFO is empty */
-	if (readl(port->membase + CDNS_UART_SR) & CDNS_UART_SR_RXEMPTY)
+	if (readl(port->membase + CDNS_UART_SR_OFFSET) & CDNS_UART_SR_RXEMPTY)
 		c = NO_POLL_CHAR;
 	else /* Read a character */
-		c = (unsigned char) readl(port->membase + CDNS_UART_FIFO);
+		c = (unsigned char) readl(
+					port->membase + CDNS_UART_FIFO_OFFSET);
 
-	spin_unlock_irqrestore(&port->lock, flags);
+	/* Enable interrupts */
+	writel(imr, port->membase + CDNS_UART_IER_OFFSET);
 
 	return c;
 }
 
 static void cdns_uart_poll_put_char(struct uart_port *port, unsigned char c)
 {
-	unsigned long flags;
+	u32 imr;
 
-	spin_lock_irqsave(&port->lock, flags);
+	/* Disable all interrupts */
+	imr = readl(port->membase + CDNS_UART_IMR_OFFSET);
+	writel(imr, port->membase + CDNS_UART_IDR_OFFSET);
 
 	/* Wait until FIFO is empty */
-	while (!(readl(port->membase + CDNS_UART_SR) & CDNS_UART_SR_TXEMPTY))
+	while (!(readl(port->membase + CDNS_UART_SR_OFFSET) &
+				CDNS_UART_SR_TXEMPTY))
 		cpu_relax();
 
 	/* Write a character */
-	writel(c, port->membase + CDNS_UART_FIFO);
+	writel(c, port->membase + CDNS_UART_FIFO_OFFSET);
 
 	/* Wait until FIFO is empty */
-	while (!(readl(port->membase + CDNS_UART_SR) & CDNS_UART_SR_TXEMPTY))
+	while (!(readl(port->membase + CDNS_UART_SR_OFFSET) &
+				CDNS_UART_SR_TXEMPTY))
 		cpu_relax();
 
-	spin_unlock_irqrestore(&port->lock, flags);
+	/* Enable interrupts */
+	writel(imr, port->membase + CDNS_UART_IER_OFFSET);
 
 	return;
 }
@@ -1044,7 +1059,8 @@ static struct uart_port *cdns_uart_get_port(int id)
  */
 static void cdns_uart_console_wait_tx(struct uart_port *port)
 {
-	while (!(readl(port->membase + CDNS_UART_SR) & CDNS_UART_SR_TXEMPTY))
+	while (!(readl(port->membase + CDNS_UART_SR_OFFSET) &
+				CDNS_UART_SR_TXEMPTY))
 		barrier();
 }
 
@@ -1056,7 +1072,7 @@ static void cdns_uart_console_wait_tx(struct uart_port *port)
 static void cdns_uart_console_putchar(struct uart_port *port, int ch)
 {
 	cdns_uart_console_wait_tx(port);
-	writel(ch, port->membase + CDNS_UART_FIFO);
+	writel(ch, port->membase + CDNS_UART_FIFO_OFFSET);
 }
 
 static void __init cdns_early_write(struct console *con, const char *s,
@@ -1077,9 +1093,7 @@ static int __init cdns_early_console_setup(struct earlycon_device *device,
 
 	return 0;
 }
-OF_EARLYCON_DECLARE(cdns, "xlnx,xuartps", cdns_early_console_setup);
-OF_EARLYCON_DECLARE(cdns, "cdns,uart-r1p8", cdns_early_console_setup);
-OF_EARLYCON_DECLARE(cdns, "cdns,uart-r1p12", cdns_early_console_setup);
+EARLYCON_DECLARE(cdns, cdns_early_console_setup);
 
 /**
  * cdns_uart_console_write - perform write operation
@@ -1095,33 +1109,30 @@ static void cdns_uart_console_write(struct console *co, const char *s,
 	unsigned int imr, ctrl;
 	int locked = 1;
 
-	if (port->sysrq)
-		locked = 0;
-	else if (oops_in_progress)
+	if (oops_in_progress)
 		locked = spin_trylock_irqsave(&port->lock, flags);
 	else
 		spin_lock_irqsave(&port->lock, flags);
 
 	/* save and disable interrupt */
-	imr = readl(port->membase + CDNS_UART_IMR);
-	writel(imr, port->membase + CDNS_UART_IDR);
+	imr = readl(port->membase + CDNS_UART_IMR_OFFSET);
+	writel(imr, port->membase + CDNS_UART_IDR_OFFSET);
 
 	/*
 	 * Make sure that the tx part is enabled. Set the TX enable bit and
 	 * clear the TX disable bit to enable the transmitter.
 	 */
-	ctrl = readl(port->membase + CDNS_UART_CR);
-	ctrl &= ~CDNS_UART_CR_TX_DIS;
-	ctrl |= CDNS_UART_CR_TX_EN;
-	writel(ctrl, port->membase + CDNS_UART_CR);
+	ctrl = readl(port->membase + CDNS_UART_CR_OFFSET);
+	writel((ctrl & ~CDNS_UART_CR_TX_DIS) | CDNS_UART_CR_TX_EN,
+			port->membase + CDNS_UART_CR_OFFSET);
 
 	uart_console_write(port, s, count, cdns_uart_console_putchar);
 	cdns_uart_console_wait_tx(port);
 
-	writel(ctrl, port->membase + CDNS_UART_CR);
+	writel(ctrl, port->membase + CDNS_UART_CR_OFFSET);
 
 	/* restore interrupt state */
-	writel(imr, port->membase + CDNS_UART_IER);
+	writel(imr, port->membase + CDNS_UART_IER_OFFSET);
 
 	if (locked)
 		spin_unlock_irqrestore(&port->lock, flags);
@@ -1233,13 +1244,14 @@ static int cdns_uart_suspend(struct device *device)
 
 		spin_lock_irqsave(&port->lock, flags);
 		/* Empty the receive FIFO 1st before making changes */
-		while (!(readl(port->membase + CDNS_UART_SR) &
+		while (!(readl(port->membase + CDNS_UART_SR_OFFSET) &
 					CDNS_UART_SR_RXEMPTY))
-			readl(port->membase + CDNS_UART_FIFO);
+			readl(port->membase + CDNS_UART_FIFO_OFFSET);
 		/* set RX trigger level to 1 */
-		writel(1, port->membase + CDNS_UART_RXWM);
+		writel(1, port->membase + CDNS_UART_RXWM_OFFSET);
 		/* disable RX timeout interrups */
-		writel(CDNS_UART_IXR_TOUT, port->membase + CDNS_UART_IDR);
+		writel(CDNS_UART_IXR_TOUT,
+				port->membase + CDNS_UART_IDR_OFFSET);
 		spin_unlock_irqrestore(&port->lock, flags);
 	}
 
@@ -1278,28 +1290,30 @@ static int cdns_uart_resume(struct device *device)
 		spin_lock_irqsave(&port->lock, flags);
 
 		/* Set TX/RX Reset */
-		ctrl_reg = readl(port->membase + CDNS_UART_CR);
+		ctrl_reg = readl(port->membase + CDNS_UART_CR_OFFSET);
 		ctrl_reg |= CDNS_UART_CR_TXRST | CDNS_UART_CR_RXRST;
-		writel(ctrl_reg, port->membase + CDNS_UART_CR);
-		while (readl(port->membase + CDNS_UART_CR) &
+		writel(ctrl_reg, port->membase + CDNS_UART_CR_OFFSET);
+		while (readl(port->membase + CDNS_UART_CR_OFFSET) &
 				(CDNS_UART_CR_TXRST | CDNS_UART_CR_RXRST))
 			cpu_relax();
 
 		/* restore rx timeout value */
-		writel(rx_timeout, port->membase + CDNS_UART_RXTOUT);
+		writel(rx_timeout, port->membase + CDNS_UART_RXTOUT_OFFSET);
 		/* Enable Tx/Rx */
-		ctrl_reg = readl(port->membase + CDNS_UART_CR);
+		ctrl_reg = readl(port->membase + CDNS_UART_CR_OFFSET);
 		ctrl_reg &= ~(CDNS_UART_CR_TX_DIS | CDNS_UART_CR_RX_DIS);
 		ctrl_reg |= CDNS_UART_CR_TX_EN | CDNS_UART_CR_RX_EN;
-		writel(ctrl_reg, port->membase + CDNS_UART_CR);
+		writel(ctrl_reg, port->membase + CDNS_UART_CR_OFFSET);
 
 		spin_unlock_irqrestore(&port->lock, flags);
 	} else {
 		spin_lock_irqsave(&port->lock, flags);
 		/* restore original rx trigger level */
-		writel(rx_trigger_level, port->membase + CDNS_UART_RXWM);
+		writel(rx_trigger_level,
+				port->membase + CDNS_UART_RXWM_OFFSET);
 		/* enable RX timeout interrupt */
-		writel(CDNS_UART_IXR_TOUT, port->membase + CDNS_UART_IER);
+		writel(CDNS_UART_IXR_TOUT,
+				port->membase + CDNS_UART_IER_OFFSET);
 		spin_unlock_irqrestore(&port->lock, flags);
 	}
 
@@ -1392,29 +1406,26 @@ static int cdns_uart_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "Cannot get uart_port structure\n");
 		rc = -ENODEV;
 		goto err_out_notif_unreg;
+	} else {
+		/* Register the port.
+		 * This function also registers this device with the tty layer
+		 * and triggers invocation of the config_port() entry point.
+		 */
+		port->mapbase = res->start;
+		port->irq = irq;
+		port->dev = &pdev->dev;
+		port->uartclk = clk_get_rate(cdns_uart_data->uartclk);
+		port->private_data = cdns_uart_data;
+		cdns_uart_data->port = port;
+		platform_set_drvdata(pdev, port);
+		rc = uart_add_one_port(&cdns_uart_uart_driver, port);
+		if (rc) {
+			dev_err(&pdev->dev,
+				"uart_add_one_port() failed; err=%i\n", rc);
+			goto err_out_notif_unreg;
+		}
+		return 0;
 	}
-
-	/*
-	 * Register the port.
-	 * This function also registers this device with the tty layer
-	 * and triggers invocation of the config_port() entry point.
-	 */
-	port->mapbase = res->start;
-	port->irq = irq;
-	port->dev = &pdev->dev;
-	port->uartclk = clk_get_rate(cdns_uart_data->uartclk);
-	port->private_data = cdns_uart_data;
-	cdns_uart_data->port = port;
-	platform_set_drvdata(pdev, port);
-
-	rc = uart_add_one_port(&cdns_uart_uart_driver, port);
-	if (rc) {
-		dev_err(&pdev->dev,
-			"uart_add_one_port() failed; err=%i\n", rc);
-		goto err_out_notif_unreg;
-	}
-
-	return 0;
 
 err_out_notif_unreg:
 #ifdef CONFIG_COMMON_CLK

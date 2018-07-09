@@ -398,8 +398,9 @@ int vc4_mmap(struct file *filp, struct vm_area_struct *vma)
 	vma->vm_flags &= ~VM_PFNMAP;
 	vma->vm_pgoff = 0;
 
-	ret = dma_mmap_wc(bo->base.base.dev->dev, vma, bo->base.vaddr,
-			  bo->base.paddr, vma->vm_end - vma->vm_start);
+	ret = dma_mmap_writecombine(bo->base.base.dev->dev, vma,
+				    bo->base.vaddr, bo->base.paddr,
+				    vma->vm_end - vma->vm_start);
 	if (ret)
 		drm_gem_vm_close(vma);
 
@@ -457,7 +458,7 @@ int vc4_mmap_bo_ioctl(struct drm_device *dev, void *data,
 	struct drm_vc4_mmap_bo *args = data;
 	struct drm_gem_object *gem_obj;
 
-	gem_obj = drm_gem_object_lookup(file_priv, args->handle);
+	gem_obj = drm_gem_object_lookup(dev, file_priv, args->handle);
 	if (!gem_obj) {
 		DRM_ERROR("Failed to look up GEM BO %d\n", args->handle);
 		return -EINVAL;

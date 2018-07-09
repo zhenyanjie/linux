@@ -640,7 +640,9 @@ static void early_init_this_mmu(void)
 		 * transient mapping would cause problems.
 		 */
 #ifdef CONFIG_SMP
-		if (hweight32(get_tensr()) > 1)
+		if (cpu != boot_cpuid &&
+		    (cpu != cpu_first_thread_sibling(cpu) ||
+		     cpu == cpu_first_thread_sibling(boot_cpuid)))
 			map = false;
 #endif
 

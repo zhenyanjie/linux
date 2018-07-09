@@ -16,6 +16,7 @@
 #endif
 #include <asm/thread_info.h>
 #include <asm/cpumask.h>
+#include <asm/cpufeature.h>
 
 extern int smp_num_siblings;
 extern unsigned int num_processors;
@@ -155,7 +156,6 @@ static inline int wbinvd_on_all_cpus(void)
 	wbinvd();
 	return 0;
 }
-#define smp_num_siblings	1
 #endif /* CONFIG_SMP */
 
 extern unsigned disabled_cpus;

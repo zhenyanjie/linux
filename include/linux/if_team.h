@@ -24,7 +24,6 @@ struct team_pcpu_stats {
 	struct u64_stats_sync	syncp;
 	u32			rx_dropped;
 	u32			tx_dropped;
-	u32			rx_nohandler;
 };
 
 struct team;

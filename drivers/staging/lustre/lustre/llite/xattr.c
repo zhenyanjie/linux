@@ -135,7 +135,7 @@ int ll_setxattr_common(struct inode *inode, const char *name,
 
 	/* b15587: ignore security.capability xattr for now */
 	if ((xattr_type == XATTR_SECURITY_T &&
-	     strcmp(name, "security.capability") == 0))
+	    strcmp(name, "security.capability") == 0))
 		return 0;
 
 	/* LU-549:  Disable security.selinux when selinux is disabled */
@@ -148,7 +148,7 @@ int ll_setxattr_common(struct inode *inode, const char *name,
 	    (xattr_type == XATTR_ACL_ACCESS_T ||
 	    xattr_type == XATTR_ACL_DEFAULT_T)) {
 		rce = rct_search(&sbi->ll_rct, current_pid());
-		if (!rce ||
+		if (rce == NULL ||
 		    (rce->rce_ops != RMT_LSETFACL &&
 		    rce->rce_ops != RMT_RSETFACL))
 			return -EOPNOTSUPP;
@@ -158,6 +158,7 @@ int ll_setxattr_common(struct inode *inode, const char *name,
 
 			ee = et_search_del(&sbi->ll_et, current_pid(),
 					   ll_inode2fid(inode), xattr_type);
+			LASSERT(ee != NULL);
 			if (valid & OBD_MD_FLXATTR) {
 				acl = lustre_acl_xattr_merge2ext(
 						(posix_acl_xattr_header *)value,
@@ -181,9 +182,8 @@ int ll_setxattr_common(struct inode *inode, const char *name,
 			size = rc;
 
 			pv = (const char *)new_value;
-		} else {
+		} else
 			return -EOPNOTSUPP;
-		}
 
 		valid |= rce_ops2valid(rce->rce_ops);
 	}
@@ -192,11 +192,12 @@ int ll_setxattr_common(struct inode *inode, const char *name,
 			 valid, name, pv, size, 0, flags,
 			 ll_i2suppgid(inode), &req);
 #ifdef CONFIG_FS_POSIX_ACL
-	/*
-	 * Release the posix ACL space.
-	 */
-	kfree(new_value);
-	if (acl)
+	if (new_value != NULL)
+		/*
+		 * Release the posix ACL space.
+		 */
+		kfree(new_value);
+	if (acl != NULL)
 		lustre_ext_acl_xattr_free(acl);
 #endif
 	if (rc) {
@@ -211,14 +212,16 @@ int ll_setxattr_common(struct inode *inode, const char *name,
 	return 0;
 }
 
-int ll_setxattr(struct dentry *dentry, struct inode *inode,
-		const char *name, const void *value, size_t size, int flags)
+int ll_setxattr(struct dentry *dentry, const char *name,
+		const void *value, size_t size, int flags)
 {
+	struct inode *inode = d_inode(dentry);
+
 	LASSERT(inode);
 	LASSERT(name);
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p), xattr %s\n",
-	       PFID(ll_inode2fid(inode)), inode, name);
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu/%u(%p), xattr %s\n",
+	       inode->i_ino, inode->i_generation, inode, name);
 
 	ll_stats_ops_tally(ll_i2sbi(inode), LPROC_LL_SETXATTR, 1);
 
@@ -236,18 +239,17 @@ int ll_setxattr(struct dentry *dentry, struct inode *inode,
 
 		/* Attributes that are saved via getxattr will always have
 		 * the stripe_offset as 0.  Instead, the MDS should be
-		 * allowed to pick the starting OST index.   b=17846
-		 */
-		if (lump && lump->lmm_stripe_offset == 0)
+		 * allowed to pick the starting OST index.   b=17846 */
+		if (lump != NULL && lump->lmm_stripe_offset == 0)
 			lump->lmm_stripe_offset = -1;
 
-		if (lump && S_ISREG(inode->i_mode)) {
-			__u64 it_flags = FMODE_WRITE;
+		if (lump != NULL && S_ISREG(inode->i_mode)) {
+			int flags = FMODE_WRITE;
 			int lum_size = (lump->lmm_magic == LOV_USER_MAGIC_V1) ?
 				sizeof(*lump) : sizeof(struct lov_user_md_v3);
 
-			rc = ll_lov_setstripe_ea_info(inode, dentry, it_flags,
-						      lump, lum_size);
+			rc = ll_lov_setstripe_ea_info(inode, dentry, flags, lump,
+						      lum_size);
 			/* b10667: rc always be 0 here for now */
 			rc = 0;
 		} else if (S_ISDIR(inode->i_mode)) {
@@ -271,8 +273,8 @@ int ll_removexattr(struct dentry *dentry, const char *name)
 	LASSERT(inode);
 	LASSERT(name);
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p), xattr %s\n",
-	       PFID(ll_inode2fid(inode)), inode, name);
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu/%u(%p), xattr %s\n",
+	       inode->i_ino, inode->i_generation, inode, name);
 
 	ll_stats_ops_tally(ll_i2sbi(inode), LPROC_LL_REMOVEXATTR, 1);
 	return ll_setxattr_common(inode, name, NULL, 0, 0,
@@ -291,8 +293,8 @@ int ll_getxattr_common(struct inode *inode, const char *name,
 	struct rmtacl_ctl_entry *rce = NULL;
 	struct ll_inode_info *lli = ll_i2info(inode);
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p)\n",
-	       PFID(ll_inode2fid(inode)), inode);
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu/%u(%p)\n",
+	       inode->i_ino, inode->i_generation, inode);
 
 	/* listxattr have slightly different behavior from of ext3:
 	 * without 'user_xattr' ext3 will list all xattr names but
@@ -310,7 +312,7 @@ int ll_getxattr_common(struct inode *inode, const char *name,
 
 	/* b15587: ignore security.capability xattr for now */
 	if ((xattr_type == XATTR_SECURITY_T &&
-	     strcmp(name, "security.capability") == 0))
+	    strcmp(name, "security.capability") == 0))
 		return -ENODATA;
 
 	/* LU-549:  Disable security.selinux when selinux is disabled */
@@ -323,7 +325,7 @@ int ll_getxattr_common(struct inode *inode, const char *name,
 	    (xattr_type == XATTR_ACL_ACCESS_T ||
 	    xattr_type == XATTR_ACL_DEFAULT_T)) {
 		rce = rct_search(&sbi->ll_rct, current_pid());
-		if (!rce ||
+		if (rce == NULL ||
 		    (rce->rce_ops != RMT_LSETFACL &&
 		    rce->rce_ops != RMT_LGETFACL &&
 		    rce->rce_ops != RMT_RSETFACL &&
@@ -337,6 +339,7 @@ int ll_getxattr_common(struct inode *inode, const char *name,
 	 */
 	if (xattr_type == XATTR_ACL_ACCESS_T &&
 	    !(sbi->ll_flags & LL_SBI_RMT_CLIENT)) {
+
 		struct posix_acl *acl;
 
 		spin_lock(&lli->lli_lock);
@@ -363,7 +366,7 @@ do_getxattr:
 			goto out_xattr;
 
 		/* Add "system.posix_acl_access" to the list */
-		if (lli->lli_posix_acl && valid & OBD_MD_FLXATTRLS) {
+		if (lli->lli_posix_acl != NULL && valid & OBD_MD_FLXATTRLS) {
 			if (size == 0) {
 				rc += sizeof(XATTR_NAME_ACL_ACCESS);
 			} else if (size - rc >= sizeof(XATTR_NAME_ACL_ACCESS)) {
@@ -395,7 +398,7 @@ getxattr_nocache:
 
 		if (size < body->eadatasize) {
 			CERROR("server bug: replied size %u > %u\n",
-			       body->eadatasize, (int)size);
+				body->eadatasize, (int)size);
 			rc = -ERANGE;
 			goto out;
 		}
@@ -407,7 +410,7 @@ getxattr_nocache:
 
 		/* do not need swab xattr data */
 		xdata = req_capsule_server_sized_get(&req->rq_pill, &RMF_EADATA,
-						     body->eadatasize);
+							body->eadatasize);
 		if (!xdata) {
 			rc = -EFAULT;
 			goto out;
@@ -421,7 +424,8 @@ getxattr_nocache:
 	if (rce && rce->rce_ops == RMT_LSETFACL) {
 		ext_acl_xattr_header *acl;
 
-		acl = lustre_posix_acl_xattr_2ext(buffer, rc);
+		acl = lustre_posix_acl_xattr_2ext(
+					(posix_acl_xattr_header *)buffer, rc);
 		if (IS_ERR(acl)) {
 			rc = PTR_ERR(acl);
 			goto out;
@@ -448,14 +452,16 @@ out:
 	return rc;
 }
 
-ssize_t ll_getxattr(struct dentry *dentry, struct inode *inode,
-		    const char *name, void *buffer, size_t size)
+ssize_t ll_getxattr(struct dentry *dentry, const char *name,
+		    void *buffer, size_t size)
 {
+	struct inode *inode = d_inode(dentry);
+
 	LASSERT(inode);
 	LASSERT(name);
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p), xattr %s\n",
-	       PFID(ll_inode2fid(inode)), inode, name);
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu/%u(%p), xattr %s\n",
+	       inode->i_ino, inode->i_generation, inode, name);
 
 	ll_stats_ops_tally(ll_i2sbi(inode), LPROC_LL_GETXATTR, 1);
 
@@ -476,14 +482,13 @@ ssize_t ll_getxattr(struct dentry *dentry, struct inode *inode,
 
 		if (size == 0 && S_ISDIR(inode->i_mode)) {
 			/* XXX directory EA is fix for now, optimize to save
-			 * RPC transfer
-			 */
+			 * RPC transfer */
 			rc = sizeof(struct lov_user_md);
 			goto out;
 		}
 
 		lsm = ccc_inode_lsm_get(inode);
-		if (!lsm) {
+		if (lsm == NULL) {
 			if (S_ISDIR(inode->i_mode)) {
 				rc = ll_dir_getstripe(inode, &lmm,
 						      &lmmsize, &request);
@@ -492,8 +497,7 @@ ssize_t ll_getxattr(struct dentry *dentry, struct inode *inode,
 			}
 		} else {
 			/* LSM is present already after lookup/getattr call.
-			 * we need to grab layout lock once it is implemented
-			 */
+			 * we need to grab layout lock once it is implemented */
 			rc = obd_packmd(ll_i2dtexp(inode), &lmm, lsm);
 			lmmsize = rc;
 		}
@@ -506,8 +510,7 @@ ssize_t ll_getxattr(struct dentry *dentry, struct inode *inode,
 			/* used to call ll_get_max_mdsize() forward to get
 			 * the maximum buffer size, while some apps (such as
 			 * rsync 3.0.x) care much about the exact xattr value
-			 * size
-			 */
+			 * size */
 			rc = lmmsize;
 			goto out;
 		}
@@ -523,8 +526,7 @@ ssize_t ll_getxattr(struct dentry *dentry, struct inode *inode,
 		memcpy(lump, lmm, lmmsize);
 		/* do not return layout gen for getxattr otherwise it would
 		 * confuse tar --xattr by recognizing layout gen as stripe
-		 * offset when the file is restored. See LU-2809.
-		 */
+		 * offset when the file is restored. See LU-2809. */
 		lump->lmm_layout_gen = 0;
 
 		rc = lmmsize;
@@ -549,8 +551,8 @@ ssize_t ll_listxattr(struct dentry *dentry, char *buffer, size_t size)
 
 	LASSERT(inode);
 
-	CDEBUG(D_VFSTRACE, "VFS Op:inode="DFID"(%p)\n",
-	       PFID(ll_inode2fid(inode)), inode);
+	CDEBUG(D_VFSTRACE, "VFS Op:inode=%lu/%u(%p)\n",
+	       inode->i_ino, inode->i_generation, inode);
 
 	ll_stats_ops_tally(ll_i2sbi(inode), LPROC_LL_LISTXATTR, 1);
 
@@ -558,7 +560,7 @@ ssize_t ll_listxattr(struct dentry *dentry, char *buffer, size_t size)
 	if (rc < 0)
 		goto out;
 
-	if (buffer) {
+	if (buffer != NULL) {
 		struct ll_sb_info *sbi = ll_i2sbi(inode);
 		char *xattr_name = buffer;
 		int xlen, rem = rc;
@@ -596,12 +598,12 @@ ssize_t ll_listxattr(struct dentry *dentry, char *buffer, size_t size)
 		const size_t name_len   = sizeof("lov") - 1;
 		const size_t total_len  = prefix_len + name_len + 1;
 
-		if (((rc + total_len) > size) && buffer) {
+		if (((rc + total_len) > size) && (buffer != NULL)) {
 			ptlrpc_req_finished(request);
 			return -ERANGE;
 		}
 
-		if (buffer) {
+		if (buffer != NULL) {
 			buffer += rc;
 			memcpy(buffer, XATTR_LUSTRE_PREFIX, prefix_len);
 			memcpy(buffer + prefix_len, "lov", name_len);

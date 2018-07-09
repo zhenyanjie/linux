@@ -19,6 +19,8 @@
 #include <linux/of_platform.h>
 #include <linux/slab.h>
 
+#include <asm/pci-bridge.h>
+
 /*
  * Called after each bus is probed, but before its children are examined
  */
@@ -73,16 +75,6 @@ int raw_pci_write(unsigned int domain, unsigned int bus,
 {
 	return -ENXIO;
 }
-
-#ifdef CONFIG_NUMA
-
-int pcibus_to_node(struct pci_bus *bus)
-{
-	return dev_to_node(&bus->dev);
-}
-EXPORT_SYMBOL(pcibus_to_node);
-
-#endif
 
 #ifdef CONFIG_ACPI
 /* Root bridge scanning */

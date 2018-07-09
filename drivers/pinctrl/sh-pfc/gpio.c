@@ -212,7 +212,7 @@ static int gpio_pin_to_irq(struct gpio_chip *gc, unsigned offset)
 		}
 	}
 
-	return 0;
+	return -ENOSYS;
 
 found:
 	return pfc->irqs[i];

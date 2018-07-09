@@ -62,8 +62,7 @@ struct meson_wdt_dev {
 	const struct meson_wdt_data *data;
 };
 
-static int meson_wdt_restart(struct watchdog_device *wdt_dev,
-			     unsigned long action, void *data)
+static int meson_wdt_restart(struct watchdog_device *wdt_dev)
 {
 	struct meson_wdt_dev *meson_wdt = watchdog_get_drvdata(wdt_dev);
 	u32 tc_reboot = MESON_WDT_DC_RESET;

@@ -446,7 +446,9 @@ static int brcmstb_i2c_do_addr(struct brcmstb_i2c_dev *dev,
 
 		}
 	} else {
-		addr = i2c_8bit_addr_from_msg(msg);
+		addr = msg->addr << 1;
+		if (msg->flags & I2C_M_RD)
+			addr |= 1;
 
 		bsc_writel(dev, addr, chip_address);
 	}

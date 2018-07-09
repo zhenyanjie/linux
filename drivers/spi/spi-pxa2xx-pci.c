@@ -19,7 +19,6 @@ enum {
 	PORT_BSW1,
 	PORT_BSW2,
 	PORT_QUARK_X1000,
-	PORT_LPT,
 };
 
 struct pxa_spi_info {
@@ -42,9 +41,6 @@ static struct dw_dma_slave bsw1_tx_param = { .dst_id = 6 };
 static struct dw_dma_slave bsw1_rx_param = { .src_id = 7 };
 static struct dw_dma_slave bsw2_tx_param = { .dst_id = 8 };
 static struct dw_dma_slave bsw2_rx_param = { .src_id = 9 };
-
-static struct dw_dma_slave lpt_tx_param = { .dst_id = 0 };
-static struct dw_dma_slave lpt_rx_param = { .src_id = 1 };
 
 static bool lpss_dma_filter(struct dma_chan *chan, void *param)
 {
@@ -102,14 +98,6 @@ static struct pxa_spi_info spi_info_configs[] = {
 		.num_chipselect = 1,
 		.max_clk_rate = 50000000,
 	},
-	[PORT_LPT] = {
-		.type = LPSS_LPT_SSP,
-		.port_id = 0,
-		.num_chipselect = 1,
-		.max_clk_rate = 50000000,
-		.tx_param = &lpt_tx_param,
-		.rx_param = &lpt_rx_param,
-	},
 };
 
 static int pxa2xx_spi_pci_probe(struct pci_dev *dev,
@@ -144,16 +132,16 @@ static int pxa2xx_spi_pci_probe(struct pci_dev *dev,
 		struct dw_dma_slave *slave = c->tx_param;
 
 		slave->dma_dev = &dma_dev->dev;
-		slave->m_master = 0;
-		slave->p_master = 1;
+		slave->src_master = 1;
+		slave->dst_master = 0;
 	}
 
 	if (c->rx_param) {
 		struct dw_dma_slave *slave = c->rx_param;
 
 		slave->dma_dev = &dma_dev->dev;
-		slave->m_master = 0;
-		slave->p_master = 1;
+		slave->src_master = 1;
+		slave->dst_master = 0;
 	}
 
 	spi_pdata.dma_filter = lpss_dma_filter;
@@ -173,8 +161,8 @@ static int pxa2xx_spi_pci_probe(struct pci_dev *dev,
 	ssp->type = c->type;
 
 	snprintf(buf, sizeof(buf), "pxa2xx-spi.%d", ssp->port_id);
-	ssp->clk = clk_register_fixed_rate(&dev->dev, buf , NULL, 0,
-					   c->max_clk_rate);
+	ssp->clk = clk_register_fixed_rate(&dev->dev, buf , NULL,
+					CLK_IS_ROOT, c->max_clk_rate);
 	 if (IS_ERR(ssp->clk))
 		return PTR_ERR(ssp->clk);
 
@@ -214,7 +202,6 @@ static const struct pci_device_id pxa2xx_spi_pci_devices[] = {
 	{ PCI_VDEVICE(INTEL, 0x228e), PORT_BSW0 },
 	{ PCI_VDEVICE(INTEL, 0x2290), PORT_BSW1 },
 	{ PCI_VDEVICE(INTEL, 0x22ac), PORT_BSW2 },
-	{ PCI_VDEVICE(INTEL, 0x9ce6), PORT_LPT },
 	{ },
 };
 MODULE_DEVICE_TABLE(pci, pxa2xx_spi_pci_devices);

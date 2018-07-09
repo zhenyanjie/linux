@@ -19,7 +19,6 @@ TARGETS += powerpc
 TARGETS += pstore
 TARGETS += ptrace
 TARGETS += seccomp
-TARGETS += sigaltstack
 TARGETS += size
 TARGETS += static_keys
 TARGETS += sysctl

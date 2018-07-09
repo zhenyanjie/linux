@@ -27,13 +27,6 @@ struct pwm_regulator_data {
 
 	/* Voltage table */
 	struct pwm_voltages *duty_cycle_table;
-
-	/* regulator descriptor */
-	struct regulator_desc desc;
-
-	/* Regulator ops */
-	struct regulator_ops ops;
-
 	int state;
 
 	/* Continuous voltage */
@@ -59,18 +52,18 @@ static int pwm_regulator_set_voltage_sel(struct regulator_dev *rdev,
 					 unsigned selector)
 {
 	struct pwm_regulator_data *drvdata = rdev_get_drvdata(rdev);
-	struct pwm_args pargs;
+	unsigned int pwm_reg_period;
 	int dutycycle;
 	int ret;
 
-	pwm_get_args(drvdata->pwm, &pargs);
+	pwm_reg_period = pwm_get_period(drvdata->pwm);
 
-	dutycycle = (pargs.period *
+	dutycycle = (pwm_reg_period *
 		    drvdata->duty_cycle_table[selector].dutycycle) / 100;
 
-	ret = pwm_config(drvdata->pwm, dutycycle, pargs.period);
+	ret = pwm_config(drvdata->pwm, dutycycle, pwm_reg_period);
 	if (ret) {
-		dev_err(&rdev->dev, "Failed to configure PWM: %d\n", ret);
+		dev_err(&rdev->dev, "Failed to configure PWM\n");
 		return ret;
 	}
 
@@ -113,6 +106,18 @@ static int pwm_regulator_is_enabled(struct regulator_dev *dev)
 	return pwm_is_enabled(drvdata->pwm);
 }
 
+/**
+ * Continuous voltage call-backs
+ */
+static int pwm_voltage_to_duty_cycle_percentage(struct regulator_dev *rdev, int req_uV)
+{
+	int min_uV = rdev->constraints->min_uV;
+	int max_uV = rdev->constraints->max_uV;
+	int diff = max_uV - min_uV;
+
+	return 100 - (((req_uV * 100) - (min_uV * 100)) / diff);
+}
+
 static int pwm_regulator_get_voltage(struct regulator_dev *rdev)
 {
 	struct pwm_regulator_data *drvdata = rdev_get_drvdata(rdev);
@@ -126,53 +131,27 @@ static int pwm_regulator_set_voltage(struct regulator_dev *rdev,
 {
 	struct pwm_regulator_data *drvdata = rdev_get_drvdata(rdev);
 	unsigned int ramp_delay = rdev->constraints->ramp_delay;
-	struct pwm_args pargs;
-	unsigned int req_diff = min_uV - rdev->constraints->min_uV;
-	unsigned int diff;
-	unsigned int duty_pulse;
-	u64 req_period;
-	u32 rem;
-	int old_uV = pwm_regulator_get_voltage(rdev);
+	unsigned int period = pwm_get_period(drvdata->pwm);
+	int duty_cycle;
 	int ret;
 
-	pwm_get_args(drvdata->pwm, &pargs);
-	diff = rdev->constraints->max_uV - rdev->constraints->min_uV;
+	duty_cycle = pwm_voltage_to_duty_cycle_percentage(rdev, min_uV);
 
-	/* First try to find out if we get the iduty cycle time which is
-	 * factor of PWM period time. If (request_diff_to_min * pwm_period)
-	 * is perfect divided by voltage_range_diff then it is possible to
-	 * get duty cycle time which is factor of PWM period. This will help
-	 * to get output voltage nearer to requested value as there is no
-	 * calculation loss.
-	 */
-	req_period = req_diff * pargs.period;
-	div_u64_rem(req_period, diff, &rem);
-	if (!rem) {
-		do_div(req_period, diff);
-		duty_pulse = (unsigned int)req_period;
-	} else {
-		duty_pulse = (pargs.period / 100) * ((req_diff * 100) / diff);
-	}
-
-	ret = pwm_config(drvdata->pwm, duty_pulse, pargs.period);
+	ret = pwm_config(drvdata->pwm, (period / 100) * duty_cycle, period);
 	if (ret) {
-		dev_err(&rdev->dev, "Failed to configure PWM: %d\n", ret);
+		dev_err(&rdev->dev, "Failed to configure PWM\n");
 		return ret;
 	}
 
 	ret = pwm_enable(drvdata->pwm);
 	if (ret) {
-		dev_err(&rdev->dev, "Failed to enable PWM: %d\n", ret);
+		dev_err(&rdev->dev, "Failed to enable PWM\n");
 		return ret;
 	}
 	drvdata->volt_uV = min_uV;
 
-	if ((ramp_delay == 0) || !pwm_regulator_is_enabled(rdev))
-		return 0;
-
-	/* Ramp delay is in uV/uS. Adjust to uS and delay */
-	ramp_delay = DIV_ROUND_UP(abs(min_uV - old_uV), ramp_delay);
-	usleep_range(ramp_delay, ramp_delay + DIV_ROUND_UP(ramp_delay, 10));
+	/* Delay required by PWM regulator to settle to the new voltage */
+	usleep_range(ramp_delay, ramp_delay + 1000);
 
 	return 0;
 }
@@ -214,7 +193,8 @@ static int pwm_regulator_init_table(struct platform_device *pdev,
 
 	if ((length < sizeof(*duty_cycle_table)) ||
 	    (length % sizeof(*duty_cycle_table))) {
-		dev_err(&pdev->dev, "voltage-table length(%d) is invalid\n",
+		dev_err(&pdev->dev,
+			"voltage-table length(%d) is invalid\n",
 			length);
 		return -EINVAL;
 	}
@@ -227,15 +207,13 @@ static int pwm_regulator_init_table(struct platform_device *pdev,
 					 (u32 *)duty_cycle_table,
 					 length / sizeof(u32));
 	if (ret) {
-		dev_err(&pdev->dev, "Failed to read voltage-table: %d\n", ret);
+		dev_err(&pdev->dev, "Failed to read voltage-table\n");
 		return ret;
 	}
 
 	drvdata->duty_cycle_table	= duty_cycle_table;
-	memcpy(&drvdata->ops, &pwm_regulator_voltage_table_ops,
-	       sizeof(drvdata->ops));
-	drvdata->desc.ops = &drvdata->ops;
-	drvdata->desc.n_voltages	= length / sizeof(*duty_cycle_table);
+	pwm_regulator_desc.ops		= &pwm_regulator_voltage_table_ops;
+	pwm_regulator_desc.n_voltages	= length / sizeof(*duty_cycle_table);
 
 	return 0;
 }
@@ -243,10 +221,8 @@ static int pwm_regulator_init_table(struct platform_device *pdev,
 static int pwm_regulator_init_continuous(struct platform_device *pdev,
 					 struct pwm_regulator_data *drvdata)
 {
-	memcpy(&drvdata->ops, &pwm_regulator_voltage_continuous_ops,
-	       sizeof(drvdata->ops));
-	drvdata->desc.ops = &drvdata->ops;
-	drvdata->desc.continuous_voltage_range = true;
+	pwm_regulator_desc.ops = &pwm_regulator_voltage_continuous_ops;
+	pwm_regulator_desc.continuous_voltage_range = true;
 
 	return 0;
 }
@@ -269,8 +245,6 @@ static int pwm_regulator_probe(struct platform_device *pdev)
 	if (!drvdata)
 		return -ENOMEM;
 
-	memcpy(&drvdata->desc, &pwm_regulator_desc, sizeof(drvdata->desc));
-
 	if (of_find_property(np, "voltage-table", NULL))
 		ret = pwm_regulator_init_table(pdev, drvdata);
 	else
@@ -279,7 +253,7 @@ static int pwm_regulator_probe(struct platform_device *pdev)
 		return ret;
 
 	init_data = of_get_regulator_init_data(&pdev->dev, np,
-					       &drvdata->desc);
+					       &pwm_regulator_desc);
 	if (!init_data)
 		return -ENOMEM;
 
@@ -290,24 +264,16 @@ static int pwm_regulator_probe(struct platform_device *pdev)
 
 	drvdata->pwm = devm_pwm_get(&pdev->dev, NULL);
 	if (IS_ERR(drvdata->pwm)) {
-		ret = PTR_ERR(drvdata->pwm);
-		dev_err(&pdev->dev, "Failed to get PWM: %d\n", ret);
-		return ret;
+		dev_err(&pdev->dev, "Failed to get PWM\n");
+		return PTR_ERR(drvdata->pwm);
 	}
 
-	/*
-	 * FIXME: pwm_apply_args() should be removed when switching to the
-	 * atomic PWM API.
-	 */
-	pwm_apply_args(drvdata->pwm);
-
 	regulator = devm_regulator_register(&pdev->dev,
-					    &drvdata->desc, &config);
+					    &pwm_regulator_desc, &config);
 	if (IS_ERR(regulator)) {
-		ret = PTR_ERR(regulator);
-		dev_err(&pdev->dev, "Failed to register regulator %s: %d\n",
-			drvdata->desc.name, ret);
-		return ret;
+		dev_err(&pdev->dev, "Failed to register regulator %s\n",
+			pwm_regulator_desc.name);
+		return PTR_ERR(regulator);
 	}
 
 	return 0;

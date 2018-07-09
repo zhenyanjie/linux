@@ -746,7 +746,7 @@ static irqreturn_t fjn_interrupt(int dummy, void *dev_id)
 	    lp->sent = lp->tx_queue ;
 	    lp->tx_queue = 0;
 	    lp->tx_queue_len = 0;
-	    netif_trans_update(dev);
+	    dev->trans_start = jiffies;
 	} else {
 	    lp->tx_started = 0;
 	}

@@ -419,7 +419,7 @@ static struct ocrdma_pd *_ocrdma_alloc_pd(struct ocrdma_dev *dev,
 					  struct ib_udata *udata)
 {
 	struct ocrdma_pd *pd = NULL;
-	int status;
+	int status = 0;
 
 	pd = kzalloc(sizeof(*pd), GFP_KERNEL);
 	if (!pd)
@@ -468,7 +468,7 @@ static inline int is_ucontext_pd(struct ocrdma_ucontext *uctx,
 static int _ocrdma_dealloc_pd(struct ocrdma_dev *dev,
 			      struct ocrdma_pd *pd)
 {
-	int status;
+	int status = 0;
 
 	if (dev->pd_mgr->pd_prealloc_valid)
 		status = ocrdma_put_pd_num(dev, pd->id, pd->dpp_enabled);
@@ -596,7 +596,7 @@ map_err:
 
 int ocrdma_dealloc_ucontext(struct ib_ucontext *ibctx)
 {
-	int status;
+	int status = 0;
 	struct ocrdma_mm *mm, *tmp;
 	struct ocrdma_ucontext *uctx = get_ocrdma_ucontext(ibctx);
 	struct ocrdma_dev *dev = get_ocrdma_dev(ibctx->device);
@@ -623,7 +623,7 @@ int ocrdma_mmap(struct ib_ucontext *context, struct vm_area_struct *vma)
 	unsigned long vm_page = vma->vm_pgoff << PAGE_SHIFT;
 	u64 unmapped_db = (u64) dev->nic_info.unmapped_db;
 	unsigned long len = (vma->vm_end - vma->vm_start);
-	int status;
+	int status = 0;
 	bool found;
 
 	if (vma->vm_start & (PAGE_SIZE - 1))
@@ -1285,7 +1285,7 @@ static int ocrdma_copy_qp_uresp(struct ocrdma_qp *qp,
 				struct ib_udata *udata, int dpp_offset,
 				int dpp_credit_lmt, int srq)
 {
-	int status;
+	int status = 0;
 	u64 usr_db;
 	struct ocrdma_create_qp_uresp uresp;
 	struct ocrdma_pd *pd = qp->pd;
@@ -1494,7 +1494,9 @@ int _ocrdma_modify_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
 	 */
 	if (status < 0)
 		return status;
-	return ocrdma_mbx_modify_qp(dev, qp, attr, attr_mask);
+	status = ocrdma_mbx_modify_qp(dev, qp, attr, attr_mask);
+
+	return status;
 }
 
 int ocrdma_modify_qp(struct ib_qp *ibqp, struct ib_qp_attr *attr,
@@ -1947,7 +1949,7 @@ int ocrdma_modify_srq(struct ib_srq *ibsrq,
 		      enum ib_srq_attr_mask srq_attr_mask,
 		      struct ib_udata *udata)
 {
-	int status;
+	int status = 0;
 	struct ocrdma_srq *srq;
 
 	srq = get_ocrdma_srq(ibsrq);
@@ -2003,7 +2005,6 @@ static void ocrdma_build_ud_hdr(struct ocrdma_qp *qp,
 	else
 		ud_hdr->qkey = ud_wr(wr)->remote_qkey;
 	ud_hdr->rsvd_ahid = ah->id;
-	ud_hdr->hdr_type = ah->hdr_type;
 	if (ah->av->valid & OCRDMA_AV_VLAN_VALID)
 		hdr->cw |= (OCRDMA_FLAG_AH_VLAN_PR << OCRDMA_WQE_FLAGS_SHIFT);
 }
@@ -2716,11 +2717,9 @@ static bool ocrdma_poll_scqe(struct ocrdma_qp *qp, struct ocrdma_cqe *cqe,
 	return expand;
 }
 
-static int ocrdma_update_ud_rcqe(struct ocrdma_dev *dev, struct ib_wc *ibwc,
-				 struct ocrdma_cqe *cqe)
+static int ocrdma_update_ud_rcqe(struct ib_wc *ibwc, struct ocrdma_cqe *cqe)
 {
 	int status;
-	u16 hdr_type = 0;
 
 	status = (le32_to_cpu(cqe->flags_status_srcqpn) &
 		OCRDMA_CQE_UD_STATUS_MASK) >> OCRDMA_CQE_UD_STATUS_SHIFT;
@@ -2729,17 +2728,7 @@ static int ocrdma_update_ud_rcqe(struct ocrdma_dev *dev, struct ib_wc *ibwc,
 	ibwc->pkey_index = 0;
 	ibwc->wc_flags = IB_WC_GRH;
 	ibwc->byte_len = (le32_to_cpu(cqe->ud.rxlen_pkey) >>
-			  OCRDMA_CQE_UD_XFER_LEN_SHIFT) &
-			  OCRDMA_CQE_UD_XFER_LEN_MASK;
-
-	if (ocrdma_is_udp_encap_supported(dev)) {
-		hdr_type = (le32_to_cpu(cqe->ud.rxlen_pkey) >>
-			    OCRDMA_CQE_UD_L3TYPE_SHIFT) &
-			    OCRDMA_CQE_UD_L3TYPE_MASK;
-		ibwc->wc_flags |= IB_WC_WITH_NETWORK_HDR_TYPE;
-		ibwc->network_hdr_type = hdr_type;
-	}
-
+					OCRDMA_CQE_UD_XFER_LEN_SHIFT);
 	return status;
 }
 
@@ -2802,15 +2791,12 @@ static bool ocrdma_poll_err_rcqe(struct ocrdma_qp *qp, struct ocrdma_cqe *cqe,
 static void ocrdma_poll_success_rcqe(struct ocrdma_qp *qp,
 				     struct ocrdma_cqe *cqe, struct ib_wc *ibwc)
 {
-	struct ocrdma_dev *dev;
-
-	dev = get_ocrdma_dev(qp->ibqp.device);
 	ibwc->opcode = IB_WC_RECV;
 	ibwc->qp = &qp->ibqp;
 	ibwc->status = IB_WC_SUCCESS;
 
 	if (qp->qp_type == IB_QPT_UD || qp->qp_type == IB_QPT_GSI)
-		ocrdma_update_ud_rcqe(dev, ibwc, cqe);
+		ocrdma_update_ud_rcqe(ibwc, cqe);
 	else
 		ibwc->byte_len = le32_to_cpu(cqe->rq.rxlen);
 
@@ -3081,12 +3067,13 @@ static int ocrdma_set_page(struct ib_mr *ibmr, u64 addr)
 	return 0;
 }
 
-int ocrdma_map_mr_sg(struct ib_mr *ibmr, struct scatterlist *sg, int sg_nents,
-		     unsigned int *sg_offset)
+int ocrdma_map_mr_sg(struct ib_mr *ibmr,
+		     struct scatterlist *sg,
+		     int sg_nents)
 {
 	struct ocrdma_mr *mr = get_ocrdma_mr(ibmr);
 
 	mr->npages = 0;
 
-	return ib_sg_to_pages(ibmr, sg, sg_nents, sg_offset, ocrdma_set_page);
+	return ib_sg_to_pages(ibmr, sg, sg_nents, ocrdma_set_page);
 }

@@ -345,13 +345,12 @@ static int spi_st_probe(struct platform_device *pdev)
 	spi_st->clk = devm_clk_get(&pdev->dev, "ssc");
 	if (IS_ERR(spi_st->clk)) {
 		dev_err(&pdev->dev, "Unable to request clock\n");
-		ret = PTR_ERR(spi_st->clk);
-		goto put_master;
+		return PTR_ERR(spi_st->clk);
 	}
 
 	ret = spi_st_clk_enable(spi_st);
 	if (ret)
-		goto put_master;
+		return ret;
 
 	init_completion(&spi_st->done);
 
@@ -409,8 +408,7 @@ static int spi_st_probe(struct platform_device *pdev)
 
 clk_disable:
 	spi_st_clk_disable(spi_st);
-put_master:
-	spi_master_put(master);
+
 	return ret;
 }
 

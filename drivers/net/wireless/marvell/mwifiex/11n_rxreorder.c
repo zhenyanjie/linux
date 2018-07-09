@@ -59,10 +59,7 @@ static int mwifiex_11n_dispatch_amsdu_pkt(struct mwifiex_private *priv,
 								  skb->len);
 			}
 
-			if (priv->bss_role == MWIFIEX_BSS_ROLE_UAP)
-				ret = mwifiex_uap_recv_packet(priv, rx_skb);
-			else
-				ret = mwifiex_recv_packet(priv, rx_skb);
+			ret = mwifiex_recv_packet(priv, rx_skb);
 			if (ret == -1)
 				mwifiex_dbg(priv->adapter, ERROR,
 					    "Rx of A-MSDU failed");

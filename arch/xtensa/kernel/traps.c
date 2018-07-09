@@ -39,7 +39,11 @@
 #include <asm/pgtable.h>
 #include <asm/processor.h>
 #include <asm/traps.h>
-#include <asm/hw_breakpoint.h>
+
+#ifdef CONFIG_KGDB
+extern int gdb_enter;
+extern int return_from_debug_flag;
+#endif
 
 /*
  * Machine specific interrupt handlers
@@ -158,8 +162,6 @@ COPROCESSOR(7),
 
 DEFINE_PER_CPU(unsigned long, exc_table[EXC_TABLE_SIZE/4]);
 
-DEFINE_PER_CPU(struct debug_table, debug_table);
-
 void die(const char*, struct pt_regs*, long);
 
 static inline void
@@ -203,32 +205,6 @@ extern void do_IRQ(int, struct pt_regs *);
 
 #if XTENSA_FAKE_NMI
 
-#define IS_POW2(v) (((v) & ((v) - 1)) == 0)
-
-#if !(PROFILING_INTLEVEL == XCHAL_EXCM_LEVEL && \
-      IS_POW2(XTENSA_INTLEVEL_MASK(PROFILING_INTLEVEL)))
-#warning "Fake NMI is requested for PMM, but there are other IRQs at or above its level."
-#warning "Fake NMI will be used, but there will be a bugcheck if one of those IRQs fire."
-
-static inline void check_valid_nmi(void)
-{
-	unsigned intread = get_sr(interrupt);
-	unsigned intenable = get_sr(intenable);
-
-	BUG_ON(intread & intenable &
-	       ~(XTENSA_INTLEVEL_ANDBELOW_MASK(PROFILING_INTLEVEL) ^
-		 XTENSA_INTLEVEL_MASK(PROFILING_INTLEVEL) ^
-		 BIT(XCHAL_PROFILING_INTERRUPT)));
-}
-
-#else
-
-static inline void check_valid_nmi(void)
-{
-}
-
-#endif
-
 irqreturn_t xtensa_pmu_irq_handler(int irq, void *dev_id);
 
 DEFINE_PER_CPU(unsigned long, nmi_count);
@@ -243,7 +219,6 @@ void do_nmi(struct pt_regs *regs)
 	old_regs = set_irq_regs(regs);
 	nmi_enter();
 	++*this_cpu_ptr(&nmi_count);
-	check_valid_nmi();
 	xtensa_pmu_irq_handler(0, NULL);
 	nmi_exit();
 	set_irq_regs(old_regs);
@@ -339,22 +314,23 @@ do_unaligned_user (struct pt_regs *regs)
 }
 #endif
 
-/* Handle debug events.
- * When CONFIG_HAVE_HW_BREAKPOINT is on this handler is called with
- * preemption disabled to avoid rescheduling and keep mapping of hardware
- * breakpoint structures to debug registers intact, so that
- * DEBUGCAUSE.DBNUM could be used in case of data breakpoint hit.
- */
 void
 do_debug(struct pt_regs *regs)
 {
-#ifdef CONFIG_HAVE_HW_BREAKPOINT
-	int ret = check_hw_breakpoint(regs);
+#ifdef CONFIG_KGDB
+	/* If remote debugging is configured AND enabled, we give control to
+	 * kgdb.  Otherwise, we fall through, perhaps giving control to the
+	 * native debugger.
+	 */
 
-	preempt_enable();
-	if (ret == 0)
+	if (gdb_enter) {
+		extern void gdb_handle_exception(struct pt_regs *);
+		gdb_handle_exception(regs);
+		return_from_debug_flag = 1;
 		return;
+	}
 #endif
+
 	__die_if_kernel("Breakpoint in kernel", regs, SIGKILL);
 
 	/* If in user mode, send SIGTRAP signal to current process */
@@ -386,15 +362,6 @@ static void trap_init_excsave(void)
 {
 	unsigned long excsave1 = (unsigned long)this_cpu_ptr(exc_table);
 	__asm__ __volatile__("wsr  %0, excsave1\n" : : "a" (excsave1));
-}
-
-static void trap_init_debug(void)
-{
-	unsigned long debugsave = (unsigned long)this_cpu_ptr(&debug_table);
-
-	this_cpu_ptr(&debug_table)->debug_exception = debug_exception;
-	__asm__ __volatile__("wsr %0, excsave" __stringify(XCHAL_DEBUGLEVEL)
-			     :: "a"(debugsave));
 }
 
 /*
@@ -440,14 +407,12 @@ void __init trap_init(void)
 
 	/* Initialize EXCSAVE_1 to hold the address of the exception table. */
 	trap_init_excsave();
-	trap_init_debug();
 }
 
 #ifdef CONFIG_SMP
 void secondary_trap_init(void)
 {
 	trap_init_excsave();
-	trap_init_debug();
 }
 #endif
 

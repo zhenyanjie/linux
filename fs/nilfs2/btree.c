@@ -13,7 +13,11 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * Written by Koji Sato.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * Written by Koji Sato <koji@osrg.net>.
  */
 
 #include <linux/slab.h>
@@ -685,8 +689,7 @@ static int nilfs_btree_lookup(const struct nilfs_bmap *btree,
 }
 
 static int nilfs_btree_lookup_contig(const struct nilfs_bmap *btree,
-				     __u64 key, __u64 *ptrp,
-				     unsigned int maxblocks)
+				     __u64 key, __u64 *ptrp, unsigned maxblocks)
 {
 	struct nilfs_btree_path *path;
 	struct nilfs_btree_node *node;
@@ -1029,12 +1032,12 @@ static __u64 nilfs_btree_find_target_v(const struct nilfs_bmap *btree,
 	if (ptr != NILFS_BMAP_INVALID_PTR)
 		/* sequential access */
 		return ptr;
-
-	ptr = nilfs_btree_find_near(btree, path);
-	if (ptr != NILFS_BMAP_INVALID_PTR)
-		/* near */
-		return ptr;
-
+	else {
+		ptr = nilfs_btree_find_near(btree, path);
+		if (ptr != NILFS_BMAP_INVALID_PTR)
+			/* near */
+			return ptr;
+	}
 	/* block group */
 	return nilfs_bmap_find_target_in_group(btree);
 }

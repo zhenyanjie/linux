@@ -401,7 +401,7 @@ static int cmos_alarm_irq_enable(struct device *dev, unsigned int enabled)
 	return 0;
 }
 
-#if IS_ENABLED(CONFIG_RTC_INTF_PROC)
+#if defined(CONFIG_RTC_INTF_PROC) || defined(CONFIG_RTC_INTF_PROC_MODULE)
 
 static int cmos_procfs(struct device *dev, struct seq_file *seq)
 {

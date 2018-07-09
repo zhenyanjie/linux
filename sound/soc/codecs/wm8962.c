@@ -18,7 +18,7 @@
 #include <linux/delay.h>
 #include <linux/pm.h>
 #include <linux/gcd.h>
-#include <linux/gpio/driver.h>
+#include <linux/gpio.h>
 #include <linux/i2c.h>
 #include <linux/input.h>
 #include <linux/pm_runtime.h>
@@ -2471,7 +2471,7 @@ static void wm8962_configure_bclk(struct snd_soc_codec *codec)
 		break;
 	default:
 		dev_warn(codec->dev, "Unknown DSPCLK divisor read back\n");
-		dspclk = wm8962->sysclk_rate;
+		dspclk = wm8962->sysclk;
 	}
 
 	dev_dbg(codec->dev, "DSPCLK is %dHz, BCLK %d\n", dspclk, wm8962->bclk);
@@ -3307,9 +3307,14 @@ static void wm8962_set_gpio_mode(struct wm8962_priv *wm8962, int gpio)
 }
 
 #ifdef CONFIG_GPIOLIB
+static inline struct wm8962_priv *gpio_to_wm8962(struct gpio_chip *chip)
+{
+	return container_of(chip, struct wm8962_priv, gpio_chip);
+}
+
 static int wm8962_gpio_request(struct gpio_chip *chip, unsigned offset)
 {
-	struct wm8962_priv *wm8962 = gpiochip_get_data(chip);
+	struct wm8962_priv *wm8962 = gpio_to_wm8962(chip);
 
 	/* The WM8962 GPIOs aren't linearly numbered.  For simplicity
 	 * we export linear numbers and error out if the unsupported
@@ -3332,7 +3337,7 @@ static int wm8962_gpio_request(struct gpio_chip *chip, unsigned offset)
 
 static void wm8962_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 {
-	struct wm8962_priv *wm8962 = gpiochip_get_data(chip);
+	struct wm8962_priv *wm8962 = gpio_to_wm8962(chip);
 	struct snd_soc_codec *codec = wm8962->codec;
 
 	snd_soc_update_bits(codec, WM8962_GPIO_BASE + offset,
@@ -3342,7 +3347,7 @@ static void wm8962_gpio_set(struct gpio_chip *chip, unsigned offset, int value)
 static int wm8962_gpio_direction_out(struct gpio_chip *chip,
 				     unsigned offset, int value)
 {
-	struct wm8962_priv *wm8962 = gpiochip_get_data(chip);
+	struct wm8962_priv *wm8962 = gpio_to_wm8962(chip);
 	struct snd_soc_codec *codec = wm8962->codec;
 	int ret, val;
 
@@ -3381,7 +3386,7 @@ static void wm8962_init_gpio(struct snd_soc_codec *codec)
 	else
 		wm8962->gpio_chip.base = -1;
 
-	ret = gpiochip_add_data(&wm8962->gpio_chip, wm8962);
+	ret = gpiochip_add(&wm8962->gpio_chip);
 	if (ret != 0)
 		dev_err(codec->dev, "Failed to add GPIOs: %d\n", ret);
 }
@@ -3793,8 +3798,9 @@ static int wm8962_runtime_resume(struct device *dev)
 	ret = regulator_bulk_enable(ARRAY_SIZE(wm8962->supplies),
 				    wm8962->supplies);
 	if (ret != 0) {
-		dev_err(dev, "Failed to enable supplies: %d\n", ret);
-		goto disable_clock;
+		dev_err(dev,
+			"Failed to enable supplies: %d\n", ret);
+		return ret;
 	}
 
 	regcache_cache_only(wm8962->regmap, false);
@@ -3832,10 +3838,6 @@ static int wm8962_runtime_resume(struct device *dev)
 	msleep(5);
 
 	return 0;
-
-disable_clock:
-	clk_disable_unprepare(wm8962->pdata.mclk);
-	return ret;
 }
 
 static int wm8962_runtime_suspend(struct device *dev)

@@ -17,7 +17,6 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
-#include <video/mipi_display.h>
 
 #include "fbtft.h"
 
@@ -26,10 +25,12 @@
 			"0F 1B 0F 17 33 2C 29 2E 30 30 39 3F 00 07 03 10"
 
 static int default_init_sequence[] = {
-	-1, MIPI_DCS_SOFT_RESET,
+	/* SWRESET - Software reset */
+	-1, 0x01,
 	-2, 150,                               /* delay */
 
-	-1, MIPI_DCS_EXIT_SLEEP_MODE,
+	/* SLPOUT - Sleep out & booster on */
+	-1, 0x11,
 	-2, 500,                               /* delay */
 
 	/* FRMCTR1 - frame rate control: normal mode
@@ -70,14 +71,18 @@ static int default_init_sequence[] = {
 	/* VMCTR1 - Power Control */
 	-1, 0xC5, 0x0E,
 
-	-1, MIPI_DCS_EXIT_INVERT_MODE,
+	/* INVOFF - Display inversion off */
+	-1, 0x20,
 
-	-1, MIPI_DCS_SET_PIXEL_FORMAT, MIPI_DCS_PIXEL_FMT_16BIT,
+	/* COLMOD - Interface pixel format */
+	-1, 0x3A, 0x05,
 
-	-1, MIPI_DCS_SET_DISPLAY_ON,
+	/* DISPON - Display On */
+	-1, 0x29,
 	-2, 100,                               /* delay */
 
-	-1, MIPI_DCS_ENTER_NORMAL_MODE,
+	/* NORON - Partial off (Normal) */
+	-1, 0x13,
 	-2, 10,                               /* delay */
 
 	/* end marker */
@@ -86,13 +91,14 @@ static int default_init_sequence[] = {
 
 static void set_addr_win(struct fbtft_par *par, int xs, int ys, int xe, int ye)
 {
-	write_reg(par, MIPI_DCS_SET_COLUMN_ADDRESS,
-		  xs >> 8, xs & 0xFF, xe >> 8, xe & 0xFF);
+	/* Column address */
+	write_reg(par, 0x2A, xs >> 8, xs & 0xFF, xe >> 8, xe & 0xFF);
 
-	write_reg(par, MIPI_DCS_SET_PAGE_ADDRESS,
-		  ys >> 8, ys & 0xFF, ye >> 8, ye & 0xFF);
+	/* Row address */
+	write_reg(par, 0x2B, ys >> 8, ys & 0xFF, ye >> 8, ye & 0xFF);
 
-	write_reg(par, MIPI_DCS_WRITE_MEMORY_START);
+	/* Memory write */
+	write_reg(par, 0x2C);
 }
 
 #define MY BIT(7)
@@ -108,20 +114,16 @@ static int set_var(struct fbtft_par *par)
 		RGB-BGR ORDER color filter panel: 0=RGB, 1=BGR */
 	switch (par->info->var.rotate) {
 	case 0:
-		write_reg(par, MIPI_DCS_SET_ADDRESS_MODE,
-			  MX | MY | (par->bgr << 3));
+		write_reg(par, 0x36, MX | MY | (par->bgr << 3));
 		break;
 	case 270:
-		write_reg(par, MIPI_DCS_SET_ADDRESS_MODE,
-			  MY | MV | (par->bgr << 3));
+		write_reg(par, 0x36, MY | MV | (par->bgr << 3));
 		break;
 	case 180:
-		write_reg(par, MIPI_DCS_SET_ADDRESS_MODE,
-			  par->bgr << 3);
+		write_reg(par, 0x36, par->bgr << 3);
 		break;
 	case 90:
-		write_reg(par, MIPI_DCS_SET_ADDRESS_MODE,
-			  MX | MV | (par->bgr << 3));
+		write_reg(par, 0x36, MX | MV | (par->bgr << 3));
 		break;
 	}
 

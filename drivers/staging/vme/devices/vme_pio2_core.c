@@ -215,9 +215,11 @@ static int pio2_probe(struct vme_dev *vdev)
 	u8 reg;
 	int vec;
 
-	card = devm_kzalloc(&vdev->dev, sizeof(*card), GFP_KERNEL);
-	if (!card)
-		return -ENOMEM;
+	card = kzalloc(sizeof(*card), GFP_KERNEL);
+	if (!card) {
+		retval = -ENOMEM;
+		goto err_struct;
+	}
 
 	card->id = vdev->num;
 	card->bus = bus[card->id];
@@ -230,7 +232,8 @@ static int pio2_probe(struct vme_dev *vdev)
 	for (i = 0; i < PIO2_VARIANT_LENGTH; i++) {
 		if (!isdigit(card->variant[i])) {
 			dev_err(&card->vdev->dev, "Variant invalid\n");
-			return -EINVAL;
+			retval = -EINVAL;
+			goto err_variant;
 		}
 	}
 
@@ -241,7 +244,8 @@ static int pio2_probe(struct vme_dev *vdev)
 	if (card->irq_vector & ~PIO2_VME_VECTOR_MASK) {
 		dev_err(&card->vdev->dev,
 			"Invalid VME IRQ Vector, vector must not use lower 4 bits\n");
-		return -EINVAL;
+		retval = -EINVAL;
+		goto err_vector;
 	}
 
 	/*
@@ -280,7 +284,8 @@ static int pio2_probe(struct vme_dev *vdev)
 	if (!card->window) {
 		dev_err(&card->vdev->dev,
 			"Unable to assign VME master resource\n");
-		return -EIO;
+		retval = -EIO;
+		goto err_window;
 	}
 
 	retval = vme_master_set(card->window, 1, card->base, 0x10000, VME_A24,
@@ -425,6 +430,11 @@ err_read:
 	vme_master_set(card->window, 0, 0, 0, VME_A16, 0, VME_D16);
 err_set:
 	vme_master_free(card->window);
+err_window:
+err_vector:
+err_variant:
+	kfree(card);
+err_struct:
 	return retval;
 }
 
@@ -455,6 +465,8 @@ static int pio2_remove(struct vme_dev *vdev)
 	vme_master_set(card->window, 0, 0, 0, VME_A16, 0, VME_D16);
 
 	vme_master_free(card->window);
+
+	kfree(card);
 
 	return 0;
 }

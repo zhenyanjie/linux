@@ -41,7 +41,6 @@
 #include <linux/vmalloc.h>
 #include <linux/tcp.h>
 #include <linux/ip.h>
-#include <linux/ipv6.h>
 #include <linux/moduleparam.h>
 
 #include "mlx4_en.h"
@@ -94,11 +93,18 @@ int mlx4_en_create_tx_ring(struct mlx4_en_priv *priv,
 
 	/* Allocate HW buffers on provided NUMA node */
 	set_dev_node(&mdev->dev->persist->pdev->dev, node);
-	err = mlx4_alloc_hwq_res(mdev->dev, &ring->wqres, ring->buf_size);
+	err = mlx4_alloc_hwq_res(mdev->dev, &ring->wqres, ring->buf_size,
+				 2 * PAGE_SIZE);
 	set_dev_node(&mdev->dev->persist->pdev->dev, mdev->dev->numa_node);
 	if (err) {
 		en_err(priv, "Failed allocating hwq resources\n");
 		goto err_bounce;
+	}
+
+	err = mlx4_en_map_buffer(&ring->wqres.buf);
+	if (err) {
+		en_err(priv, "Failed to map TX buffer\n");
+		goto err_hwq_res;
 	}
 
 	ring->buf = ring->wqres.buf.direct.buf;
@@ -111,7 +117,7 @@ int mlx4_en_create_tx_ring(struct mlx4_en_priv *priv,
 				    MLX4_RESERVE_ETH_BF_QP);
 	if (err) {
 		en_err(priv, "failed reserving qp for TX ring\n");
-		goto err_hwq_res;
+		goto err_map;
 	}
 
 	err = mlx4_qp_alloc(mdev->dev, ring->qpn, &ring->qp, GFP_KERNEL);
@@ -148,6 +154,8 @@ int mlx4_en_create_tx_ring(struct mlx4_en_priv *priv,
 
 err_reserve:
 	mlx4_qp_release_range(mdev->dev, ring->qpn, 1);
+err_map:
+	mlx4_en_unmap_buffer(&ring->wqres.buf);
 err_hwq_res:
 	mlx4_free_hwq_res(mdev->dev, &ring->wqres, ring->buf_size);
 err_bounce:
@@ -174,6 +182,7 @@ void mlx4_en_destroy_tx_ring(struct mlx4_en_priv *priv,
 	mlx4_qp_remove(mdev->dev, &ring->qp);
 	mlx4_qp_free(mdev->dev, &ring->qp);
 	mlx4_qp_release_range(priv->mdev->dev, ring->qpn, 1);
+	mlx4_en_unmap_buffer(&ring->wqres.buf);
 	mlx4_free_hwq_res(mdev->dev, &ring->wqres, ring->buf_size);
 	kfree(ring->bounce_buf);
 	ring->bounce_buf = NULL;
@@ -267,8 +276,7 @@ static void mlx4_en_stamp_wqe(struct mlx4_en_priv *priv,
 
 static u32 mlx4_en_free_tx_desc(struct mlx4_en_priv *priv,
 				struct mlx4_en_tx_ring *ring,
-				int index, u8 owner, u64 timestamp,
-				int napi_mode)
+				int index, u8 owner, u64 timestamp)
 {
 	struct mlx4_en_tx_info *tx_info = &ring->tx_info[index];
 	struct mlx4_en_tx_desc *tx_desc = ring->buf + index * TXBB_SIZE;
@@ -339,8 +347,7 @@ static u32 mlx4_en_free_tx_desc(struct mlx4_en_priv *priv,
 			}
 		}
 	}
-	napi_consume_skb(skb, napi_mode);
-
+	dev_consume_skb_any(skb);
 	return tx_info->nr_txbb;
 }
 
@@ -364,8 +371,7 @@ int mlx4_en_free_tx_buf(struct net_device *dev, struct mlx4_en_tx_ring *ring)
 	while (ring->cons != ring->prod) {
 		ring->last_nr_txbb = mlx4_en_free_tx_desc(priv, ring,
 						ring->cons & ring->size_mask,
-						!!(ring->cons & ring->size), 0,
-						0 /* Non-NAPI caller */);
+						!!(ring->cons & ring->size), 0);
 		ring->cons += ring->last_nr_txbb;
 		cnt++;
 	}
@@ -379,7 +385,7 @@ int mlx4_en_free_tx_buf(struct net_device *dev, struct mlx4_en_tx_ring *ring)
 }
 
 static bool mlx4_en_process_tx_cq(struct net_device *dev,
-				  struct mlx4_en_cq *cq, int napi_budget)
+				 struct mlx4_en_cq *cq)
 {
 	struct mlx4_en_priv *priv = netdev_priv(dev);
 	struct mlx4_cq *mcq = &cq->mcq;
@@ -447,7 +453,7 @@ static bool mlx4_en_process_tx_cq(struct net_device *dev,
 			last_nr_txbb = mlx4_en_free_tx_desc(
 					priv, ring, ring_index,
 					!!((ring_cons + txbbs_skipped) &
-					ring->size), timestamp, napi_budget);
+					ring->size), timestamp);
 
 			mlx4_en_stamp_wqe(priv, ring, stamp_index,
 					  !!((ring_cons + txbbs_stamp) &
@@ -507,7 +513,7 @@ int mlx4_en_poll_tx_cq(struct napi_struct *napi, int budget)
 	struct mlx4_en_priv *priv = netdev_priv(dev);
 	int clean_complete;
 
-	clean_complete = mlx4_en_process_tx_cq(dev, cq, budget);
+	clean_complete = mlx4_en_process_tx_cq(dev, cq);
 	if (!clean_complete)
 		return budget;
 
@@ -726,11 +732,11 @@ netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev)
 	bool inline_ok;
 	u32 ring_cons;
 
-	tx_ind = skb_get_queue_mapping(skb);
-	ring = priv->tx_ring[tx_ind];
-
 	if (!priv->port_up)
 		goto tx_drop;
+
+	tx_ind = skb_get_queue_mapping(skb);
+	ring = priv->tx_ring[tx_ind];
 
 	/* fetch ring->cons far ahead before needing it to avoid stall */
 	ring_cons = ACCESS_ONCE(ring->cons);
@@ -911,18 +917,8 @@ netdev_tx_t mlx4_en_xmit(struct sk_buff *skb, struct net_device *dev)
 				 tx_ind, fragptr);
 
 	if (skb->encapsulation) {
-		union {
-			struct iphdr *v4;
-			struct ipv6hdr *v6;
-			unsigned char *hdr;
-		} ip;
-		u8 proto;
-
-		ip.hdr = skb_inner_network_header(skb);
-		proto = (ip.v4->version == 4) ? ip.v4->protocol :
-						ip.v6->nexthdr;
-
-		if (proto == IPPROTO_TCP || proto == IPPROTO_UDP)
+		struct iphdr *ipv4 = (struct iphdr *)skb_inner_network_header(skb);
+		if (ipv4->protocol == IPPROTO_TCP || ipv4->protocol == IPPROTO_UDP)
 			op_own |= cpu_to_be32(MLX4_WQE_CTRL_IIP | MLX4_WQE_CTRL_ILP);
 		else
 			op_own |= cpu_to_be32(MLX4_WQE_CTRL_IIP);
@@ -1030,7 +1026,7 @@ tx_drop_unmap:
 
 tx_drop:
 	dev_kfree_skb_any(skb);
-	ring->tx_dropped++;
+	priv->stats.tx_dropped++;
 	return NETDEV_TX_OK;
 }
 

@@ -158,7 +158,7 @@ int tty_throttle_safe(struct tty_struct *tty)
 	int ret = 0;
 
 	mutex_lock(&tty->throttle_mutex);
-	if (!tty_throttled(tty)) {
+	if (!test_bit(TTY_THROTTLED, &tty->flags)) {
 		if (tty->flow_change != TTY_THROTTLE_SAFE)
 			ret = 1;
 		else {
@@ -189,7 +189,7 @@ int tty_unthrottle_safe(struct tty_struct *tty)
 	int ret = 0;
 
 	mutex_lock(&tty->throttle_mutex);
-	if (tty_throttled(tty)) {
+	if (test_bit(TTY_THROTTLED, &tty->flags)) {
 		if (tty->flow_change != TTY_UNTHROTTLE_SAFE)
 			ret = 1;
 		else {
@@ -719,16 +719,16 @@ static int get_sgflags(struct tty_struct *tty)
 {
 	int flags = 0;
 
-	if (!L_ICANON(tty)) {
-		if (L_ISIG(tty))
+	if (!(tty->termios.c_lflag & ICANON)) {
+		if (tty->termios.c_lflag & ISIG)
 			flags |= 0x02;		/* cbreak */
 		else
 			flags |= 0x20;		/* raw */
 	}
-	if (L_ECHO(tty))
+	if (tty->termios.c_lflag & ECHO)
 		flags |= 0x08;			/* echo */
-	if (O_OPOST(tty))
-		if (O_ONLCR(tty))
+	if (tty->termios.c_oflag & OPOST)
+		if (tty->termios.c_oflag & ONLCR)
 			flags |= 0x10;		/* crmod */
 	return flags;
 }
@@ -908,7 +908,7 @@ static int tty_change_softcar(struct tty_struct *tty, int arg)
 	tty->termios.c_cflag |= bit;
 	if (tty->ops->set_termios)
 		tty->ops->set_termios(tty, &old);
-	if (C_CLOCAL(tty) != bit)
+	if ((tty->termios.c_cflag & CLOCAL) != bit)
 		ret = -EINVAL;
 	up_write(&tty->termios_rwsem);
 	return ret;

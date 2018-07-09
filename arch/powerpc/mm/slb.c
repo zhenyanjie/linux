@@ -32,6 +32,7 @@ enum slb_index {
 };
 
 extern void slb_allocate_realmode(unsigned long ea);
+extern void slb_allocate_user(unsigned long ea);
 
 static void slb_allocate(unsigned long ea)
 {

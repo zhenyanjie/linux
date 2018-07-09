@@ -79,8 +79,7 @@ acpi_ns_convert_to_integer(union acpi_operand_object *original_object,
 		/* String-to-Integer conversion */
 
 		status = acpi_ut_strtoul64(original_object->string.pointer,
-					   ACPI_ANY_BASE,
-					   acpi_gbl_integer_byte_width, &value);
+					   ACPI_ANY_BASE, &value);
 		if (ACPI_FAILURE(status)) {
 			return (status);
 		}
@@ -318,7 +317,7 @@ acpi_ns_convert_to_buffer(union acpi_operand_object *original_object,
  ******************************************************************************/
 
 acpi_status
-acpi_ns_convert_to_unicode(struct acpi_namespace_node *scope,
+acpi_ns_convert_to_unicode(struct acpi_namespace_node * scope,
 			   union acpi_operand_object *original_object,
 			   union acpi_operand_object **return_object)
 {
@@ -385,7 +384,7 @@ acpi_ns_convert_to_unicode(struct acpi_namespace_node *scope,
  ******************************************************************************/
 
 acpi_status
-acpi_ns_convert_to_resource(struct acpi_namespace_node *scope,
+acpi_ns_convert_to_resource(struct acpi_namespace_node * scope,
 			    union acpi_operand_object *original_object,
 			    union acpi_operand_object **return_object)
 {
@@ -464,7 +463,7 @@ acpi_ns_convert_to_resource(struct acpi_namespace_node *scope,
  ******************************************************************************/
 
 acpi_status
-acpi_ns_convert_to_reference(struct acpi_namespace_node *scope,
+acpi_ns_convert_to_reference(struct acpi_namespace_node * scope,
 			     union acpi_operand_object *original_object,
 			     union acpi_operand_object **return_object)
 {

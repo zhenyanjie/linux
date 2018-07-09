@@ -683,38 +683,44 @@ static void ffs_epfile_async_io_complete(struct usb_ep *_ep,
 static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 {
 	struct ffs_epfile *epfile = file->private_data;
-	struct usb_request *req;
 	struct ffs_ep *ep;
 	char *data = NULL;
 	ssize_t ret, data_len = -EINVAL;
 	int halt;
 
 	/* Are we still active? */
-	if (WARN_ON(epfile->ffs->state != FFS_ACTIVE))
-		return -ENODEV;
+	if (WARN_ON(epfile->ffs->state != FFS_ACTIVE)) {
+		ret = -ENODEV;
+		goto error;
+	}
 
 	/* Wait for endpoint to be enabled */
 	ep = epfile->ep;
 	if (!ep) {
-		if (file->f_flags & O_NONBLOCK)
-			return -EAGAIN;
+		if (file->f_flags & O_NONBLOCK) {
+			ret = -EAGAIN;
+			goto error;
+		}
 
 		ret = wait_event_interruptible(epfile->wait, (ep = epfile->ep));
-		if (ret)
-			return -EINTR;
+		if (ret) {
+			ret = -EINTR;
+			goto error;
+		}
 	}
 
 	/* Do we halt? */
 	halt = (!io_data->read == !epfile->in);
-	if (halt && epfile->isoc)
-		return -EINVAL;
+	if (halt && epfile->isoc) {
+		ret = -EINVAL;
+		goto error;
+	}
 
 	/* Allocate & copy */
 	if (!halt) {
 		/*
 		 * if we _do_ wait above, the epfile->ffs->gadget might be NULL
-		 * before the waiting completes, so do not assign to 'gadget'
-		 * earlier
+		 * before the waiting completes, so do not assign to 'gadget' earlier
 		 */
 		struct usb_gadget *gadget = epfile->ffs->gadget;
 		size_t copied;
@@ -756,12 +762,17 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 	if (epfile->ep != ep) {
 		/* In the meantime, endpoint got disabled or changed. */
 		ret = -ESHUTDOWN;
+		spin_unlock_irq(&epfile->ffs->eps_lock);
 	} else if (halt) {
 		/* Halt */
 		if (likely(epfile->ep == ep) && !WARN_ON(!ep->ep))
 			usb_ep_set_halt(ep->ep);
+		spin_unlock_irq(&epfile->ffs->eps_lock);
 		ret = -EBADMSG;
-	} else if (unlikely(data_len == -EINVAL)) {
+	} else {
+		/* Fire the request */
+		struct usb_request *req;
+
 		/*
 		 * Sanity Check: even though data_len can't be used
 		 * uninitialized at the time I write this comment, some
@@ -773,80 +784,80 @@ static ssize_t ffs_epfile_io(struct file *file, struct ffs_io_data *io_data)
 		 * For such reason, we're adding this redundant sanity check
 		 * here.
 		 */
-		WARN(1, "%s: data_len == -EINVAL\n", __func__);
-		ret = -EINVAL;
-	} else if (!io_data->aio) {
-		DECLARE_COMPLETION_ONSTACK(done);
-		bool interrupted = false;
-
-		req = ep->req;
-		req->buf      = data;
-		req->length   = data_len;
-
-		req->context  = &done;
-		req->complete = ffs_epfile_io_complete;
-
-		ret = usb_ep_queue(ep->ep, req, GFP_ATOMIC);
-		if (unlikely(ret < 0))
-			goto error_lock;
-
-		spin_unlock_irq(&epfile->ffs->eps_lock);
-
-		if (unlikely(wait_for_completion_interruptible(&done))) {
-			/*
-			 * To avoid race condition with ffs_epfile_io_complete,
-			 * dequeue the request first then check
-			 * status. usb_ep_dequeue API should guarantee no race
-			 * condition with req->complete callback.
-			 */
-			usb_ep_dequeue(ep->ep, req);
-			interrupted = ep->status < 0;
-		}
-
-		/*
-		 * XXX We may end up silently droping data here.  Since data_len
-		 * (i.e. req->length) may be bigger than len (after being
-		 * rounded up to maxpacketsize), we may end up with more data
-		 * then user space has space for.
-		 */
-		ret = interrupted ? -EINTR : ep->status;
-		if (io_data->read && ret > 0) {
-			ret = copy_to_iter(data, ret, &io_data->data);
-			if (!ret)
-				ret = -EFAULT;
-		}
-		goto error_mutex;
-	} else if (!(req = usb_ep_alloc_request(ep->ep, GFP_KERNEL))) {
-		ret = -ENOMEM;
-	} else {
-		req->buf      = data;
-		req->length   = data_len;
-
-		io_data->buf = data;
-		io_data->ep = ep->ep;
-		io_data->req = req;
-		io_data->ffs = epfile->ffs;
-
-		req->context  = io_data;
-		req->complete = ffs_epfile_async_io_complete;
-
-		ret = usb_ep_queue(ep->ep, req, GFP_ATOMIC);
-		if (unlikely(ret)) {
-			usb_ep_free_request(ep->ep, req);
+		if (unlikely(data_len == -EINVAL)) {
+			WARN(1, "%s: data_len == -EINVAL\n", __func__);
+			ret = -EINVAL;
 			goto error_lock;
 		}
 
-		ret = -EIOCBQUEUED;
-		/*
-		 * Do not kfree the buffer in this function.  It will be freed
-		 * by ffs_user_copy_worker.
-		 */
-		data = NULL;
+		if (io_data->aio) {
+			req = usb_ep_alloc_request(ep->ep, GFP_KERNEL);
+			if (unlikely(!req))
+				goto error_lock;
+
+			req->buf      = data;
+			req->length   = data_len;
+
+			io_data->buf = data;
+			io_data->ep = ep->ep;
+			io_data->req = req;
+			io_data->ffs = epfile->ffs;
+
+			req->context  = io_data;
+			req->complete = ffs_epfile_async_io_complete;
+
+			ret = usb_ep_queue(ep->ep, req, GFP_ATOMIC);
+			if (unlikely(ret)) {
+				usb_ep_free_request(ep->ep, req);
+				goto error_lock;
+			}
+			ret = -EIOCBQUEUED;
+
+			spin_unlock_irq(&epfile->ffs->eps_lock);
+		} else {
+			DECLARE_COMPLETION_ONSTACK(done);
+
+			req = ep->req;
+			req->buf      = data;
+			req->length   = data_len;
+
+			req->context  = &done;
+			req->complete = ffs_epfile_io_complete;
+
+			ret = usb_ep_queue(ep->ep, req, GFP_ATOMIC);
+
+			spin_unlock_irq(&epfile->ffs->eps_lock);
+
+			if (unlikely(ret < 0)) {
+				/* nop */
+			} else if (unlikely(
+				   wait_for_completion_interruptible(&done))) {
+				ret = -EINTR;
+				usb_ep_dequeue(ep->ep, req);
+			} else {
+				/*
+				 * XXX We may end up silently droping data
+				 * here.  Since data_len (i.e. req->length) may
+				 * be bigger than len (after being rounded up
+				 * to maxpacketsize), we may end up with more
+				 * data then user space has space for.
+				 */
+				ret = ep->status;
+				if (io_data->read && ret > 0) {
+					ret = copy_to_iter(data, ret, &io_data->data);
+					if (!ret)
+						ret = -EFAULT;
+				}
+			}
+			kfree(data);
+		}
 	}
+
+	mutex_unlock(&epfile->mutex);
+	return ret;
 
 error_lock:
 	spin_unlock_irq(&epfile->ffs->eps_lock);
-error_mutex:
 	mutex_unlock(&epfile->mutex);
 error:
 	kfree(data);
@@ -1146,8 +1157,8 @@ static int ffs_sb_fill(struct super_block *sb, void *_data, int silent)
 	ffs->sb              = sb;
 	data->ffs_data       = NULL;
 	sb->s_fs_info        = ffs;
-	sb->s_blocksize      = PAGE_SIZE;
-	sb->s_blocksize_bits = PAGE_SHIFT;
+	sb->s_blocksize      = PAGE_CACHE_SIZE;
+	sb->s_blocksize_bits = PAGE_CACHE_SHIFT;
 	sb->s_magic          = FUNCTIONFS_MAGIC;
 	sb->s_op             = &ffs_sb_operations;
 	sb->s_time_gran      = 1;
@@ -2051,7 +2062,7 @@ static int __ffs_data_do_os_desc(enum ffs_os_desc_type type,
 
 		if (len < sizeof(*d) ||
 		    d->bFirstInterfaceNumber >= ffs->interfaces_count ||
-		    !d->Reserved1)
+		    d->Reserved1)
 			return -EINVAL;
 		for (i = 0; i < ARRAY_SIZE(d->Reserved2); ++i)
 			if (d->Reserved2[i])
@@ -2729,7 +2740,6 @@ static int _ffs_func_bind(struct usb_configuration *c,
 		func->ffs->ss_descs_count;
 
 	int fs_len, hs_len, ss_len, ret, i;
-	struct ffs_ep *eps_ptr;
 
 	/* Make it a single chunk, less management later on */
 	vla_group(d);
@@ -2778,9 +2788,12 @@ static int _ffs_func_bind(struct usb_configuration *c,
 	       ffs->raw_descs_length);
 
 	memset(vla_ptr(vlabuf, d, inums), 0xff, d_inums__sz);
-	eps_ptr = vla_ptr(vlabuf, d, eps);
-	for (i = 0; i < ffs->eps_count; i++)
-		eps_ptr[i].num = -1;
+	for (ret = ffs->eps_count; ret; --ret) {
+		struct ffs_ep *ptr;
+
+		ptr = vla_ptr(vlabuf, d, eps);
+		ptr[ret].num = -1;
+	}
 
 	/* Save pointers
 	 * d_eps == vlabuf, func->eps used to kfree vlabuf later
@@ -2849,7 +2862,7 @@ static int _ffs_func_bind(struct usb_configuration *c,
 		goto error;
 
 	func->function.os_desc_table = vla_ptr(vlabuf, d, os_desc_table);
-	if (c->cdev->use_os_string) {
+	if (c->cdev->use_os_string)
 		for (i = 0; i < ffs->interfaces_count; ++i) {
 			struct usb_os_desc *desc;
 
@@ -2860,15 +2873,13 @@ static int _ffs_func_bind(struct usb_configuration *c,
 				vla_ptr(vlabuf, d, ext_compat) + i * 16;
 			INIT_LIST_HEAD(&desc->ext_prop);
 		}
-		ret = ffs_do_os_descs(ffs->ms_os_descs_count,
-				      vla_ptr(vlabuf, d, raw_descs) +
-				      fs_len + hs_len + ss_len,
-				      d_raw_descs__sz - fs_len - hs_len -
-				      ss_len,
-				      __ffs_func_bind_do_os_desc, func);
-		if (unlikely(ret < 0))
-			goto error;
-	}
+	ret = ffs_do_os_descs(ffs->ms_os_descs_count,
+			      vla_ptr(vlabuf, d, raw_descs) +
+			      fs_len + hs_len + ss_len,
+			      d_raw_descs__sz - fs_len - hs_len - ss_len,
+			      __ffs_func_bind_do_os_desc, func);
+	if (unlikely(ret < 0))
+		goto error;
 	func->function.os_desc_n =
 		c->cdev->use_os_string ? ffs->interfaces_count : 0;
 

@@ -1,5 +1,5 @@
 /*
- *    Copyright (c) 2007 Benjamin Herrenschmidt, IBM Corporation
+ *    Copyright (c) 2007 Benjamin Herrenschmidt, IBM Coproration
  *    Extracted from signal_32.c and signal_64.c
  *
  * This file is subject to the terms and conditions of the GNU General

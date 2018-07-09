@@ -23,7 +23,6 @@
 #include <linux/kernel.h>
 #include <linux/slab.h>
 #include <linux/mm.h>
-#include <linux/backing-dev.h>
 
 #include "ext4_jbd2.h"
 #include "xattr.h"
@@ -129,12 +128,25 @@ static void ext4_release_io_end(ext4_io_end_t *io_end)
 	BUG_ON(io_end->flag & EXT4_IO_END_UNWRITTEN);
 	WARN_ON(io_end->handle);
 
+	if (atomic_dec_and_test(&EXT4_I(io_end->inode)->i_ioend_count))
+		wake_up_all(ext4_ioend_wq(io_end->inode));
+
 	for (bio = io_end->bio; bio; bio = next_bio) {
 		next_bio = bio->bi_private;
 		ext4_finish_bio(bio);
 		bio_put(bio);
 	}
 	kmem_cache_free(io_end_cachep, io_end);
+}
+
+static void ext4_clear_io_unwritten_flag(ext4_io_end_t *io_end)
+{
+	struct inode *inode = io_end->inode;
+
+	io_end->flag &= ~EXT4_IO_END_UNWRITTEN;
+	/* Wake up anyone waiting on unwritten extent conversion */
+	if (atomic_dec_and_test(&EXT4_I(inode)->i_unwritten))
+		wake_up_all(ext4_ioend_wq(inode));
 }
 
 /*
@@ -253,6 +265,7 @@ ext4_io_end_t *ext4_init_io_end(struct inode *inode, gfp_t flags)
 {
 	ext4_io_end_t *io = kmem_cache_zalloc(io_end_cachep, flags);
 	if (io) {
+		atomic_inc(&EXT4_I(inode)->i_ioend_count);
 		io->inode = inode;
 		INIT_LIST_HEAD(&io->list);
 		atomic_set(&io->count, 1);
@@ -342,7 +355,9 @@ void ext4_io_submit(struct ext4_io_submit *io)
 	if (bio) {
 		int io_op = io->io_wbc->sync_mode == WB_SYNC_ALL ?
 			    WRITE_SYNC : WRITE;
+		bio_get(io->io_bio);
 		submit_bio(io_op, io->io_bio);
+		bio_put(io->io_bio);
 	}
 	io->io_bio = NULL;
 }
@@ -431,8 +446,8 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 	 * the page size, the remaining memory is zeroed when mapped, and
 	 * writes to that region are not written out to the file."
 	 */
-	if (len < PAGE_SIZE)
-		zero_user_segment(page, len, PAGE_SIZE);
+	if (len < PAGE_CACHE_SIZE)
+		zero_user_segment(page, len, PAGE_CACHE_SIZE);
 	/*
 	 * In the first loop we prepare and mark buffers to submit. We have to
 	 * mark all buffers in the page before submitting so that
@@ -469,20 +484,9 @@ int ext4_bio_write_page(struct ext4_io_submit *io,
 
 	if (ext4_encrypted_inode(inode) && S_ISREG(inode->i_mode) &&
 	    nr_to_submit) {
-		gfp_t gfp_flags = GFP_NOFS;
-
-	retry_encrypt:
-		data_page = ext4_encrypt(inode, page, gfp_flags);
+		data_page = ext4_encrypt(inode, page);
 		if (IS_ERR(data_page)) {
 			ret = PTR_ERR(data_page);
-			if (ret == -ENOMEM && wbc->sync_mode == WB_SYNC_ALL) {
-				if (io->io_bio) {
-					ext4_io_submit(io);
-					congestion_wait(BLK_RW_ASYNC, HZ/50);
-				}
-				gfp_flags |= __GFP_NOFAIL;
-				goto retry_encrypt;
-			}
 			data_page = NULL;
 			goto out;
 		}

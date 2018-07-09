@@ -49,15 +49,6 @@ vc4_atomic_complete_commit(struct vc4_commit *c)
 
 	drm_atomic_helper_commit_modeset_enables(dev, state);
 
-	/* Make sure that drm_atomic_helper_wait_for_vblanks()
-	 * actually waits for vblank.  If we're doing a full atomic
-	 * modeset (as opposed to a vc4_update_plane() short circuit),
-	 * then we need to wait for scanout to be done with our
-	 * display lists before we free it and potentially reallocate
-	 * and overwrite the dlist memory with a new modeset.
-	 */
-	state->legacy_cursor_update = false;
-
 	drm_atomic_helper_wait_for_vblanks(dev, state);
 
 	drm_atomic_helper_cleanup_planes(dev, state);
@@ -93,7 +84,7 @@ static struct vc4_commit *commit_init(struct drm_atomic_state *state)
  * vc4_atomic_commit - commit validated state object
  * @dev: DRM device
  * @state: the driver state object
- * @nonblock: nonblocking commit
+ * @async: asynchronous commit
  *
  * This function commits a with drm_atomic_helper_check() pre-validated state
  * object. This can still fail when e.g. the framebuffer reservation fails. For
@@ -104,7 +95,7 @@ static struct vc4_commit *commit_init(struct drm_atomic_state *state)
  */
 static int vc4_atomic_commit(struct drm_device *dev,
 			     struct drm_atomic_state *state,
-			     bool nonblock)
+			     bool async)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(dev);
 	int ret;
@@ -117,18 +108,10 @@ static int vc4_atomic_commit(struct drm_device *dev,
 		return -ENOMEM;
 
 	/* Make sure that any outstanding modesets have finished. */
-	if (nonblock) {
-		ret = down_trylock(&vc4->async_modeset);
-		if (ret) {
-			kfree(c);
-			return -EBUSY;
-		}
-	} else {
-		ret = down_interruptible(&vc4->async_modeset);
-		if (ret) {
-			kfree(c);
-			return ret;
-		}
+	ret = down_interruptible(&vc4->async_modeset);
+	if (ret) {
+		kfree(c);
+		return ret;
 	}
 
 	ret = drm_atomic_helper_prepare_planes(dev, state);
@@ -178,7 +161,7 @@ static int vc4_atomic_commit(struct drm_device *dev,
 	 * current layout.
 	 */
 
-	if (nonblock) {
+	if (async) {
 		vc4_queue_seqno_cb(dev, &c->cb, wait_seqno,
 				   vc4_atomic_complete_commit_seqno_cb);
 	} else {
@@ -214,6 +197,8 @@ int vc4_kms_load(struct drm_device *dev)
 	dev->mode_config.funcs = &vc4_mode_funcs;
 	dev->mode_config.preferred_depth = 24;
 	dev->mode_config.async_page_flip = true;
+
+	dev->vblank_disable_allowed = true;
 
 	drm_mode_config_reset(dev);
 

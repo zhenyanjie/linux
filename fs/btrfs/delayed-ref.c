@@ -929,10 +929,14 @@ btrfs_find_delayed_ref_head(struct btrfs_trans_handle *trans, u64 bytenr)
 
 void btrfs_delayed_ref_exit(void)
 {
-	kmem_cache_destroy(btrfs_delayed_ref_head_cachep);
-	kmem_cache_destroy(btrfs_delayed_tree_ref_cachep);
-	kmem_cache_destroy(btrfs_delayed_data_ref_cachep);
-	kmem_cache_destroy(btrfs_delayed_extent_op_cachep);
+	if (btrfs_delayed_ref_head_cachep)
+		kmem_cache_destroy(btrfs_delayed_ref_head_cachep);
+	if (btrfs_delayed_tree_ref_cachep)
+		kmem_cache_destroy(btrfs_delayed_tree_ref_cachep);
+	if (btrfs_delayed_data_ref_cachep)
+		kmem_cache_destroy(btrfs_delayed_data_ref_cachep);
+	if (btrfs_delayed_extent_op_cachep)
+		kmem_cache_destroy(btrfs_delayed_extent_op_cachep);
 }
 
 int btrfs_delayed_ref_init(void)

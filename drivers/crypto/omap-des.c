@@ -29,6 +29,7 @@
 #include <linux/scatterlist.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmaengine.h>
+#include <linux/omap-dma.h>
 #include <linux/pm_runtime.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
@@ -38,7 +39,6 @@
 #include <linux/interrupt.h>
 #include <crypto/scatterwalk.h>
 #include <crypto/des.h>
-#include <crypto/algapi.h>
 
 #define DST_MAXBURST			2
 
@@ -132,10 +132,14 @@ struct omap_des_dev {
 	unsigned long		flags;
 	int			err;
 
+	/* spinlock used for queues */
+	spinlock_t		lock;
+	struct crypto_queue	queue;
+
 	struct tasklet_struct	done_task;
+	struct tasklet_struct	queue_task;
 
 	struct ablkcipher_request	*req;
-	struct crypto_engine		*engine;
 	/*
 	 * total is used by PIO mode for book keeping so introduce
 	 * variable total_save as need it to calc page_order
@@ -154,7 +158,9 @@ struct omap_des_dev {
 
 	struct scatter_walk		in_walk;
 	struct scatter_walk		out_walk;
+	int			dma_in;
 	struct dma_chan		*dma_lch_in;
+	int			dma_out;
 	struct dma_chan		*dma_lch_out;
 	int			in_sg_len;
 	int			out_sg_len;
@@ -334,21 +340,30 @@ static void omap_des_dma_out_callback(void *data)
 
 static int omap_des_dma_init(struct omap_des_dev *dd)
 {
-	int err;
+	int err = -ENOMEM;
+	dma_cap_mask_t mask;
 
 	dd->dma_lch_out = NULL;
 	dd->dma_lch_in = NULL;
 
-	dd->dma_lch_in = dma_request_chan(dd->dev, "rx");
-	if (IS_ERR(dd->dma_lch_in)) {
+	dma_cap_zero(mask);
+	dma_cap_set(DMA_SLAVE, mask);
+
+	dd->dma_lch_in = dma_request_slave_channel_compat(mask,
+							  omap_dma_filter_fn,
+							  &dd->dma_in,
+							  dd->dev, "rx");
+	if (!dd->dma_lch_in) {
 		dev_err(dd->dev, "Unable to request in DMA channel\n");
-		return PTR_ERR(dd->dma_lch_in);
+		goto err_dma_in;
 	}
 
-	dd->dma_lch_out = dma_request_chan(dd->dev, "tx");
-	if (IS_ERR(dd->dma_lch_out)) {
+	dd->dma_lch_out = dma_request_slave_channel_compat(mask,
+							   omap_dma_filter_fn,
+							   &dd->dma_out,
+							   dd->dev, "tx");
+	if (!dd->dma_lch_out) {
 		dev_err(dd->dev, "Unable to request out DMA channel\n");
-		err = PTR_ERR(dd->dma_lch_out);
 		goto err_dma_out;
 	}
 
@@ -356,15 +371,14 @@ static int omap_des_dma_init(struct omap_des_dev *dd)
 
 err_dma_out:
 	dma_release_channel(dd->dma_lch_in);
-
+err_dma_in:
+	if (err)
+		pr_err("error: %d\n", err);
 	return err;
 }
 
 static void omap_des_dma_cleanup(struct omap_des_dev *dd)
 {
-	if (dd->pio_only)
-		return;
-
 	dma_release_channel(dd->dma_lch_out);
 	dma_release_channel(dd->dma_lch_in);
 }
@@ -506,7 +520,9 @@ static void omap_des_finish_req(struct omap_des_dev *dd, int err)
 	pr_debug("err: %d\n", err);
 
 	pm_runtime_put(dd->dev);
-	crypto_finalize_request(dd->engine, req, err);
+	dd->flags &= ~FLAGS_BUSY;
+
+	req->base.complete(&req->base, err);
 }
 
 static int omap_des_crypt_dma_stop(struct omap_des_dev *dd)
@@ -569,24 +585,34 @@ static int omap_des_copy_sgs(struct omap_des_dev *dd)
 }
 
 static int omap_des_handle_queue(struct omap_des_dev *dd,
-				 struct ablkcipher_request *req)
+			       struct ablkcipher_request *req)
 {
-	if (req)
-		return crypto_transfer_request_to_engine(dd->engine, req);
-
-	return 0;
-}
-
-static int omap_des_prepare_req(struct crypto_engine *engine,
-				struct ablkcipher_request *req)
-{
-	struct omap_des_ctx *ctx = crypto_ablkcipher_ctx(
-			crypto_ablkcipher_reqtfm(req));
-	struct omap_des_dev *dd = omap_des_find_dev(ctx);
+	struct crypto_async_request *async_req, *backlog;
+	struct omap_des_ctx *ctx;
 	struct omap_des_reqctx *rctx;
+	unsigned long flags;
+	int err, ret = 0;
 
-	if (!dd)
-		return -ENODEV;
+	spin_lock_irqsave(&dd->lock, flags);
+	if (req)
+		ret = ablkcipher_enqueue_request(&dd->queue, req);
+	if (dd->flags & FLAGS_BUSY) {
+		spin_unlock_irqrestore(&dd->lock, flags);
+		return ret;
+	}
+	backlog = crypto_get_backlog(&dd->queue);
+	async_req = crypto_dequeue_request(&dd->queue);
+	if (async_req)
+		dd->flags |= FLAGS_BUSY;
+	spin_unlock_irqrestore(&dd->lock, flags);
+
+	if (!async_req)
+		return ret;
+
+	if (backlog)
+		backlog->complete(backlog, -EINPROGRESS);
+
+	req = ablkcipher_request_cast(async_req);
 
 	/* assign new request to device */
 	dd->req = req;
@@ -616,20 +642,16 @@ static int omap_des_prepare_req(struct crypto_engine *engine,
 	dd->ctx = ctx;
 	ctx->dd = dd;
 
-	return omap_des_write_ctrl(dd);
-}
+	err = omap_des_write_ctrl(dd);
+	if (!err)
+		err = omap_des_crypt_dma_start(dd);
+	if (err) {
+		/* des_task will not finish it, so do it here */
+		omap_des_finish_req(dd, err);
+		tasklet_schedule(&dd->queue_task);
+	}
 
-static int omap_des_crypt_req(struct crypto_engine *engine,
-			      struct ablkcipher_request *req)
-{
-	struct omap_des_ctx *ctx = crypto_ablkcipher_ctx(
-			crypto_ablkcipher_reqtfm(req));
-	struct omap_des_dev *dd = omap_des_find_dev(ctx);
-
-	if (!dd)
-		return -ENODEV;
-
-	return omap_des_crypt_dma_start(dd);
+	return ret; /* return ret, which is enqueue return value */
 }
 
 static void omap_des_done_task(unsigned long data)
@@ -661,8 +683,16 @@ static void omap_des_done_task(unsigned long data)
 	}
 
 	omap_des_finish_req(dd, 0);
+	omap_des_handle_queue(dd, NULL);
 
 	pr_debug("exit\n");
+}
+
+static void omap_des_queue_task(unsigned long data)
+{
+	struct omap_des_dev *dd = (struct omap_des_dev *)data;
+
+	omap_des_handle_queue(dd, NULL);
 }
 
 static int omap_des_crypt(struct ablkcipher_request *req, unsigned long mode)
@@ -969,6 +999,8 @@ static int omap_des_get_of(struct omap_des_dev *dd,
 		return -EINVAL;
 	}
 
+	dd->dma_out = -1; /* Dummy value that's unused */
+	dd->dma_in = -1; /* Dummy value that's unused */
 	dd->pdata = match->data;
 
 	return 0;
@@ -984,10 +1016,33 @@ static int omap_des_get_of(struct omap_des_dev *dd,
 static int omap_des_get_pdev(struct omap_des_dev *dd,
 		struct platform_device *pdev)
 {
+	struct device *dev = &pdev->dev;
+	struct resource *r;
+	int err = 0;
+
+	/* Get the DMA out channel */
+	r = platform_get_resource(pdev, IORESOURCE_DMA, 0);
+	if (!r) {
+		dev_err(dev, "no DMA out resource info\n");
+		err = -ENODEV;
+		goto err;
+	}
+	dd->dma_out = r->start;
+
+	/* Get the DMA in channel */
+	r = platform_get_resource(pdev, IORESOURCE_DMA, 1);
+	if (!r) {
+		dev_err(dev, "no DMA in resource info\n");
+		err = -ENODEV;
+		goto err;
+	}
+	dd->dma_in = r->start;
+
 	/* non-DT devices get pdata from pdev */
 	dd->pdata = pdev->dev.platform_data;
 
-	return 0;
+err:
+	return err;
 }
 
 static int omap_des_probe(struct platform_device *pdev)
@@ -1006,6 +1061,9 @@ static int omap_des_probe(struct platform_device *pdev)
 	}
 	dd->dev = dev;
 	platform_set_drvdata(pdev, dd);
+
+	spin_lock_init(&dd->lock);
+	crypto_init_queue(&dd->queue, OMAP_DES_QUEUE_LENGTH);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	if (!res) {
@@ -1045,11 +1103,10 @@ static int omap_des_probe(struct platform_device *pdev)
 		 (reg & dd->pdata->minor_mask) >> dd->pdata->minor_shift);
 
 	tasklet_init(&dd->done_task, omap_des_done_task, (unsigned long)dd);
+	tasklet_init(&dd->queue_task, omap_des_queue_task, (unsigned long)dd);
 
 	err = omap_des_dma_init(dd);
-	if (err == -EPROBE_DEFER) {
-		goto err_irq;
-	} else if (err && DES_REG_IRQ_STATUS(dd) && DES_REG_IRQ_ENABLE(dd)) {
+	if (err && DES_REG_IRQ_STATUS(dd) && DES_REG_IRQ_ENABLE(dd)) {
 		dd->pio_only = 1;
 
 		irq = platform_get_irq(pdev, 0);
@@ -1087,30 +1144,17 @@ static int omap_des_probe(struct platform_device *pdev)
 		}
 	}
 
-	/* Initialize des crypto engine */
-	dd->engine = crypto_engine_alloc_init(dev, 1);
-	if (!dd->engine)
-		goto err_algs;
-
-	dd->engine->prepare_request = omap_des_prepare_req;
-	dd->engine->crypt_one_request = omap_des_crypt_req;
-	err = crypto_engine_start(dd->engine);
-	if (err)
-		goto err_engine;
-
 	return 0;
-
-err_engine:
-	crypto_engine_exit(dd->engine);
 err_algs:
 	for (i = dd->pdata->algs_info_size - 1; i >= 0; i--)
 		for (j = dd->pdata->algs_info[i].registered - 1; j >= 0; j--)
 			crypto_unregister_alg(
 					&dd->pdata->algs_info[i].algs_list[j]);
-
-	omap_des_dma_cleanup(dd);
+	if (!dd->pio_only)
+		omap_des_dma_cleanup(dd);
 err_irq:
 	tasklet_kill(&dd->done_task);
+	tasklet_kill(&dd->queue_task);
 err_get:
 	pm_runtime_disable(dev);
 err_res:
@@ -1138,6 +1182,7 @@ static int omap_des_remove(struct platform_device *pdev)
 					&dd->pdata->algs_info[i].algs_list[j]);
 
 	tasklet_kill(&dd->done_task);
+	tasklet_kill(&dd->queue_task);
 	omap_des_dma_cleanup(dd);
 	pm_runtime_disable(dd->dev);
 	dd = NULL;

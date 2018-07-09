@@ -1,6 +1,13 @@
 <section id="selection-api">
 
-  <title>API for cropping, composing and scaling</title>
+  <title>Experimental API for cropping, composing and scaling</title>
+
+      <note>
+	<title>Experimental</title>
+
+	<para>This is an <link linkend="experimental">experimental</link>
+interface and may change in the future.</para>
+      </note>
 
   <section>
     <title>Introduction</title>

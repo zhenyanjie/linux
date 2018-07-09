@@ -37,7 +37,6 @@
 #include <asm/cacheflush.h>
 #endif /* CONFIG_HPWDT_NMI_DECODING */
 #include <asm/nmi.h>
-#include <asm/frame.h>
 
 #define HPWDT_VERSION			"1.3.3"
 #define SECS_TO_TICKS(secs)		((secs) * 1000 / 128)
@@ -354,10 +353,10 @@ static int detect_cru_service(void)
 
 asm(".text                      \n\t"
     ".align 4                   \n\t"
-    ".globl asminline_call	\n\t"
-    ".type asminline_call, @function \n\t"
+    ".globl asminline_call	\n"
     "asminline_call:            \n\t"
-    FRAME_BEGIN
+    "pushq      %rbp            \n\t"
+    "movq       %rsp, %rbp      \n\t"
     "pushq      %rax            \n\t"
     "pushq      %rbx            \n\t"
     "pushq      %rdx            \n\t"
@@ -387,7 +386,7 @@ asm(".text                      \n\t"
     "popq       %rdx            \n\t"
     "popq       %rbx            \n\t"
     "popq       %rax            \n\t"
-    FRAME_END
+    "leave                      \n\t"
     "ret                        \n\t"
     ".previous");
 
@@ -484,7 +483,7 @@ static int hpwdt_pretimeout(unsigned int ulReason, struct pt_regs *regs)
 	static int die_nmi_called;
 
 	if (!hpwdt_nmi_decoding)
-		return NMI_DONE;
+		goto out;
 
 	spin_lock_irqsave(&rom_lock, rom_pl);
 	if (!die_nmi_called && !is_icru && !is_uefi)
@@ -497,11 +496,11 @@ static int hpwdt_pretimeout(unsigned int ulReason, struct pt_regs *regs)
 
 	if (!is_icru && !is_uefi) {
 		if (cmn_regs.u1.ral == 0) {
-			nmi_panic(regs, "An NMI occurred, but unable to determine source.\n");
-			return NMI_HANDLED;
+			panic("An NMI occurred, "
+				"but unable to determine source.\n");
 		}
 	}
-	nmi_panic(regs, "An NMI occurred. Depending on your system the reason "
+	panic("An NMI occurred. Depending on your system the reason "
 		"for the NMI is logged in any one of the following "
 		"resources:\n"
 		"1. Integrated Management Log (IML)\n"
@@ -509,7 +508,8 @@ static int hpwdt_pretimeout(unsigned int ulReason, struct pt_regs *regs)
 		"3. OA Forward Progress Log\n"
 		"4. iLO Event Log");
 
-	return NMI_HANDLED;
+out:
+	return NMI_DONE;
 }
 #endif /* CONFIG_HPWDT_NMI_DECODING */
 

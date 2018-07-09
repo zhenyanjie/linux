@@ -84,33 +84,11 @@
 
 /* new oob placement block for use with hardware ecc generation
  */
-static int s3c2410_ooblayout_ecc(struct mtd_info *mtd, int section,
-				 struct mtd_oob_region *oobregion)
-{
-	if (section)
-		return -ERANGE;
 
-	oobregion->offset = 0;
-	oobregion->length = 3;
-
-	return 0;
-}
-
-static int s3c2410_ooblayout_free(struct mtd_info *mtd, int section,
-				  struct mtd_oob_region *oobregion)
-{
-	if (section)
-		return -ERANGE;
-
-	oobregion->offset = 8;
-	oobregion->length = 8;
-
-	return 0;
-}
-
-static const struct mtd_ooblayout_ops s3c2410_ooblayout_ops = {
-	.ecc = s3c2410_ooblayout_ecc,
-	.free = s3c2410_ooblayout_free,
+static struct nand_ecclayout nand_hw_eccoob = {
+	.eccbytes = 3,
+	.eccpos = {0, 1, 2},
+	.oobfree = {{8, 8}}
 };
 
 /* controller and mtd information */
@@ -564,8 +542,7 @@ static int s3c2410_nand_correct_data(struct mtd_info *mtd, u_char *dat,
 	diff0 |= (diff1 << 8);
 	diff0 |= (diff2 << 16);
 
-	/* equal to "(diff0 & ~(1 << __ffs(diff0)))" */
-	if ((diff0 & (diff0 - 1)) == 0)
+	if ((diff0 & ~(1<<fls(diff0))) == 0)
 		return 1;
 
 	return -1;
@@ -882,8 +859,10 @@ static void s3c2410_nand_init_chip(struct s3c2410_nand_info *info,
 	}
 #else
 	chip->ecc.mode	    = NAND_ECC_SOFT;
-	chip->ecc.algo	= NAND_ECC_HAMMING;
 #endif
+
+	if (set->ecc_layout != NULL)
+		chip->ecc.layout = set->ecc_layout;
 
 	if (set->disable_ecc)
 		chip->ecc.mode	= NAND_ECC_NONE;
@@ -943,7 +922,7 @@ static void s3c2410_nand_update_chip(struct s3c2410_nand_info *info,
 	} else {
 		chip->ecc.size	    = 512;
 		chip->ecc.bytes	    = 3;
-		mtd_set_ooblayout(nand_to_mtd(chip), &s3c2410_ooblayout_ops);
+		chip->ecc.layout    = &nand_hw_eccoob;
 	}
 }
 

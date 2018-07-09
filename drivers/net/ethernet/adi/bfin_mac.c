@@ -1430,7 +1430,7 @@ static void bfin_mac_timeout(struct net_device *dev)
 	bfin_mac_enable(lp->phydev);
 
 	/* We can accept TX packets again */
-	netif_trans_update(dev); /* prevent tx timeout */
+	dev->trans_start = jiffies; /* prevent tx timeout */
 }
 
 static void bfin_mac_multicast_hash(struct net_device *dev)

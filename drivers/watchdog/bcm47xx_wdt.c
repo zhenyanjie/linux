@@ -87,8 +87,7 @@ static int bcm47xx_wdt_hard_set_timeout(struct watchdog_device *wdd,
 	return 0;
 }
 
-static int bcm47xx_wdt_restart(struct watchdog_device *wdd,
-			       unsigned long action, void *data)
+static int bcm47xx_wdt_restart(struct watchdog_device *wdd)
 {
 	struct bcm47xx_wdt *wdt = bcm47xx_wdt_get(wdd);
 

@@ -27,6 +27,7 @@
 
 #include <linux/slab.h>
 #include <linux/bitops.h>
+#include <linux/freezer.h>
 #include <linux/hash.h>
 #include <linux/kthread.h>
 #include <linux/prefetch.h>
@@ -1786,6 +1787,7 @@ again:
 
 		mutex_unlock(&c->bucket_lock);
 
+		try_to_freeze();
 		schedule();
 	}
 

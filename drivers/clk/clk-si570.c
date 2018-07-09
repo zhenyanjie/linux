@@ -418,7 +418,7 @@ static int si570_probe(struct i2c_client *client,
 		return -ENOMEM;
 
 	init.ops = &si570_clk_ops;
-	init.flags = 0;
+	init.flags = CLK_IS_ROOT;
 	init.num_parents = 0;
 	data->hw.init = &init;
 	data->i2c_client = client;

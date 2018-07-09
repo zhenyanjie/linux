@@ -47,7 +47,11 @@
 #include "smi.h"
 #include "opa_smi.h"
 #include "agent.h"
-#include "core_priv.h"
+
+MODULE_LICENSE("Dual BSD/GPL");
+MODULE_DESCRIPTION("kernel IB MAD API");
+MODULE_AUTHOR("Hal Rosenstock");
+MODULE_AUTHOR("Sean Hefty");
 
 static int mad_sendq_size = IB_MAD_QP_SEND_SIZE;
 static int mad_recvq_size = IB_MAD_QP_RECV_SIZE;
@@ -1638,9 +1642,9 @@ static void remove_mad_reg_req(struct ib_mad_agent_private *agent_priv)
 		/* Now, check to see if there are any methods still in use */
 		if (!check_method_table(method)) {
 			/* If not, release management method table */
-			kfree(method);
-			class->method_table[mgmt_class] = NULL;
-			/* Any management classes left ? */
+			 kfree(method);
+			 class->method_table[mgmt_class] = NULL;
+			 /* Any management classes left ? */
 			if (!check_class_table(class)) {
 				/* If not, release management class table */
 				kfree(class);
@@ -3312,7 +3316,7 @@ static struct ib_client mad_client = {
 	.remove = ib_mad_remove_device
 };
 
-int ib_mad_init(void)
+static int __init ib_mad_init_module(void)
 {
 	mad_recvq_size = min(mad_recvq_size, IB_MAD_QP_MAX_SIZE);
 	mad_recvq_size = max(mad_recvq_size, IB_MAD_QP_MIN_SIZE);
@@ -3330,7 +3334,10 @@ int ib_mad_init(void)
 	return 0;
 }
 
-void ib_mad_cleanup(void)
+static void __exit ib_mad_cleanup_module(void)
 {
 	ib_unregister_client(&mad_client);
 }
+
+module_init(ib_mad_init_module);
+module_exit(ib_mad_cleanup_module);

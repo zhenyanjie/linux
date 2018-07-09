@@ -79,13 +79,7 @@ static void async_pf_execute(struct work_struct *work)
 
 	might_sleep();
 
-	/*
-	 * This work is run asynchromously to the task which owns
-	 * mm and might be done in another context, so we must
-	 * use FOLL_REMOTE.
-	 */
-	__get_user_pages_unlocked(NULL, mm, addr, 1, 1, 0, NULL, FOLL_REMOTE);
-
+	get_user_pages_unlocked(NULL, mm, addr, 1, 1, 0, NULL);
 	kvm_async_page_present_sync(vcpu, apf);
 
 	spin_lock(&vcpu->async_pf.lock);
@@ -103,8 +97,8 @@ static void async_pf_execute(struct work_struct *work)
 	 * This memory barrier pairs with prepare_to_wait's set_current_state()
 	 */
 	smp_mb();
-	if (swait_active(&vcpu->wq))
-		swake_up(&vcpu->wq);
+	if (waitqueue_active(&vcpu->wq))
+		wake_up_interruptible(&vcpu->wq);
 
 	mmput(mm);
 	kvm_put_kvm(vcpu->kvm);
@@ -115,8 +109,8 @@ void kvm_clear_async_pf_completion_queue(struct kvm_vcpu *vcpu)
 	/* cancel outstanding work queue item */
 	while (!list_empty(&vcpu->async_pf.queue)) {
 		struct kvm_async_pf *work =
-			list_first_entry(&vcpu->async_pf.queue,
-					 typeof(*work), queue);
+			list_entry(vcpu->async_pf.queue.next,
+				   typeof(*work), queue);
 		list_del(&work->queue);
 
 #ifdef CONFIG_KVM_ASYNC_PF_SYNC
@@ -133,8 +127,8 @@ void kvm_clear_async_pf_completion_queue(struct kvm_vcpu *vcpu)
 	spin_lock(&vcpu->async_pf.lock);
 	while (!list_empty(&vcpu->async_pf.done)) {
 		struct kvm_async_pf *work =
-			list_first_entry(&vcpu->async_pf.done,
-					 typeof(*work), link);
+			list_entry(vcpu->async_pf.done.next,
+				   typeof(*work), link);
 		list_del(&work->link);
 		kmem_cache_free(async_pf_cache, work);
 	}

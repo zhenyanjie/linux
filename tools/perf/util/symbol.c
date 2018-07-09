@@ -255,6 +255,40 @@ void symbol__delete(struct symbol *sym)
 	free(((void *)sym) - symbol_conf.priv_size);
 }
 
+size_t symbol__fprintf(struct symbol *sym, FILE *fp)
+{
+	return fprintf(fp, " %" PRIx64 "-%" PRIx64 " %c %s\n",
+		       sym->start, sym->end,
+		       sym->binding == STB_GLOBAL ? 'g' :
+		       sym->binding == STB_LOCAL  ? 'l' : 'w',
+		       sym->name);
+}
+
+size_t symbol__fprintf_symname_offs(const struct symbol *sym,
+				    const struct addr_location *al, FILE *fp)
+{
+	unsigned long offset;
+	size_t length;
+
+	if (sym && sym->name) {
+		length = fprintf(fp, "%s", sym->name);
+		if (al) {
+			if (al->addr < sym->end)
+				offset = al->addr - sym->start;
+			else
+				offset = al->addr - al->map->start - sym->start;
+			length += fprintf(fp, "+0x%lx", offset);
+		}
+		return length;
+	} else
+		return fprintf(fp, "[unknown]");
+}
+
+size_t symbol__fprintf_symname(const struct symbol *sym, FILE *fp)
+{
+	return symbol__fprintf_symname_offs(sym, NULL, fp);
+}
+
 void symbols__delete(struct rb_root *symbols)
 {
 	struct symbol *pos;
@@ -301,7 +335,7 @@ static struct symbol *symbols__find(struct rb_root *symbols, u64 ip)
 
 		if (ip < s->start)
 			n = n->rb_left;
-		else if (ip > s->end || (ip == s->end && ip != s->start))
+		else if (ip >= s->end)
 			n = n->rb_right;
 		else
 			return s;
@@ -329,6 +363,11 @@ static struct symbol *symbols__next(struct symbol *sym)
 
 	return NULL;
 }
+
+struct symbol_name_rb_node {
+	struct rb_node	rb_node;
+	struct symbol	sym;
+};
 
 static void symbols__insert_by_name(struct rb_root *symbols, struct symbol *sym)
 {
@@ -413,18 +452,6 @@ void dso__reset_find_symbol_cache(struct dso *dso)
 	}
 }
 
-void dso__insert_symbol(struct dso *dso, enum map_type type, struct symbol *sym)
-{
-	symbols__insert(&dso->symbols[type], sym);
-
-	/* update the symbol cache if necessary */
-	if (dso->last_find_result[type].addr >= sym->start &&
-	    (dso->last_find_result[type].addr < sym->end ||
-	    sym->start == sym->end)) {
-		dso->last_find_result[type].symbol = sym;
-	}
-}
-
 struct symbol *dso__find_symbol(struct dso *dso,
 				enum map_type type, u64 addr)
 {
@@ -468,6 +495,21 @@ void dso__sort_by_name(struct dso *dso, enum map_type type)
 	dso__set_sorted_by_name(dso, type);
 	return symbols__sort_by_name(&dso->symbol_names[type],
 				     &dso->symbols[type]);
+}
+
+size_t dso__fprintf_symbols_by_name(struct dso *dso,
+				    enum map_type type, FILE *fp)
+{
+	size_t ret = 0;
+	struct rb_node *nd;
+	struct symbol_name_rb_node *pos;
+
+	for (nd = rb_first(&dso->symbol_names[type]); nd; nd = rb_next(nd)) {
+		pos = rb_entry(nd, struct symbol_name_rb_node, rb_node);
+		fprintf(fp, "%s\n", pos->sym.name);
+	}
+
+	return ret;
 }
 
 int modules__parse(const char *filename, void *arg,
@@ -1220,8 +1262,8 @@ static int kallsyms__delta(struct map *map, const char *filename, u64 *delta)
 	return 0;
 }
 
-int __dso__load_kallsyms(struct dso *dso, const char *filename,
-			 struct map *map, bool no_kcore, symbol_filter_t filter)
+int dso__load_kallsyms(struct dso *dso, const char *filename,
+		       struct map *map, symbol_filter_t filter)
 {
 	u64 delta = 0;
 
@@ -1242,16 +1284,10 @@ int __dso__load_kallsyms(struct dso *dso, const char *filename,
 	else
 		dso->symtab_type = DSO_BINARY_TYPE__KALLSYMS;
 
-	if (!no_kcore && !dso__load_kcore(dso, map, filename))
+	if (!dso__load_kcore(dso, map, filename))
 		return dso__split_kallsyms_for_kcore(dso, map, filter);
 	else
 		return dso__split_kallsyms(dso, map, delta, filter);
-}
-
-int dso__load_kallsyms(struct dso *dso, const char *filename,
-		       struct map *map, symbol_filter_t filter)
-{
-	return __dso__load_kallsyms(dso, filename, map, false, filter);
 }
 
 static int dso__load_perf_map(struct dso *dso, struct map *map,
@@ -1430,8 +1466,7 @@ int dso__load(struct dso *dso, struct map *map, symbol_filter_t filter)
 	 * Read the build id if possible. This is required for
 	 * DSO_BINARY_TYPE__BUILDID_DEBUGINFO to work
 	 */
-	if (is_regular_file(name) &&
-	    filename__read_build_id(dso->long_name, build_id, BUILD_ID_SIZE) > 0)
+	if (filename__read_build_id(dso->long_name, build_id, BUILD_ID_SIZE) > 0)
 		dso__set_build_id(dso, build_id);
 
 	/*
@@ -1450,9 +1485,6 @@ int dso__load(struct dso *dso, struct map *map, symbol_filter_t filter)
 
 		if (dso__read_binary_type_filename(dso, symtab_type,
 						   root_dir, name, PATH_MAX))
-			continue;
-
-		if (!is_regular_file(name))
 			continue;
 
 		/* Name is now the name of the next image to try */
@@ -1492,10 +1524,6 @@ int dso__load(struct dso *dso, struct map *map, symbol_filter_t filter)
 	/* We'll have to hope for the best */
 	if (!runtime_ss && syms_ss)
 		runtime_ss = syms_ss;
-
-	if (syms_ss && syms_ss->type == DSO_BINARY_TYPE__BUILD_ID_CACHE)
-		if (dso__build_id_is_kmod(dso, name, PATH_MAX))
-			kmod = true;
 
 	if (syms_ss)
 		ret = dso__load_sym(dso, map, syms_ss, runtime_ss, filter, kmod);
@@ -1608,27 +1636,25 @@ out:
 	return err;
 }
 
-static bool visible_dir_filter(const char *name, struct dirent *d)
-{
-	if (d->d_type != DT_DIR)
-		return false;
-	return lsdir_no_dot_filter(name, d);
-}
-
 static int find_matching_kcore(struct map *map, char *dir, size_t dir_sz)
 {
 	char kallsyms_filename[PATH_MAX];
+	struct dirent *dent;
 	int ret = -1;
-	struct strlist *dirs;
-	struct str_node *nd;
+	DIR *d;
 
-	dirs = lsdir(dir, visible_dir_filter);
-	if (!dirs)
+	d = opendir(dir);
+	if (!d)
 		return -1;
 
-	strlist__for_each(nd, dirs) {
+	while (1) {
+		dent = readdir(d);
+		if (!dent)
+			break;
+		if (dent->d_type != DT_DIR)
+			continue;
 		scnprintf(kallsyms_filename, sizeof(kallsyms_filename),
-			  "%s/%s/kallsyms", dir, nd->s);
+			  "%s/%s/kallsyms", dir, dent->d_name);
 		if (!validate_kcore_addresses(kallsyms_filename, map)) {
 			strlcpy(dir, kallsyms_filename, dir_sz);
 			ret = 0;
@@ -1636,7 +1662,7 @@ static int find_matching_kcore(struct map *map, char *dir, size_t dir_sz)
 		}
 	}
 
-	strlist__delete(dirs);
+	closedir(d);
 
 	return ret;
 }
@@ -1644,7 +1670,7 @@ static int find_matching_kcore(struct map *map, char *dir, size_t dir_sz)
 static char *dso__find_kallsyms(struct dso *dso, struct map *map)
 {
 	u8 host_build_id[BUILD_ID_SIZE];
-	char sbuild_id[SBUILD_ID_SIZE];
+	char sbuild_id[BUILD_ID_SIZE * 2 + 1];
 	bool is_host = false;
 	char path[PATH_MAX];
 
@@ -1662,8 +1688,8 @@ static char *dso__find_kallsyms(struct dso *dso, struct map *map)
 
 	build_id__sprintf(dso->build_id, sizeof(dso->build_id), sbuild_id);
 
-	scnprintf(path, sizeof(path), "%s/%s/%s", buildid_dir,
-		  DSO__NAME_KCORE, sbuild_id);
+	scnprintf(path, sizeof(path), "%s/[kernel.kcore]/%s", buildid_dir,
+		  sbuild_id);
 
 	/* Use /proc/kallsyms if possible */
 	if (is_host) {
@@ -1699,8 +1725,8 @@ static char *dso__find_kallsyms(struct dso *dso, struct map *map)
 	if (!find_matching_kcore(map, path, sizeof(path)))
 		return strdup(path);
 
-	scnprintf(path, sizeof(path), "%s/%s/%s",
-		  buildid_dir, DSO__NAME_KALLSYMS, sbuild_id);
+	scnprintf(path, sizeof(path), "%s/[kernel.kallsyms]/%s",
+		  buildid_dir, sbuild_id);
 
 	if (access(path, F_OK)) {
 		pr_err("No kallsyms or vmlinux with build-id %s was found\n",
@@ -1769,7 +1795,7 @@ do_kallsyms:
 
 	if (err > 0 && !dso__is_kcore(dso)) {
 		dso->binary_type = DSO_BINARY_TYPE__KALLSYMS;
-		dso__set_long_name(dso, DSO__NAME_KALLSYMS, false);
+		dso__set_long_name(dso, "[kernel.kallsyms]", false);
 		map__fixup_start(map);
 		map__fixup_end(map);
 	}
@@ -1933,17 +1959,17 @@ int setup_intlist(struct intlist **list, const char *list_str,
 static bool symbol__read_kptr_restrict(void)
 {
 	bool value = false;
-	FILE *fp = fopen("/proc/sys/kernel/kptr_restrict", "r");
 
-	if (fp != NULL) {
-		char line[8];
+	if (geteuid() != 0) {
+		FILE *fp = fopen("/proc/sys/kernel/kptr_restrict", "r");
+		if (fp != NULL) {
+			char line[8];
 
-		if (fgets(line, sizeof(line), fp) != NULL)
-			value = (geteuid() != 0) ?
-					(atoi(line) != 0) :
-					(atoi(line) == 2);
+			if (fgets(line, sizeof(line), fp) != NULL)
+				value = atoi(line) != 0;
 
-		fclose(fp);
+			fclose(fp);
+		}
 	}
 
 	return value;
@@ -2032,27 +2058,4 @@ void symbol__exit(void)
 	vmlinux_path__exit();
 	symbol_conf.sym_list = symbol_conf.dso_list = symbol_conf.comm_list = NULL;
 	symbol_conf.initialized = false;
-}
-
-int symbol__config_symfs(const struct option *opt __maybe_unused,
-			 const char *dir, int unset __maybe_unused)
-{
-	char *bf = NULL;
-	int ret;
-
-	symbol_conf.symfs = strdup(dir);
-	if (symbol_conf.symfs == NULL)
-		return -ENOMEM;
-
-	/* skip the locally configured cache if a symfs is given, and
-	 * config buildid dir to symfs/.debug
-	 */
-	ret = asprintf(&bf, "%s/%s", dir, ".debug");
-	if (ret < 0)
-		return -ENOMEM;
-
-	set_buildid_dir(bf);
-
-	free(bf);
-	return 0;
 }

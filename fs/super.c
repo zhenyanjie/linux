@@ -285,7 +285,7 @@ static void put_super(struct super_block *sb)
  *	deactivate_locked_super	-	drop an active reference to superblock
  *	@s: superblock to deactivate
  *
- *	Drops an active reference to superblock, converting it into a temporary
+ *	Drops an active reference to superblock, converting it into a temprory
  *	one if there is no other active references left.  In that case we
  *	tell fs driver to shut it down and drop the temporary reference we
  *	had just acquired.

@@ -37,7 +37,6 @@
 #include "cypress_ps2.h"
 #include "focaltech.h"
 #include "vmmouse.h"
-#include "byd.h"
 
 #define DRIVER_DESC	"PS/2 mouse driver"
 
@@ -843,15 +842,6 @@ static const struct psmouse_protocol psmouse_protocols[] = {
 		.init		= vmmouse_init,
 	},
 #endif
-#ifdef CONFIG_MOUSE_PS2_BYD
-	{
-		.type		= PSMOUSE_BYD,
-		.name		= "BYDPS/2",
-		.alias		= "byd",
-		.detect		= byd_detect,
-		.init		= byd_init,
-	},
-#endif
 	{
 		.type		= PSMOUSE_AUTO,
 		.name		= "auto",
@@ -1115,10 +1105,6 @@ static int psmouse_extensions(struct psmouse *psmouse,
 		if (psmouse_try_protocol(psmouse, PSMOUSE_TOUCHKIT_PS2,
 					 &max_proto, set_properties, true))
 			return PSMOUSE_TOUCHKIT_PS2;
-
-		if (psmouse_try_protocol(psmouse, PSMOUSE_BYD,
-					 &max_proto, set_properties, true))
-			return PSMOUSE_BYD;
 	}
 
 	/*

@@ -150,8 +150,7 @@ static int pdc_wdt_start(struct watchdog_device *wdt_dev)
 	return 0;
 }
 
-static int pdc_wdt_restart(struct watchdog_device *wdt_dev,
-			   unsigned long action, void *data)
+static int pdc_wdt_restart(struct watchdog_device *wdt_dev)
 {
 	struct pdc_wdt_dev *wdt = watchdog_get_drvdata(wdt_dev);
 

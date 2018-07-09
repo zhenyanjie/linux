@@ -32,7 +32,6 @@
 #include <asm/asm-offsets.h>
 #include <asm/diag.h>
 #include <asm/pgtable.h>
-#include <asm/gmap.h>
 #include <asm/irq.h>
 #include <asm/mmu_context.h>
 #include <asm/facility.h>
@@ -184,8 +183,6 @@ static void dump_fault_info(struct pt_regs *regs)
 {
 	unsigned long asce;
 
-	pr_alert("Failing address: %016lx TEID: %016lx\n",
-		 regs->int_parm_long & __FAIL_ADDR_MASK, regs->int_parm_long);
 	pr_alert("Fault in ");
 	switch (regs->int_parm_long & 3) {
 	case 3:
@@ -221,9 +218,7 @@ static void dump_fault_info(struct pt_regs *regs)
 	dump_pagetable(asce, regs->int_parm_long & __FAIL_ADDR_MASK);
 }
 
-int show_unhandled_signals = 1;
-
-void report_user_fault(struct pt_regs *regs, long signr, int is_mm_fault)
+static inline void report_user_fault(struct pt_regs *regs, long signr)
 {
 	if ((task_pid_nr(current) > 1) && !show_unhandled_signals)
 		return;
@@ -235,8 +230,9 @@ void report_user_fault(struct pt_regs *regs, long signr, int is_mm_fault)
 	       regs->int_code & 0xffff, regs->int_code >> 17);
 	print_vma_addr(KERN_CONT "in ", regs->psw.addr);
 	printk(KERN_CONT "\n");
-	if (is_mm_fault)
-		dump_fault_info(regs);
+	printk(KERN_ALERT "failing address: %016lx TEID: %016lx\n",
+	       regs->int_parm_long & __FAIL_ADDR_MASK, regs->int_parm_long);
+	dump_fault_info(regs);
 	show_regs(regs);
 }
 
@@ -248,9 +244,8 @@ static noinline void do_sigsegv(struct pt_regs *regs, int si_code)
 {
 	struct siginfo si;
 
-	report_user_fault(regs, SIGSEGV, 1);
+	report_user_fault(regs, SIGSEGV);
 	si.si_signo = SIGSEGV;
-	si.si_errno = 0;
 	si.si_code = si_code;
 	si.si_addr = (void __user *)(regs->int_parm_long & __FAIL_ADDR_MASK);
 	force_sig_info(SIGSEGV, &si, current);
@@ -277,6 +272,8 @@ static noinline void do_no_context(struct pt_regs *regs)
 	else
 		printk(KERN_ALERT "Unable to handle kernel paging request"
 		       " in virtual user address space\n");
+	printk(KERN_ALERT "failing address: %016lx TEID: %016lx\n",
+	       regs->int_parm_long & __FAIL_ADDR_MASK, regs->int_parm_long);
 	dump_fault_info(regs);
 	die(regs, "Oops");
 	do_exit(SIGKILL);
@@ -632,29 +629,6 @@ void pfault_fini(void)
 static DEFINE_SPINLOCK(pfault_lock);
 static LIST_HEAD(pfault_list);
 
-#define PF_COMPLETE	0x0080
-
-/*
- * The mechanism of our pfault code: if Linux is running as guest, runs a user
- * space process and the user space process accesses a page that the host has
- * paged out we get a pfault interrupt.
- *
- * This allows us, within the guest, to schedule a different process. Without
- * this mechanism the host would have to suspend the whole virtual cpu until
- * the page has been paged in.
- *
- * So when we get such an interrupt then we set the state of the current task
- * to uninterruptible and also set the need_resched flag. Both happens within
- * interrupt context(!). If we later on want to return to user space we
- * recognize the need_resched flag and then call schedule().  It's not very
- * obvious how this works...
- *
- * Of course we have a lot of additional fun with the completion interrupt (->
- * host signals that a page of a process has been paged in and the process can
- * continue to run). This interrupt can arrive on any cpu and, since we have
- * virtual cpus, actually appear before the interrupt that signals that a page
- * is missing.
- */
 static void pfault_interrupt(struct ext_code ext_code,
 			     unsigned int param32, unsigned long param64)
 {
@@ -663,9 +637,10 @@ static void pfault_interrupt(struct ext_code ext_code,
 	pid_t pid;
 
 	/*
-	 * Get the external interruption subcode & pfault initial/completion
-	 * signal bit. VM stores this in the 'cpu address' field associated
-	 * with the external interrupt.
+	 * Get the external interruption subcode & pfault
+	 * initial/completion signal bit. VM stores this 
+	 * in the 'cpu address' field associated with the
+         * external interrupt. 
 	 */
 	subcode = ext_code.subcode;
 	if ((subcode & 0xff00) != __SUBCODE_MASK)
@@ -681,7 +656,7 @@ static void pfault_interrupt(struct ext_code ext_code,
 	if (!tsk)
 		return;
 	spin_lock(&pfault_lock);
-	if (subcode & PF_COMPLETE) {
+	if (subcode & 0x0080) {
 		/* signal bit is set -> a page has been swapped in by VM */
 		if (tsk->thread.pfault_wait == 1) {
 			/* Initial interrupt was faster than the completion
@@ -710,7 +685,8 @@ static void pfault_interrupt(struct ext_code ext_code,
 			goto out;
 		if (tsk->thread.pfault_wait == 1) {
 			/* Already on the list with a reference: put to sleep */
-			goto block;
+			__set_task_state(tsk, TASK_UNINTERRUPTIBLE);
+			set_tsk_need_resched(tsk);
 		} else if (tsk->thread.pfault_wait == -1) {
 			/* Completion interrupt was faster than the initial
 			 * interrupt (pfault_wait == -1). Set pfault_wait
@@ -725,11 +701,7 @@ static void pfault_interrupt(struct ext_code ext_code,
 			get_task_struct(tsk);
 			tsk->thread.pfault_wait = 1;
 			list_add(&tsk->thread.list, &pfault_list);
-block:
-			/* Since this must be a userspace fault, there
-			 * is no kernel task state to trample. Rely on the
-			 * return to userspace schedule() to block. */
-			__set_current_state(TASK_UNINTERRUPTIBLE);
+			__set_task_state(tsk, TASK_UNINTERRUPTIBLE);
 			set_tsk_need_resched(tsk);
 		}
 	}

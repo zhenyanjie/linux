@@ -47,14 +47,20 @@ static DEFINE_PER_CPU(enum cpu_state_vals, current_state) = CPU_STATE_OFFLINE;
 
 static enum cpu_state_vals default_offline_state = CPU_STATE_OFFLINE;
 
-static bool cede_offline_enabled __read_mostly = true;
+static int cede_offline_enabled __read_mostly = 1;
 
 /*
  * Enable/disable cede_offline when available.
  */
 static int __init setup_cede_offline(char *str)
 {
-	return (kstrtobool(str, &cede_offline_enabled) == 0);
+	if (!strcmp(str, "off"))
+		cede_offline_enabled = 0;
+	else if (!strcmp(str, "on"))
+		cede_offline_enabled = 1;
+	else
+		return 0;
+	return 1;
 }
 
 __setup("cede_offline=", setup_cede_offline);

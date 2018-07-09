@@ -38,6 +38,7 @@
 /* The highest number of possible regulators for supported devices. */
 #define S2MPS_REGULATOR_MAX		S2MPS13_REGULATOR_MAX
 struct s2mps11_info {
+	unsigned int rdev_num;
 	int ramp_delay2;
 	int ramp_delay34;
 	int ramp_delay5;
@@ -53,10 +54,7 @@ struct s2mps11_info {
 	 */
 	DECLARE_BITMAP(suspend_state, S2MPS_REGULATOR_MAX);
 
-	/*
-	 * Array (size: number of regulators) with GPIO-s for external
-	 * sleep control.
-	 */
+	/* Array of size rdev_num with GPIO-s for external sleep control */
 	int *ext_control_gpio;
 };
 
@@ -267,7 +265,6 @@ static struct regulator_ops s2mps11_buck_ops = {
 	.ops		= &s2mps11_ldo_ops,		\
 	.type		= REGULATOR_VOLTAGE,		\
 	.owner		= THIS_MODULE,			\
-	.ramp_delay	= RAMP_DELAY_12_MVUS,		\
 	.min_uV		= MIN_800_MV,			\
 	.uV_step	= step,				\
 	.n_voltages	= S2MPS11_LDO_N_VOLTAGES,	\
@@ -750,7 +747,7 @@ static const struct regulator_linear_range s2mps15_ldo_voltage_ranges3[] = {
 
 /* voltage range for s2mps15 LDO 7, 8, 9 and 10 */
 static const struct regulator_linear_range s2mps15_ldo_voltage_ranges4[] = {
-	REGULATOR_LINEAR_RANGE(700000, 0x10, 0x20, 25000),
+	REGULATOR_LINEAR_RANGE(700000, 0xc, 0x18, 25000),
 };
 
 /* voltage range for s2mps15 LDO 1 */
@@ -760,12 +757,12 @@ static const struct regulator_linear_range s2mps15_ldo_voltage_ranges5[] = {
 
 /* voltage range for s2mps15 BUCK 1, 2, 3, 4, 5, 6 and 7 */
 static const struct regulator_linear_range s2mps15_buck_voltage_ranges1[] = {
-	REGULATOR_LINEAR_RANGE(500000, 0x20, 0xc0, 6250),
+	REGULATOR_LINEAR_RANGE(500000, 0x20, 0xb0, 6250),
 };
 
 /* voltage range for s2mps15 BUCK 8, 9 and 10 */
 static const struct regulator_linear_range s2mps15_buck_voltage_ranges2[] = {
-	REGULATOR_LINEAR_RANGE(1000000, 0x20, 0x78, 12500),
+	REGULATOR_LINEAR_RANGE(1000000, 0x20, 0xc0, 12500),
 };
 
 static const struct regulator_desc s2mps15_regulators[] = {
@@ -838,8 +835,7 @@ static void s2mps14_pmic_dt_parse_ext_control_gpio(struct platform_device *pdev,
 }
 
 static int s2mps11_pmic_dt_parse(struct platform_device *pdev,
-		struct of_regulator_match *rdata, struct s2mps11_info *s2mps11,
-		unsigned int rdev_num)
+		struct of_regulator_match *rdata, struct s2mps11_info *s2mps11)
 {
 	struct device_node *reg_np;
 
@@ -849,7 +845,7 @@ static int s2mps11_pmic_dt_parse(struct platform_device *pdev,
 		return -EINVAL;
 	}
 
-	of_regulator_match(&pdev->dev, reg_np, rdata, rdev_num);
+	of_regulator_match(&pdev->dev, reg_np, rdata, s2mps11->rdev_num);
 	if (s2mps11->dev_type == S2MPS14X)
 		s2mps14_pmic_dt_parse_ext_control_gpio(pdev, rdata, s2mps11);
 
@@ -1097,7 +1093,6 @@ static int s2mps11_pmic_probe(struct platform_device *pdev)
 	struct of_regulator_match *rdata = NULL;
 	struct regulator_config config = { };
 	struct s2mps11_info *s2mps11;
-	unsigned int rdev_num = 0;
 	int i, ret = 0;
 	const struct regulator_desc *regulators;
 
@@ -1109,29 +1104,28 @@ static int s2mps11_pmic_probe(struct platform_device *pdev)
 	s2mps11->dev_type = platform_get_device_id(pdev)->driver_data;
 	switch (s2mps11->dev_type) {
 	case S2MPS11X:
-		rdev_num = ARRAY_SIZE(s2mps11_regulators);
+		s2mps11->rdev_num = ARRAY_SIZE(s2mps11_regulators);
 		regulators = s2mps11_regulators;
-		BUILD_BUG_ON(S2MPS_REGULATOR_MAX < ARRAY_SIZE(s2mps11_regulators));
+		BUILD_BUG_ON(S2MPS_REGULATOR_MAX < s2mps11->rdev_num);
 		break;
 	case S2MPS13X:
-		rdev_num = ARRAY_SIZE(s2mps13_regulators);
+		s2mps11->rdev_num = ARRAY_SIZE(s2mps13_regulators);
 		regulators = s2mps13_regulators;
-		BUILD_BUG_ON(S2MPS_REGULATOR_MAX < ARRAY_SIZE(s2mps13_regulators));
+		BUILD_BUG_ON(S2MPS_REGULATOR_MAX < s2mps11->rdev_num);
 		break;
 	case S2MPS14X:
-		rdev_num = ARRAY_SIZE(s2mps14_regulators);
+		s2mps11->rdev_num = ARRAY_SIZE(s2mps14_regulators);
 		regulators = s2mps14_regulators;
-		BUILD_BUG_ON(S2MPS_REGULATOR_MAX < ARRAY_SIZE(s2mps14_regulators));
+		BUILD_BUG_ON(S2MPS_REGULATOR_MAX < s2mps11->rdev_num);
 		break;
 	case S2MPS15X:
-		rdev_num = ARRAY_SIZE(s2mps15_regulators);
+		s2mps11->rdev_num = ARRAY_SIZE(s2mps15_regulators);
 		regulators = s2mps15_regulators;
-		BUILD_BUG_ON(S2MPS_REGULATOR_MAX < ARRAY_SIZE(s2mps15_regulators));
 		break;
 	case S2MPU02:
-		rdev_num = ARRAY_SIZE(s2mpu02_regulators);
+		s2mps11->rdev_num = ARRAY_SIZE(s2mpu02_regulators);
 		regulators = s2mpu02_regulators;
-		BUILD_BUG_ON(S2MPS_REGULATOR_MAX < ARRAY_SIZE(s2mpu02_regulators));
+		BUILD_BUG_ON(S2MPS_REGULATOR_MAX < s2mps11->rdev_num);
 		break;
 	default:
 		dev_err(&pdev->dev, "Invalid device type: %u\n",
@@ -1140,7 +1134,7 @@ static int s2mps11_pmic_probe(struct platform_device *pdev)
 	}
 
 	s2mps11->ext_control_gpio = devm_kmalloc(&pdev->dev,
-			sizeof(*s2mps11->ext_control_gpio) * rdev_num,
+			sizeof(*s2mps11->ext_control_gpio) * s2mps11->rdev_num,
 			GFP_KERNEL);
 	if (!s2mps11->ext_control_gpio)
 		return -ENOMEM;
@@ -1148,7 +1142,7 @@ static int s2mps11_pmic_probe(struct platform_device *pdev)
 	 * 0 is a valid GPIO so initialize all GPIO-s to negative value
 	 * to indicate that external control won't be used for this regulator.
 	 */
-	for (i = 0; i < rdev_num; i++)
+	for (i = 0; i < s2mps11->rdev_num; i++)
 		s2mps11->ext_control_gpio[i] = -EINVAL;
 
 	if (!iodev->dev->of_node) {
@@ -1162,14 +1156,14 @@ static int s2mps11_pmic_probe(struct platform_device *pdev)
 		}
 	}
 
-	rdata = kzalloc(sizeof(*rdata) * rdev_num, GFP_KERNEL);
+	rdata = kzalloc(sizeof(*rdata) * s2mps11->rdev_num, GFP_KERNEL);
 	if (!rdata)
 		return -ENOMEM;
 
-	for (i = 0; i < rdev_num; i++)
+	for (i = 0; i < s2mps11->rdev_num; i++)
 		rdata[i].name = regulators[i].name;
 
-	ret = s2mps11_pmic_dt_parse(pdev, rdata, s2mps11, rdev_num);
+	ret = s2mps11_pmic_dt_parse(pdev, rdata, s2mps11);
 	if (ret)
 		goto out;
 
@@ -1181,7 +1175,7 @@ common_reg:
 	config.driver_data = s2mps11;
 	config.ena_gpio_flags = GPIOF_OUT_INIT_HIGH;
 	config.ena_gpio_initialized = true;
-	for (i = 0; i < rdev_num; i++) {
+	for (i = 0; i < s2mps11->rdev_num; i++) {
 		struct regulator_dev *regulator;
 
 		if (pdata) {
@@ -1238,7 +1232,17 @@ static struct platform_driver s2mps11_pmic_driver = {
 	.id_table = s2mps11_pmic_id,
 };
 
-module_platform_driver(s2mps11_pmic_driver);
+static int __init s2mps11_pmic_init(void)
+{
+	return platform_driver_register(&s2mps11_pmic_driver);
+}
+subsys_initcall(s2mps11_pmic_init);
+
+static void __exit s2mps11_pmic_exit(void)
+{
+	platform_driver_unregister(&s2mps11_pmic_driver);
+}
+module_exit(s2mps11_pmic_exit);
 
 /* Module information */
 MODULE_AUTHOR("Sangbeom Kim <sbkim73@samsung.com>");

@@ -48,7 +48,6 @@
 #include <linux/sunrpc/clnt.h>
 #include <linux/sunrpc/metrics.h>
 #include <linux/sunrpc/bc_xprt.h>
-#include <linux/rcupdate.h>
 
 #include <trace/events/sunrpc.h>
 
@@ -1167,7 +1166,7 @@ void xprt_free(struct rpc_xprt *xprt)
 {
 	put_net(xprt->xprt_net);
 	xprt_free_all_slots(xprt);
-	kfree_rcu(xprt, rcu);
+	kfree(xprt);
 }
 EXPORT_SYMBOL_GPL(xprt_free);
 
@@ -1181,7 +1180,7 @@ EXPORT_SYMBOL_GPL(xprt_free);
  */
 void xprt_reserve(struct rpc_task *task)
 {
-	struct rpc_xprt *xprt = task->tk_xprt;
+	struct rpc_xprt	*xprt;
 
 	task->tk_status = 0;
 	if (task->tk_rqstp != NULL)
@@ -1189,8 +1188,11 @@ void xprt_reserve(struct rpc_task *task)
 
 	task->tk_timeout = 0;
 	task->tk_status = -EAGAIN;
+	rcu_read_lock();
+	xprt = rcu_dereference(task->tk_client->cl_xprt);
 	if (!xprt_throttle_congested(xprt, task))
 		xprt->ops->alloc_slot(xprt, task);
+	rcu_read_unlock();
 }
 
 /**
@@ -1204,7 +1206,7 @@ void xprt_reserve(struct rpc_task *task)
  */
 void xprt_retry_reserve(struct rpc_task *task)
 {
-	struct rpc_xprt *xprt = task->tk_xprt;
+	struct rpc_xprt	*xprt;
 
 	task->tk_status = 0;
 	if (task->tk_rqstp != NULL)
@@ -1212,7 +1214,10 @@ void xprt_retry_reserve(struct rpc_task *task)
 
 	task->tk_timeout = 0;
 	task->tk_status = -EAGAIN;
+	rcu_read_lock();
+	xprt = rcu_dereference(task->tk_client->cl_xprt);
 	xprt->ops->alloc_slot(xprt, task);
+	rcu_read_unlock();
 }
 
 static inline __be32 xprt_alloc_xid(struct rpc_xprt *xprt)
@@ -1259,9 +1264,11 @@ void xprt_release(struct rpc_task *task)
 
 	if (req == NULL) {
 		if (task->tk_client) {
-			xprt = task->tk_xprt;
+			rcu_read_lock();
+			xprt = rcu_dereference(task->tk_client->cl_xprt);
 			if (xprt->snd_task == task)
 				xprt_release_write(xprt, task);
+			rcu_read_unlock();
 		}
 		return;
 	}
@@ -1300,7 +1307,7 @@ void xprt_release(struct rpc_task *task)
 
 static void xprt_init(struct rpc_xprt *xprt, struct net *net)
 {
-	kref_init(&xprt->kref);
+	atomic_set(&xprt->count, 1);
 
 	spin_lock_init(&xprt->transport_lock);
 	spin_lock_init(&xprt->reserve_lock);
@@ -1311,7 +1318,6 @@ static void xprt_init(struct rpc_xprt *xprt, struct net *net)
 	spin_lock_init(&xprt->bc_pa_lock);
 	INIT_LIST_HEAD(&xprt->bc_pa_list);
 #endif /* CONFIG_SUNRPC_BACKCHANNEL */
-	INIT_LIST_HEAD(&xprt->xprt_switch);
 
 	xprt->last_used = jiffies;
 	xprt->cwnd = RPC_INITCWND;
@@ -1409,24 +1415,6 @@ static void xprt_destroy(struct rpc_xprt *xprt)
 	xprt->ops->destroy(xprt);
 }
 
-static void xprt_destroy_kref(struct kref *kref)
-{
-	xprt_destroy(container_of(kref, struct rpc_xprt, kref));
-}
-
-/**
- * xprt_get - return a reference to an RPC transport.
- * @xprt: pointer to the transport
- *
- */
-struct rpc_xprt *xprt_get(struct rpc_xprt *xprt)
-{
-	if (xprt != NULL && kref_get_unless_zero(&xprt->kref))
-		return xprt;
-	return NULL;
-}
-EXPORT_SYMBOL_GPL(xprt_get);
-
 /**
  * xprt_put - release a reference to an RPC transport.
  * @xprt: pointer to the transport
@@ -1434,7 +1422,7 @@ EXPORT_SYMBOL_GPL(xprt_get);
  */
 void xprt_put(struct rpc_xprt *xprt)
 {
-	if (xprt != NULL)
-		kref_put(&xprt->kref, xprt_destroy_kref);
+	if (atomic_dec_and_test(&xprt->count))
+		xprt_destroy(xprt);
 }
 EXPORT_SYMBOL_GPL(xprt_put);

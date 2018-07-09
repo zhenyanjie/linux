@@ -273,10 +273,10 @@ static int __nd_btt_probe(struct nd_btt *nd_btt,
 	return 0;
 }
 
-int nd_btt_probe(struct device *dev, struct nd_namespace_common *ndns)
+int nd_btt_probe(struct nd_namespace_common *ndns, void *drvdata)
 {
 	int rc;
-	struct device *btt_dev;
+	struct device *dev;
 	struct btt_sb *btt_sb;
 	struct nd_region *nd_region = to_nd_region(ndns->dev.parent);
 
@@ -284,19 +284,21 @@ int nd_btt_probe(struct device *dev, struct nd_namespace_common *ndns)
 		return -ENODEV;
 
 	nvdimm_bus_lock(&ndns->dev);
-	btt_dev = __nd_btt_create(nd_region, 0, NULL, ndns);
+	dev = __nd_btt_create(nd_region, 0, NULL, ndns);
 	nvdimm_bus_unlock(&ndns->dev);
-	if (!btt_dev)
+	if (!dev)
 		return -ENOMEM;
-	btt_sb = devm_kzalloc(dev, sizeof(*btt_sb), GFP_KERNEL);
-	rc = __nd_btt_probe(to_nd_btt(btt_dev), ndns, btt_sb);
-	dev_dbg(dev, "%s: btt: %s\n", __func__,
-			rc == 0 ? dev_name(btt_dev) : "<none>");
+	dev_set_drvdata(dev, drvdata);
+	btt_sb = kzalloc(sizeof(*btt_sb), GFP_KERNEL);
+	rc = __nd_btt_probe(to_nd_btt(dev), ndns, btt_sb);
+	kfree(btt_sb);
+	dev_dbg(&ndns->dev, "%s: btt: %s\n", __func__,
+			rc == 0 ? dev_name(dev) : "<none>");
 	if (rc < 0) {
-		struct nd_btt *nd_btt = to_nd_btt(btt_dev);
+		struct nd_btt *nd_btt = to_nd_btt(dev);
 
-		__nd_detach_ndns(btt_dev, &nd_btt->ndns);
-		put_device(btt_dev);
+		__nd_detach_ndns(dev, &nd_btt->ndns);
+		put_device(dev);
 	}
 
 	return rc;

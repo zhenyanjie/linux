@@ -6,6 +6,12 @@
 #include "tests.h"
 #include "debug.h"
 
+static int perf_config_cb(const char *var, const char *val,
+			  void *arg __maybe_unused)
+{
+	return perf_default_config(var, val, arg);
+}
+
 #ifdef HAVE_LIBBPF_SUPPORT
 static int test__bpf_parsing(void *obj_buf, size_t obj_buf_sz)
 {
@@ -29,7 +35,6 @@ static int test__bpf_parsing(void *obj_buf __maybe_unused,
 static struct {
 	const char *source;
 	const char *desc;
-	bool should_load_fail;
 } bpf_source_table[__LLVM_TESTCASE_MAX] = {
 	[LLVM_TESTCASE_BASE] = {
 		.source = test_llvm__bpf_base_prog,
@@ -43,19 +48,14 @@ static struct {
 		.source = test_llvm__bpf_test_prologue_prog,
 		.desc = "Compile source for BPF prologue generation test",
 	},
-	[LLVM_TESTCASE_BPF_RELOCATION] = {
-		.source = test_llvm__bpf_test_relocation,
-		.desc = "Compile source for BPF relocation test",
-		.should_load_fail = true,
-	},
 };
+
 
 int
 test_llvm__fetch_bpf_obj(void **p_obj_buf,
 			 size_t *p_obj_buf_sz,
 			 enum test_llvm__testcase idx,
-			 bool force,
-			 bool *should_load_fail)
+			 bool force)
 {
 	const char *source;
 	const char *desc;
@@ -68,8 +68,8 @@ test_llvm__fetch_bpf_obj(void **p_obj_buf,
 
 	source = bpf_source_table[idx].source;
 	desc = bpf_source_table[idx].desc;
-	if (should_load_fail)
-		*should_load_fail = bpf_source_table[idx].should_load_fail;
+
+	perf_config(perf_config_cb, NULL);
 
 	/*
 	 * Skip this test if user's .perfconfig doesn't set [llvm] section
@@ -136,15 +136,14 @@ int test__llvm(int subtest)
 	int ret;
 	void *obj_buf = NULL;
 	size_t obj_buf_sz = 0;
-	bool should_load_fail = false;
 
 	if ((subtest < 0) || (subtest >= __LLVM_TESTCASE_MAX))
 		return TEST_FAIL;
 
 	ret = test_llvm__fetch_bpf_obj(&obj_buf, &obj_buf_sz,
-				       subtest, false, &should_load_fail);
+				       subtest, false);
 
-	if (ret == TEST_OK && !should_load_fail) {
+	if (ret == TEST_OK) {
 		ret = test__bpf_parsing(obj_buf, obj_buf_sz);
 		if (ret != TEST_OK) {
 			pr_debug("Failed to parse test case '%s'\n",

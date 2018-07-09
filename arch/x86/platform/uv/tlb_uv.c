@@ -37,7 +37,7 @@ static int timeout_base_ns[] = {
 };
 
 static int timeout_us;
-static bool nobau = true;
+static int nobau;
 static int nobau_perm;
 static cycles_t congested_cycles;
 
@@ -106,28 +106,13 @@ static char *stat_description[] = {
 	"enable:   number times use of the BAU was re-enabled"
 };
 
-static int __init setup_bau(char *arg)
+static int __init
+setup_nobau(char *arg)
 {
-	int result;
-
-	if (!arg)
-		return -EINVAL;
-
-	result = strtobool(arg, &nobau);
-	if (result)
-		return result;
-
-	/* we need to flip the logic here, so that bau=y sets nobau to false */
-	nobau = !nobau;
-
-	if (!nobau)
-		pr_info("UV BAU Enabled\n");
-	else
-		pr_info("UV BAU Disabled\n");
-
+	nobau = 1;
 	return 0;
 }
-early_param("bau", setup_bau);
+early_param("nobau", setup_nobau);
 
 /* base pnode in this partition */
 static int uv_base_pnode __read_mostly;
@@ -146,10 +131,10 @@ set_bau_on(void)
 		pr_info("BAU not initialized; cannot be turned on\n");
 		return;
 	}
-	nobau = false;
+	nobau = 0;
 	for_each_present_cpu(cpu) {
 		bcp = &per_cpu(bau_control, cpu);
-		bcp->nobau = false;
+		bcp->nobau = 0;
 	}
 	pr_info("BAU turned on\n");
 	return;
@@ -161,10 +146,10 @@ set_bau_off(void)
 	int cpu;
 	struct bau_control *bcp;
 
-	nobau = true;
+	nobau = 1;
 	for_each_present_cpu(cpu) {
 		bcp = &per_cpu(bau_control, cpu);
-		bcp->nobau = true;
+		bcp->nobau = 1;
 	}
 	pr_info("BAU turned off\n");
 	return;
@@ -1901,7 +1886,7 @@ static void __init init_per_cpu_tunables(void)
 		bcp = &per_cpu(bau_control, cpu);
 		bcp->baudisabled		= 0;
 		if (nobau)
-			bcp->nobau		= true;
+			bcp->nobau		= 1;
 		bcp->statp			= &per_cpu(ptcstats, cpu);
 		/* time interval to catch a hardware stay-busy bug */
 		bcp->timeout_interval		= usec_2_cycles(2*timeout_us);
@@ -2040,8 +2025,7 @@ static int scan_sock(struct socket_desc *sdp, struct uvhub_desc *bdp,
 			return 1;
 		}
 		bcp->uvhub_master = *hmasterp;
-		bcp->uvhub_cpu = uv_cpu_blade_processor_id(cpu);
-
+		bcp->uvhub_cpu = uv_cpu_hub_info(cpu)->blade_processor_id;
 		if (bcp->uvhub_cpu >= MAX_CPUS_PER_UVHUB) {
 			printk(KERN_EMERG "%d cpus per uvhub invalid\n",
 				bcp->uvhub_cpu);

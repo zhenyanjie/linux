@@ -20,18 +20,14 @@
 int lowpan_register_netdevice(struct net_device *dev,
 			      enum lowpan_lltypes lltype)
 {
-	int i, ret;
+	int ret;
 
 	dev->addr_len = EUI64_ADDR_LEN;
 	dev->type = ARPHRD_6LOWPAN;
 	dev->mtu = IPV6_MIN_MTU;
 	dev->priv_flags |= IFF_NO_QUEUE;
 
-	lowpan_dev(dev)->lltype = lltype;
-
-	spin_lock_init(&lowpan_dev(dev)->ctx.lock);
-	for (i = 0; i < LOWPAN_IPHC_CTX_TABLE_SIZE; i++)
-		lowpan_dev(dev)->ctx.table[i].id = i;
+	lowpan_priv(dev)->lltype = lltype;
 
 	ret = register_netdevice(dev);
 	if (ret < 0)
@@ -72,32 +68,6 @@ void lowpan_unregister_netdev(struct net_device *dev)
 }
 EXPORT_SYMBOL(lowpan_unregister_netdev);
 
-static int lowpan_event(struct notifier_block *unused,
-			unsigned long event, void *ptr)
-{
-	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
-	int i;
-
-	if (dev->type != ARPHRD_6LOWPAN)
-		return NOTIFY_DONE;
-
-	switch (event) {
-	case NETDEV_DOWN:
-		for (i = 0; i < LOWPAN_IPHC_CTX_TABLE_SIZE; i++)
-			clear_bit(LOWPAN_IPHC_CTX_FLAG_ACTIVE,
-				  &lowpan_dev(dev)->ctx.table[i].flags);
-		break;
-	default:
-		return NOTIFY_DONE;
-	}
-
-	return NOTIFY_OK;
-}
-
-static struct notifier_block lowpan_notifier = {
-	.notifier_call = lowpan_event,
-};
-
 static int __init lowpan_module_init(void)
 {
 	int ret;
@@ -105,12 +75,6 @@ static int __init lowpan_module_init(void)
 	ret = lowpan_debugfs_init();
 	if (ret < 0)
 		return ret;
-
-	ret = register_netdevice_notifier(&lowpan_notifier);
-	if (ret < 0) {
-		lowpan_debugfs_exit();
-		return ret;
-	}
 
 	request_module_nowait("ipv6");
 
@@ -128,7 +92,6 @@ static int __init lowpan_module_init(void)
 static void __exit lowpan_module_exit(void)
 {
 	lowpan_debugfs_exit();
-	unregister_netdevice_notifier(&lowpan_notifier);
 }
 
 module_init(lowpan_module_init);

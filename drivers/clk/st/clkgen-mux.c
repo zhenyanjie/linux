@@ -26,10 +26,10 @@ static const char ** __init clkgen_mux_get_parents(struct device_node *np,
 						       int *num_parents)
 {
 	const char **parents;
-	unsigned int nparents;
+	int nparents;
 
 	nparents = of_clk_get_parent_count(np);
-	if (WARN_ON(!nparents))
+	if (WARN_ON(nparents <= 0))
 		return ERR_PTR(-EINVAL);
 
 	parents = kcalloc(nparents, sizeof(const char *), GFP_KERNEL);
@@ -822,10 +822,11 @@ err:
 		if (!clk_data->clks[i])
 			continue;
 
-		composite = to_clk_composite(__clk_get_hw(clk_data->clks[i]));
-		kfree(to_clk_gate(composite->gate_hw));
-		kfree(to_clk_divider(composite->rate_hw));
-		kfree(to_clk_mux(composite->mux_hw));
+		composite = container_of(__clk_get_hw(clk_data->clks[i]),
+					 struct clk_composite, hw);
+		kfree(container_of(composite->gate_hw, struct clk_gate, hw));
+		kfree(container_of(composite->rate_hw, struct clk_divider, hw));
+		kfree(container_of(composite->mux_hw, struct clk_mux, hw));
 	}
 
 	kfree(clk_data->clks);

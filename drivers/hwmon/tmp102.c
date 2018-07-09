@@ -53,6 +53,7 @@
 struct tmp102 {
 	struct i2c_client *client;
 	struct device *hwmon_dev;
+	struct thermal_zone_device *tz;
 	struct mutex lock;
 	u16 config_orig;
 	unsigned long last_update;
@@ -231,8 +232,10 @@ static int tmp102_probe(struct i2c_client *client,
 		goto fail_restore_config;
 	}
 	tmp102->hwmon_dev = hwmon_dev;
-	devm_thermal_zone_of_sensor_register(hwmon_dev, 0, hwmon_dev,
-					     &tmp102_of_thermal_ops);
+	tmp102->tz = thermal_zone_of_sensor_register(hwmon_dev, 0, hwmon_dev,
+						     &tmp102_of_thermal_ops);
+	if (IS_ERR(tmp102->tz))
+		tmp102->tz = NULL;
 
 	dev_info(dev, "initialized\n");
 
@@ -248,6 +251,7 @@ static int tmp102_remove(struct i2c_client *client)
 {
 	struct tmp102 *tmp102 = i2c_get_clientdata(client);
 
+	thermal_zone_of_sensor_unregister(tmp102->hwmon_dev, tmp102->tz);
 	hwmon_device_unregister(tmp102->hwmon_dev);
 
 	/* Stop monitoring if device was stopped originally */

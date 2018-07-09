@@ -48,8 +48,7 @@ static void dc_wdt_set(struct dc_wdt *wdt, u32 ticks)
 	spin_unlock_irqrestore(&wdt->lock, flags);
 }
 
-static int dc_wdt_restart(struct watchdog_device *wdog, unsigned long action,
-			  void *data)
+static int dc_wdt_restart(struct watchdog_device *wdog)
 {
 	struct dc_wdt *wdt = watchdog_get_drvdata(wdog);
 

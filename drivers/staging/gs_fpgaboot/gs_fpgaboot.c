@@ -34,7 +34,7 @@
 #define DEVICE_NAME "device"
 #define CLASS_NAME  "fpgaboot"
 
-static u8 bits_magic[] = {
+static uint8_t bits_magic[] = {
 	0x0, 0x9, 0xf, 0xf0, 0xf, 0xf0,
 	0xf, 0xf0, 0xf, 0xf0, 0x0, 0x0, 0x1};
 
@@ -54,7 +54,7 @@ static void read_bitstream(char *bitdata, char *buf, int *offset, int rdsize)
 static void readinfo_bitstream(char *bitdata, char *buf, int *offset)
 {
 	char tbuf[64];
-	s32 len;
+	int32_t len;
 
 	/* read section char */
 	read_bitstream(bitdata, tbuf, offset, 1);
@@ -92,6 +92,7 @@ static int readlength_bitstream(char *bitdata, int *lendata, int *offset)
 
 	return 0;
 }
+
 
 /*
  * read first 13 bytes to check bitstream magic number
@@ -200,7 +201,7 @@ static int gs_download_image(struct fpgaimage *fimage, enum wbus bus_bytes)
 #endif /* DEBUG_FPGA */
 	if (!xl_supported_prog_bus_width(bus_bytes)) {
 		pr_err("unsupported program bus width %d\n",
-		       bus_bytes);
+				bus_bytes);
 		return -1;
 	}
 
@@ -221,7 +222,7 @@ static int gs_download_image(struct fpgaimage *fimage, enum wbus bus_bytes)
 	pr_info("device init done\n");
 
 	for (i = 0; i < size; i += bus_bytes)
-		xl_shift_bytes_out(bus_bytes, bitdata + i);
+		xl_shift_bytes_out(bus_bytes, bitdata+i);
 
 	pr_info("program done\n");
 
@@ -276,8 +277,13 @@ static int gs_set_download_method(struct fpgaimage *fimage)
 static int init_driver(void)
 {
 	firmware_pdev = platform_device_register_simple("fpgaboot", -1,
-							NULL, 0);
+							 NULL, 0);
 	return PTR_ERR_OR_ZERO(firmware_pdev);
+}
+
+static void finish_driver(void)
+{
+	platform_device_unregister(firmware_pdev);
 }
 
 static int gs_fpgaboot(void)
@@ -285,7 +291,7 @@ static int gs_fpgaboot(void)
 	int err;
 	struct fpgaimage	*fimage;
 
-	fimage = kmalloc(sizeof(*fimage), GFP_KERNEL);
+	fimage = kmalloc(sizeof(struct fpgaimage), GFP_KERNEL);
 	if (!fimage)
 		return -ENOMEM;
 
@@ -330,6 +336,7 @@ err_out1:
 	kfree(fimage);
 
 	return -1;
+
 }
 
 static int __init gs_fpgaboot_init(void)
@@ -363,14 +370,14 @@ static int __init gs_fpgaboot_init(void)
 	return 0;
 
 errout:
-	platform_device_unregister(firmware_pdev);
+	finish_driver();
 
 	return err;
 }
 
 static void __exit gs_fpgaboot_exit(void)
 {
-	platform_device_unregister(firmware_pdev);
+	finish_driver();
 	pr_info("FPGA image download module removed\n");
 }
 

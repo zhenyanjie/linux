@@ -462,8 +462,10 @@ static ssize_t hdpvr_read(struct file *file, char __user *buffer, size_t count,
 			}
 
 			if (wait_event_interruptible(dev->wait_data,
-					      buf->status == BUFSTAT_READY))
-				return -ERESTARTSYS;
+					      buf->status == BUFSTAT_READY)) {
+				ret = -ERESTARTSYS;
+				goto err;
+			}
 		}
 
 		if (buf->status != BUFSTAT_READY)

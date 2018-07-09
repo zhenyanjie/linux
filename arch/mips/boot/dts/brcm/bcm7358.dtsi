@@ -18,6 +18,8 @@
 
 	aliases {
 		uart0 = &uart0;
+		uart1 = &uart1;
+		uart2 = &uart2;
 	};
 
 	cpu_intc: cpu_intc {
@@ -110,7 +112,7 @@
 		sun_top_ctrl: syscon@404000 {
 			compatible = "brcm,bcm7358-sun-top-ctrl", "syscon";
 			reg = <0x404000 0x51c>;
-			native-endian;
+			little-endian;
 		};
 
 		reboot {

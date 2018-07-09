@@ -38,7 +38,6 @@
 #include <linux/random.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/uaccess.h>
-#include <linux/elf-randomize.h>
 
 #include <asm/pgtable.h>
 #include <asm/io.h>
@@ -56,9 +55,6 @@
 #include <asm/firmware.h>
 #endif
 #include <asm/code-patching.h>
-#include <asm/exec.h>
-#include <asm/livepatch.h>
-
 #include <linux/kprobes.h>
 #include <linux/kdebug.h>
 
@@ -137,16 +133,6 @@ void __msr_check_and_clear(unsigned long bits)
 EXPORT_SYMBOL(__msr_check_and_clear);
 
 #ifdef CONFIG_PPC_FPU
-void __giveup_fpu(struct task_struct *tsk)
-{
-	save_fpu(tsk);
-	tsk->thread.regs->msr &= ~MSR_FP;
-#ifdef CONFIG_VSX
-	if (cpu_has_feature(CPU_FTR_VSX))
-		tsk->thread.regs->msr &= ~MSR_VSX;
-#endif
-}
-
 void giveup_fpu(struct task_struct *tsk)
 {
 	check_if_tm_restore_required(tsk);
@@ -201,32 +187,9 @@ void enable_kernel_fp(void)
 	}
 }
 EXPORT_SYMBOL(enable_kernel_fp);
-
-static int restore_fp(struct task_struct *tsk) {
-	if (tsk->thread.load_fp) {
-		load_fp_state(&current->thread.fp_state);
-		current->thread.load_fp++;
-		return 1;
-	}
-	return 0;
-}
-#else
-static int restore_fp(struct task_struct *tsk) { return 0; }
 #endif /* CONFIG_PPC_FPU */
 
 #ifdef CONFIG_ALTIVEC
-#define loadvec(thr) ((thr).load_vec)
-
-static void __giveup_altivec(struct task_struct *tsk)
-{
-	save_altivec(tsk);
-	tsk->thread.regs->msr &= ~MSR_VEC;
-#ifdef CONFIG_VSX
-	if (cpu_has_feature(CPU_FTR_VSX))
-		tsk->thread.regs->msr &= ~MSR_VSX;
-#endif
-}
-
 void giveup_altivec(struct task_struct *tsk)
 {
 	check_if_tm_restore_required(tsk);
@@ -266,49 +229,22 @@ void flush_altivec_to_thread(struct task_struct *tsk)
 	}
 }
 EXPORT_SYMBOL_GPL(flush_altivec_to_thread);
-
-static int restore_altivec(struct task_struct *tsk)
-{
-	if (cpu_has_feature(CPU_FTR_ALTIVEC) && tsk->thread.load_vec) {
-		load_vr_state(&tsk->thread.vr_state);
-		tsk->thread.used_vr = 1;
-		tsk->thread.load_vec++;
-
-		return 1;
-	}
-	return 0;
-}
-#else
-#define loadvec(thr) 0
-static inline int restore_altivec(struct task_struct *tsk) { return 0; }
 #endif /* CONFIG_ALTIVEC */
 
 #ifdef CONFIG_VSX
-static void __giveup_vsx(struct task_struct *tsk)
-{
-	if (tsk->thread.regs->msr & MSR_FP)
-		__giveup_fpu(tsk);
-	if (tsk->thread.regs->msr & MSR_VEC)
-		__giveup_altivec(tsk);
-	tsk->thread.regs->msr &= ~MSR_VSX;
-}
-
-static void giveup_vsx(struct task_struct *tsk)
+void giveup_vsx(struct task_struct *tsk)
 {
 	check_if_tm_restore_required(tsk);
 
 	msr_check_and_set(MSR_FP|MSR_VEC|MSR_VSX);
+	if (tsk->thread.regs->msr & MSR_FP)
+		__giveup_fpu(tsk);
+	if (tsk->thread.regs->msr & MSR_VEC)
+		__giveup_altivec(tsk);
 	__giveup_vsx(tsk);
 	msr_check_and_clear(MSR_FP|MSR_VEC|MSR_VSX);
 }
-
-static void save_vsx(struct task_struct *tsk)
-{
-	if (tsk->thread.regs->msr & MSR_FP)
-		save_fpu(tsk);
-	if (tsk->thread.regs->msr & MSR_VEC)
-		save_altivec(tsk);
-}
+EXPORT_SYMBOL(giveup_vsx);
 
 void enable_kernel_vsx(void)
 {
@@ -339,19 +275,6 @@ void flush_vsx_to_thread(struct task_struct *tsk)
 	}
 }
 EXPORT_SYMBOL_GPL(flush_vsx_to_thread);
-
-static int restore_vsx(struct task_struct *tsk)
-{
-	if (cpu_has_feature(CPU_FTR_VSX)) {
-		tsk->thread.used_vsr = 1;
-		return 1;
-	}
-
-	return 0;
-}
-#else
-static inline int restore_vsx(struct task_struct *tsk) { return 0; }
-static inline void save_vsx(struct task_struct *tsk) { }
 #endif /* CONFIG_VSX */
 
 #ifdef CONFIG_SPE
@@ -451,76 +374,12 @@ void giveup_all(struct task_struct *tsk)
 }
 EXPORT_SYMBOL(giveup_all);
 
-void restore_math(struct pt_regs *regs)
-{
-	unsigned long msr;
-
-	if (!current->thread.load_fp && !loadvec(current->thread))
-		return;
-
-	msr = regs->msr;
-	msr_check_and_set(msr_all_available);
-
-	/*
-	 * Only reload if the bit is not set in the user MSR, the bit BEING set
-	 * indicates that the registers are hot
-	 */
-	if ((!(msr & MSR_FP)) && restore_fp(current))
-		msr |= MSR_FP | current->thread.fpexc_mode;
-
-	if ((!(msr & MSR_VEC)) && restore_altivec(current))
-		msr |= MSR_VEC;
-
-	if ((msr & (MSR_FP | MSR_VEC)) == (MSR_FP | MSR_VEC) &&
-			restore_vsx(current)) {
-		msr |= MSR_VSX;
-	}
-
-	msr_check_and_clear(msr_all_available);
-
-	regs->msr = msr;
-}
-
-void save_all(struct task_struct *tsk)
-{
-	unsigned long usermsr;
-
-	if (!tsk->thread.regs)
-		return;
-
-	usermsr = tsk->thread.regs->msr;
-
-	if ((usermsr & msr_all_available) == 0)
-		return;
-
-	msr_check_and_set(msr_all_available);
-
-	/*
-	 * Saving the way the register space is in hardware, save_vsx boils
-	 * down to a save_fpu() and save_altivec()
-	 */
-	if (usermsr & MSR_VSX) {
-		save_vsx(tsk);
-	} else {
-		if (usermsr & MSR_FP)
-			save_fpu(tsk);
-
-		if (usermsr & MSR_VEC)
-			save_altivec(tsk);
-	}
-
-	if (usermsr & MSR_SPE)
-		__giveup_spe(tsk);
-
-	msr_check_and_clear(msr_all_available);
-}
-
 void flush_all_to_thread(struct task_struct *tsk)
 {
 	if (tsk->thread.regs) {
 		preempt_disable();
 		BUG_ON(tsk != current);
-		save_all(tsk);
+		giveup_all(tsk);
 
 #ifdef CONFIG_SPE
 		if (tsk->thread.regs->msr & MSR_SPE)
@@ -973,9 +832,17 @@ void restore_tm_state(struct pt_regs *regs)
 
 	msr_diff = current->thread.ckpt_regs.msr & ~regs->msr;
 	msr_diff &= MSR_FP | MSR_VEC | MSR_VSX;
-
-	restore_math(regs);
-
+	if (msr_diff & MSR_FP) {
+		msr_check_and_set(MSR_FP);
+		load_fp_state(&current->thread.fp_state);
+		msr_check_and_clear(MSR_FP);
+		regs->msr |= current->thread.fpexc_mode;
+	}
+	if (msr_diff & MSR_VEC) {
+		msr_check_and_set(MSR_VEC);
+		load_vr_state(&current->thread.vr_state);
+		msr_check_and_clear(MSR_VEC);
+	}
 	regs->msr |= msr_diff;
 }
 
@@ -1079,7 +946,7 @@ struct task_struct *__switch_to(struct task_struct *prev,
 	}
 #endif /* CONFIG_PPC64 */
 
-#ifdef CONFIG_PPC_STD_MMU_64
+#ifdef CONFIG_PPC_BOOK3S_64
 	batch = this_cpu_ptr(&ppc64_tlb_batch);
 	if (batch->active) {
 		current_thread_info()->local_flags |= _TLF_LAZY_MMU;
@@ -1087,7 +954,7 @@ struct task_struct *__switch_to(struct task_struct *prev,
 			__flush_tlb_pending(batch);
 		batch->active = 0;
 	}
-#endif /* CONFIG_PPC_STD_MMU_64 */
+#endif /* CONFIG_PPC_BOOK3S_64 */
 
 #ifdef CONFIG_PPC_ADV_DEBUG_REGS
 	switch_booke_debug_regs(&new->thread.debug);
@@ -1133,16 +1000,13 @@ struct task_struct *__switch_to(struct task_struct *prev,
 
 	last = _switch(old_thread, new_thread);
 
-#ifdef CONFIG_PPC_STD_MMU_64
+#ifdef CONFIG_PPC_BOOK3S_64
 	if (current_thread_info()->local_flags & _TLF_LAZY_MMU) {
 		current_thread_info()->local_flags &= ~_TLF_LAZY_MMU;
 		batch = this_cpu_ptr(&ppc64_tlb_batch);
 		batch->active = 1;
 	}
-
-	if (current_thread_info()->task->thread.regs)
-		restore_math(current_thread_info()->task->thread.regs);
-#endif /* CONFIG_PPC_STD_MMU_64 */
+#endif /* CONFIG_PPC_BOOK3S_64 */
 
 	return last;
 }
@@ -1329,6 +1193,10 @@ void show_regs(struct pt_regs * regs)
 		show_instructions(regs);
 }
 
+void exit_thread(void)
+{
+}
+
 void flush_thread(void)
 {
 #ifdef CONFIG_HAVE_HW_BREAKPOINT
@@ -1373,9 +1241,6 @@ static void setup_ksp_vsid(struct task_struct *p, unsigned long sp)
 	unsigned long sp_vsid;
 	unsigned long llp = mmu_psize_defs[mmu_linear_psize].sllp;
 
-	if (radix_enabled())
-		return;
-
 	if (mmu_has_feature(MMU_FTR_1T_SEGMENT))
 		sp_vsid = get_kernel_vsid(sp, MMU_SEGSIZE_1T)
 			<< SLB_VSID_SHIFT_1T;
@@ -1402,15 +1267,13 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 	extern void ret_from_kernel_thread(void);
 	void (*f)(void);
 	unsigned long sp = (unsigned long)task_stack_page(p) + THREAD_SIZE;
-	struct thread_info *ti = task_thread_info(p);
-
-	klp_init_thread_info(ti);
 
 	/* Copy registers */
 	sp -= sizeof(struct pt_regs);
 	childregs = (struct pt_regs *) sp;
 	if (unlikely(p->flags & PF_KTHREAD)) {
 		/* kernel thread */
+		struct thread_info *ti = (void *)task_stack_page(p);
 		memset(childregs, 0, sizeof(struct pt_regs));
 		childregs->gpr[1] = sp + sizeof(struct pt_regs);
 		/* function */
@@ -1444,7 +1307,6 @@ int copy_thread(unsigned long clone_flags, unsigned long usp,
 
 		f = ret_from_fork;
 	}
-	childregs->msr &= ~(MSR_FP|MSR_VEC|MSR_VSX);
 	sp -= STACK_FRAME_OVERHEAD;
 
 	/*
@@ -1504,16 +1366,6 @@ void start_thread(struct pt_regs *regs, unsigned long start, unsigned long sp)
 		struct pt_regs *regs = task_stack_page(current) + THREAD_SIZE;
 		current->thread.regs = regs - 1;
 	}
-
-#ifdef CONFIG_PPC_TRANSACTIONAL_MEM
-	/*
-	 * Clear any transactional state, we're exec()ing. The cause is
-	 * not important as there will never be a recheckpoint so it's not
-	 * user visible.
-	 */
-	if (MSR_TM_SUSPENDED(mfmsr()))
-		tm_reclaim_current(0);
-#endif
 
 	memset(regs->gpr, 0, sizeof(regs->gpr));
 	regs->ctr = 0;
@@ -1934,8 +1786,7 @@ unsigned long arch_randomize_brk(struct mm_struct *mm)
 	 * the heap, we can put it above 1TB so it is backed by a 1TB
 	 * segment. Otherwise the heap will be in the bottom 1TB
 	 * which always uses 256MB segments and this may result in a
-	 * performance penalty. We don't need to worry about radix. For
-	 * radix, mmu_highuser_ssize remains unchanged from 256MB.
+	 * performance penalty.
 	 */
 	if (!is_32bit_task() && (mmu_highuser_ssize == MMU_SEGSIZE_1T))
 		base = max_t(unsigned long, mm->brk, 1UL << SID_SHIFT_1T);

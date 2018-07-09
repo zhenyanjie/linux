@@ -284,7 +284,7 @@ kernel_physical_mapping_init(unsigned long start,
 	 */
 	mapping_iter = 1;
 
-	if (!boot_cpu_has(X86_FEATURE_PSE))
+	if (!cpu_has_pse)
 		use_pse = 0;
 
 repeat:
@@ -388,6 +388,7 @@ repeat:
 }
 
 pte_t *kmap_pte;
+pgprot_t kmap_prot;
 
 static inline pte_t *kmap_get_fixmap_pte(unsigned long vaddr)
 {
@@ -404,6 +405,8 @@ static void __init kmap_init(void)
 	 */
 	kmap_vstart = __fix_to_virt(FIX_KMAP_BEGIN);
 	kmap_pte = kmap_get_fixmap_pte(kmap_vstart);
+
+	kmap_prot = PAGE_KERNEL;
 }
 
 #ifdef CONFIG_HIGHMEM
@@ -804,6 +807,9 @@ void __init mem_init(void)
 	BUILD_BUG_ON(VMALLOC_START			>= VMALLOC_END);
 #undef high_memory
 #undef __FIXADDR_TOP
+#ifdef CONFIG_RANDOMIZE_BASE
+	BUILD_BUG_ON(CONFIG_RANDOMIZE_BASE_MAX_OFFSET > KERNEL_IMAGE_SIZE);
+#endif
 
 #ifdef CONFIG_HIGHMEM
 	BUG_ON(PKMAP_BASE + LAST_PKMAP*PAGE_SIZE	> FIXADDR_START);
@@ -865,6 +871,7 @@ static noinline int do_test_wp_bit(void)
 	return flag;
 }
 
+#ifdef CONFIG_DEBUG_RODATA
 const int rodata_test_data = 0xC3;
 EXPORT_SYMBOL_GPL(rodata_test_data);
 
@@ -953,3 +960,5 @@ void mark_rodata_ro(void)
 	if (__supported_pte_mask & _PAGE_NX)
 		debug_checkwx();
 }
+#endif
+

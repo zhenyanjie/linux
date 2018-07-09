@@ -43,7 +43,15 @@
 #define MICROCODE_VERSION	"2.01"
 
 static struct microcode_ops	*microcode_ops;
+
 static bool dis_ucode_ldr;
+
+static int __init disable_loader(char *str)
+{
+	dis_ucode_ldr = true;
+	return 1;
+}
+__setup("dis_ucode_ldr", disable_loader);
 
 /*
  * Synchronization.
@@ -73,16 +81,15 @@ struct cpu_info_ctx {
 
 static bool __init check_loader_disabled_bsp(void)
 {
-	static const char *__dis_opt_str = "dis_ucode_ldr";
-
 #ifdef CONFIG_X86_32
 	const char *cmdline = (const char *)__pa_nodebug(boot_command_line);
-	const char *option  = (const char *)__pa_nodebug(__dis_opt_str);
+	const char *opt	    = "dis_ucode_ldr";
+	const char *option  = (const char *)__pa_nodebug(opt);
 	bool *res = (bool *)__pa_nodebug(&dis_ucode_ldr);
 
 #else /* CONFIG_X86_64 */
 	const char *cmdline = boot_command_line;
-	const char *option  = __dis_opt_str;
+	const char *option  = "dis_ucode_ldr";
 	bool *res = &dis_ucode_ldr;
 #endif
 
@@ -175,7 +182,7 @@ void load_ucode_ap(void)
 	}
 }
 
-static int __init save_microcode_in_initrd(void)
+int __init save_microcode_in_initrd(void)
 {
 	struct cpuinfo_x86 *c = &boot_cpu_data;
 
@@ -472,7 +479,7 @@ static enum ucode_state microcode_init_cpu(int cpu, bool refresh_fw)
 	enum ucode_state ustate;
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu;
 
-	if (uci->valid)
+	if (uci && uci->valid)
 		return UCODE_OK;
 
 	if (collect_cpu_info(cpu))
@@ -623,7 +630,7 @@ int __init microcode_init(void)
 	struct cpuinfo_x86 *c = &boot_cpu_data;
 	int error;
 
-	if (dis_ucode_ldr)
+	if (paravirt_enabled() || dis_ucode_ldr)
 		return -EINVAL;
 
 	if (c->x86_vendor == X86_VENDOR_INTEL)
@@ -691,5 +698,4 @@ int __init microcode_init(void)
 	return error;
 
 }
-fs_initcall(save_microcode_in_initrd);
 late_initcall(microcode_init);

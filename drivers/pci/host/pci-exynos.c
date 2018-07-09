@@ -318,6 +318,7 @@ static int exynos_pcie_establish_link(struct pcie_port *pp)
 {
 	struct exynos_pcie *exynos_pcie = to_exynos_pcie(pp);
 	u32 val;
+	unsigned int retries;
 
 	if (dw_pcie_link_up(pp)) {
 		dev_err(pp->dev, "Link already up\n");
@@ -356,8 +357,13 @@ static int exynos_pcie_establish_link(struct pcie_port *pp)
 			  PCIE_APP_LTSSM_ENABLE);
 
 	/* check if the link is up or not */
-	if (!dw_pcie_wait_for_link(pp))
-		return 0;
+	for (retries = 0; retries < 10; retries++) {
+		if (dw_pcie_link_up(pp)) {
+			dev_info(pp->dev, "Link up\n");
+			return 0;
+		}
+		mdelay(100);
+	}
 
 	while (exynos_phy_readl(exynos_pcie, PCIE_PHY_PLL_LOCKED) == 0) {
 		val = exynos_blk_readl(exynos_pcie, PCIE_PHY_PLL_LOCKED);
@@ -366,7 +372,8 @@ static int exynos_pcie_establish_link(struct pcie_port *pp)
 	/* power off phy */
 	exynos_pcie_power_off_phy(pp);
 
-	return -ETIMEDOUT;
+	dev_err(pp->dev, "PCIe Link Fail\n");
+	return -EINVAL;
 }
 
 static void exynos_pcie_clear_irq_pulse(struct pcie_port *pp)

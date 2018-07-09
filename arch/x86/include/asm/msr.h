@@ -42,6 +42,14 @@ struct saved_msrs {
 	struct saved_msr *array;
 };
 
+static inline unsigned long long native_read_tscp(unsigned int *aux)
+{
+	unsigned long low, high;
+	asm volatile(".byte 0x0f,0x01,0xf9"
+		     : "=a" (low), "=d" (high), "=c" (*aux));
+	return low | ((u64)high << 32);
+}
+
 /*
  * both i386 and x86_64 returns 64-bit value in edx:eax, but gcc's "A"
  * constraint has different meanings. For i386, "A" means exactly
@@ -84,10 +92,7 @@ static inline unsigned long long native_read_msr(unsigned int msr)
 {
 	DECLARE_ARGS(val, low, high);
 
-	asm volatile("1: rdmsr\n"
-		     "2:\n"
-		     _ASM_EXTABLE_HANDLE(1b, 2b, ex_handler_rdmsr_unsafe)
-		     : EAX_EDX_RET(val, low, high) : "c" (msr));
+	asm volatile("rdmsr" : EAX_EDX_RET(val, low, high) : "c" (msr));
 	if (msr_tracepoint_active(__tracepoint_read_msr))
 		do_trace_read_msr(msr, EAX_EDX_VAL(val, low, high), 0);
 	return EAX_EDX_VAL(val, low, high);
@@ -101,10 +106,7 @@ static inline unsigned long long native_read_msr_safe(unsigned int msr,
 	asm volatile("2: rdmsr ; xor %[err],%[err]\n"
 		     "1:\n\t"
 		     ".section .fixup,\"ax\"\n\t"
-		     "3: mov %[fault],%[err]\n\t"
-		     "xorl %%eax, %%eax\n\t"
-		     "xorl %%edx, %%edx\n\t"
-		     "jmp 1b\n\t"
+		     "3:  mov %[fault],%[err] ; jmp 1b\n\t"
 		     ".previous\n\t"
 		     _ASM_EXTABLE(2b, 3b)
 		     : [err] "=r" (*err), EAX_EDX_RET(val, low, high)
@@ -114,15 +116,11 @@ static inline unsigned long long native_read_msr_safe(unsigned int msr,
 	return EAX_EDX_VAL(val, low, high);
 }
 
-/* Can be uninlined because referenced by paravirt */
-notrace static inline void native_write_msr(unsigned int msr,
-					    unsigned low, unsigned high)
+static inline void native_write_msr(unsigned int msr,
+				    unsigned low, unsigned high)
 {
-	asm volatile("1: wrmsr\n"
-		     "2:\n"
-		     _ASM_EXTABLE_HANDLE(1b, 2b, ex_handler_wrmsr_unsafe)
-		     : : "c" (msr), "a"(low), "d" (high) : "memory");
-	if (msr_tracepoint_active(__tracepoint_write_msr))
+	asm volatile("wrmsr" : : "c" (msr), "a"(low), "d" (high) : "memory");
+	if (msr_tracepoint_active(__tracepoint_read_msr))
 		do_trace_write_msr(msr, ((u64)high << 32 | low), 0);
 }
 
@@ -141,7 +139,7 @@ notrace static inline int native_write_msr_safe(unsigned int msr,
 		     : "c" (msr), "0" (low), "d" (high),
 		       [fault] "i" (-EIO)
 		     : "memory");
-	if (msr_tracepoint_active(__tracepoint_write_msr))
+	if (msr_tracepoint_active(__tracepoint_read_msr))
 		do_trace_write_msr(msr, ((u64)high << 32 | low), err);
 	return err;
 }

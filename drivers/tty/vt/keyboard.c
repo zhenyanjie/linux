@@ -366,22 +366,34 @@ static void to_utf8(struct vc_data *vc, uint c)
 
 static void do_compute_shiftstate(void)
 {
-	unsigned int k, sym, val;
+	unsigned int i, j, k, sym, val;
 
 	shift_state = 0;
 	memset(shift_down, 0, sizeof(shift_down));
 
-	for_each_set_bit(k, key_down, min(NR_KEYS, KEY_CNT)) {
-		sym = U(key_maps[0][k]);
-		if (KTYP(sym) != KT_SHIFT && KTYP(sym) != KT_SLOCK)
+	for (i = 0; i < ARRAY_SIZE(key_down); i++) {
+
+		if (!key_down[i])
 			continue;
 
-		val = KVAL(sym);
-		if (val == KVAL(K_CAPSSHIFT))
-			val = KVAL(K_SHIFT);
+		k = i * BITS_PER_LONG;
 
-		shift_down[val]++;
-		shift_state |= BIT(val);
+		for (j = 0; j < BITS_PER_LONG; j++, k++) {
+
+			if (!test_bit(k, key_down))
+				continue;
+
+			sym = U(key_maps[0][k]);
+			if (KTYP(sym) != KT_SHIFT && KTYP(sym) != KT_SLOCK)
+				continue;
+
+			val = KVAL(sym);
+			if (val == KVAL(K_CAPSSHIFT))
+				val = KVAL(K_SHIFT);
+
+			shift_down[val]++;
+			shift_state |= (1 << val);
+		}
 	}
 }
 
@@ -1694,12 +1706,16 @@ int vt_do_diacrit(unsigned int cmd, void __user *udp, int perm)
 			return -EINVAL;
 
 		if (ct) {
+			dia = kmalloc(sizeof(struct kbdiacr) * ct,
+								GFP_KERNEL);
+			if (!dia)
+				return -ENOMEM;
 
-			dia = memdup_user(a->kbdiacr,
-					sizeof(struct kbdiacr) * ct);
-			if (IS_ERR(dia))
-				return PTR_ERR(dia);
-
+			if (copy_from_user(dia, a->kbdiacr,
+					sizeof(struct kbdiacr) * ct)) {
+				kfree(dia);
+				return -EFAULT;
+			}
 		}
 
 		spin_lock_irqsave(&kbd_event_lock, flags);

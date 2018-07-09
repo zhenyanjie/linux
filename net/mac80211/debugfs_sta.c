@@ -3,7 +3,6 @@
  * Copyright (c) 2006	Jiri Benc <jbenc@suse.cz>
  * Copyright 2007	Johannes Berg <johannes@sipsolutions.net>
  * Copyright 2013-2014  Intel Mobile Communications GmbH
- * Copyright(c) 2016 Intel Deutschland GmbH
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -52,54 +51,31 @@ static const struct file_operations sta_ ##name## _ops = {		\
 
 STA_FILE(aid, sta.aid, D);
 
-static const char * const sta_flag_names[] = {
-#define FLAG(F) [WLAN_STA_##F] = #F
-	FLAG(AUTH),
-	FLAG(ASSOC),
-	FLAG(PS_STA),
-	FLAG(AUTHORIZED),
-	FLAG(SHORT_PREAMBLE),
-	FLAG(WDS),
-	FLAG(CLEAR_PS_FILT),
-	FLAG(MFP),
-	FLAG(BLOCK_BA),
-	FLAG(PS_DRIVER),
-	FLAG(PSPOLL),
-	FLAG(TDLS_PEER),
-	FLAG(TDLS_PEER_AUTH),
-	FLAG(TDLS_INITIATOR),
-	FLAG(TDLS_CHAN_SWITCH),
-	FLAG(TDLS_OFF_CHANNEL),
-	FLAG(TDLS_WIDER_BW),
-	FLAG(UAPSD),
-	FLAG(SP),
-	FLAG(4ADDR_EVENT),
-	FLAG(INSERTED),
-	FLAG(RATE_CONTROL),
-	FLAG(TOFFSET_KNOWN),
-	FLAG(MPSP_OWNER),
-	FLAG(MPSP_RECIPIENT),
-	FLAG(PS_DELIVER),
-#undef FLAG
-};
-
 static ssize_t sta_flags_read(struct file *file, char __user *userbuf,
 			      size_t count, loff_t *ppos)
 {
-	char buf[16 * NUM_WLAN_STA_FLAGS], *pos = buf;
-	char *end = buf + sizeof(buf) - 1;
+	char buf[121];
 	struct sta_info *sta = file->private_data;
-	unsigned int flg;
 
-	BUILD_BUG_ON(ARRAY_SIZE(sta_flag_names) != NUM_WLAN_STA_FLAGS);
+#define TEST(flg) \
+	test_sta_flag(sta, WLAN_STA_##flg) ? #flg "\n" : ""
 
-	for (flg = 0; flg < NUM_WLAN_STA_FLAGS; flg++) {
-		if (test_sta_flag(sta, flg))
-			pos += scnprintf(pos, end - pos, "%s\n",
-					 sta_flag_names[flg]);
-	}
-
-	return simple_read_from_buffer(userbuf, count, ppos, buf, strlen(buf));
+	int res = scnprintf(buf, sizeof(buf),
+			    "%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s%s",
+			    TEST(AUTH), TEST(ASSOC), TEST(PS_STA),
+			    TEST(PS_DRIVER), TEST(AUTHORIZED),
+			    TEST(SHORT_PREAMBLE),
+			    sta->sta.wme ? "WME\n" : "",
+			    TEST(WDS), TEST(CLEAR_PS_FILT),
+			    TEST(MFP), TEST(BLOCK_BA), TEST(PSPOLL),
+			    TEST(UAPSD), TEST(SP), TEST(TDLS_PEER),
+			    TEST(TDLS_PEER_AUTH), TEST(TDLS_INITIATOR),
+			    TEST(TDLS_CHAN_SWITCH), TEST(TDLS_OFF_CHANNEL),
+			    TEST(4ADDR_EVENT), TEST(INSERTED),
+			    TEST(RATE_CONTROL), TEST(TOFFSET_KNOWN),
+			    TEST(MPSP_OWNER), TEST(MPSP_RECIPIENT));
+#undef TEST
+	return simple_read_from_buffer(userbuf, count, ppos, buf, res);
 }
 STA_OPS(flags);
 
@@ -175,12 +151,11 @@ static ssize_t sta_agg_status_read(struct file *file, char __user *userbuf,
 static ssize_t sta_agg_status_write(struct file *file, const char __user *userbuf,
 				    size_t count, loff_t *ppos)
 {
-	char _buf[25] = {}, *buf = _buf;
+	char _buf[12] = {}, *buf = _buf;
 	struct sta_info *sta = file->private_data;
 	bool start, tx;
 	unsigned long tid;
-	char *pos;
-	int ret, timeout = 5000;
+	int ret;
 
 	if (count > sizeof(_buf))
 		return -EINVAL;
@@ -189,48 +164,37 @@ static ssize_t sta_agg_status_write(struct file *file, const char __user *userbu
 		return -EFAULT;
 
 	buf[sizeof(_buf) - 1] = '\0';
-	pos = buf;
-	buf = strsep(&pos, " ");
-	if (!buf)
-		return -EINVAL;
 
-	if (!strcmp(buf, "tx"))
+	if (strncmp(buf, "tx ", 3) == 0) {
+		buf += 3;
 		tx = true;
-	else if (!strcmp(buf, "rx"))
+	} else if (strncmp(buf, "rx ", 3) == 0) {
+		buf += 3;
 		tx = false;
-	else
+	} else
 		return -EINVAL;
 
-	buf = strsep(&pos, " ");
-	if (!buf)
-		return -EINVAL;
-	if (!strcmp(buf, "start")) {
+	if (strncmp(buf, "start ", 6) == 0) {
+		buf += 6;
 		start = true;
 		if (!tx)
 			return -EINVAL;
-	} else if (!strcmp(buf, "stop")) {
+	} else if (strncmp(buf, "stop ", 5) == 0) {
+		buf += 5;
 		start = false;
-	} else {
+	} else
 		return -EINVAL;
-	}
-
-	buf = strsep(&pos, " ");
-	if (!buf)
-		return -EINVAL;
-	if (sscanf(buf, "timeout=%d", &timeout) == 1) {
-		buf = strsep(&pos, " ");
-		if (!buf || !tx || !start)
-			return -EINVAL;
-	}
 
 	ret = kstrtoul(buf, 0, &tid);
-	if (ret || tid >= IEEE80211_NUM_TIDS)
+	if (ret)
+		return ret;
+
+	if (tid >= IEEE80211_NUM_TIDS)
 		return -EINVAL;
 
 	if (tx) {
 		if (start)
-			ret = ieee80211_start_tx_ba_session(&sta->sta, tid,
-							    timeout);
+			ret = ieee80211_start_tx_ba_session(&sta->sta, tid, 5000);
 		else
 			ret = ieee80211_stop_tx_ba_session(&sta->sta, tid);
 	} else {
@@ -358,14 +322,14 @@ STA_OPS(vht_capa);
 
 #define DEBUGFS_ADD(name) \
 	debugfs_create_file(#name, 0400, \
-		sta->debugfs_dir, sta, &sta_ ##name## _ops);
+		sta->debugfs.dir, sta, &sta_ ##name## _ops);
 
 #define DEBUGFS_ADD_COUNTER(name, field)				\
 	if (sizeof(sta->field) == sizeof(u32))				\
-		debugfs_create_u32(#name, 0400, sta->debugfs_dir,	\
+		debugfs_create_u32(#name, 0400, sta->debugfs.dir,	\
 			(u32 *) &sta->field);				\
 	else								\
-		debugfs_create_u64(#name, 0400, sta->debugfs_dir,	\
+		debugfs_create_u64(#name, 0400, sta->debugfs.dir,	\
 			(u64 *) &sta->field);
 
 void ieee80211_sta_debugfs_add(struct sta_info *sta)
@@ -374,6 +338,8 @@ void ieee80211_sta_debugfs_add(struct sta_info *sta)
 	struct ieee80211_sub_if_data *sdata = sta->sdata;
 	struct dentry *stations_dir = sta->sdata->debugfs.subdir_stations;
 	u8 mac[3*ETH_ALEN];
+
+	sta->debugfs.add_has_run = true;
 
 	if (!stations_dir)
 		return;
@@ -389,8 +355,8 @@ void ieee80211_sta_debugfs_add(struct sta_info *sta)
 	 * destroyed quickly enough the old station's debugfs
 	 * dir might still be around.
 	 */
-	sta->debugfs_dir = debugfs_create_dir(mac, stations_dir);
-	if (!sta->debugfs_dir)
+	sta->debugfs.dir = debugfs_create_dir(mac, stations_dir);
+	if (!sta->debugfs.dir)
 		return;
 
 	DEBUGFS_ADD(flags);
@@ -406,14 +372,14 @@ void ieee80211_sta_debugfs_add(struct sta_info *sta)
 
 	if (sizeof(sta->driver_buffered_tids) == sizeof(u32))
 		debugfs_create_x32("driver_buffered_tids", 0400,
-				   sta->debugfs_dir,
+				   sta->debugfs.dir,
 				   (u32 *)&sta->driver_buffered_tids);
 	else
 		debugfs_create_x64("driver_buffered_tids", 0400,
-				   sta->debugfs_dir,
+				   sta->debugfs.dir,
 				   (u64 *)&sta->driver_buffered_tids);
 
-	drv_sta_add_debugfs(local, sdata, &sta->sta, sta->debugfs_dir);
+	drv_sta_add_debugfs(local, sdata, &sta->sta, sta->debugfs.dir);
 }
 
 void ieee80211_sta_debugfs_remove(struct sta_info *sta)
@@ -421,7 +387,7 @@ void ieee80211_sta_debugfs_remove(struct sta_info *sta)
 	struct ieee80211_local *local = sta->local;
 	struct ieee80211_sub_if_data *sdata = sta->sdata;
 
-	drv_sta_remove_debugfs(local, sdata, &sta->sta, sta->debugfs_dir);
-	debugfs_remove_recursive(sta->debugfs_dir);
-	sta->debugfs_dir = NULL;
+	drv_sta_remove_debugfs(local, sdata, &sta->sta, sta->debugfs.dir);
+	debugfs_remove_recursive(sta->debugfs.dir);
+	sta->debugfs.dir = NULL;
 }

@@ -14,6 +14,8 @@
 #include <linux/completion.h>
 #include <linux/kernel.h>
 #include <linux/export.h>
+#include <linux/mempool.h>
+#include <linux/slab.h>
 #include <linux/init.h>
 #include <linux/pci.h>
 #include <linux/delay.h>
@@ -37,6 +39,39 @@
 #include "scsi_priv.h"
 #include "scsi_logging.h"
 
+
+#define SG_MEMPOOL_NR		ARRAY_SIZE(scsi_sg_pools)
+#define SG_MEMPOOL_SIZE		2
+
+struct scsi_host_sg_pool {
+	size_t		size;
+	char		*name;
+	struct kmem_cache	*slab;
+	mempool_t	*pool;
+};
+
+#define SP(x) { .size = x, "sgpool-" __stringify(x) }
+#if (SCSI_MAX_SG_SEGMENTS < 32)
+#error SCSI_MAX_SG_SEGMENTS is too small (must be 32 or greater)
+#endif
+static struct scsi_host_sg_pool scsi_sg_pools[] = {
+	SP(8),
+	SP(16),
+#if (SCSI_MAX_SG_SEGMENTS > 32)
+	SP(32),
+#if (SCSI_MAX_SG_SEGMENTS > 64)
+	SP(64),
+#if (SCSI_MAX_SG_SEGMENTS > 128)
+	SP(128),
+#if (SCSI_MAX_SG_SEGMENTS > 256)
+#error SCSI_MAX_SG_SEGMENTS is too large (256 MAX)
+#endif
+#endif
+#endif
+#endif
+	SP(SCSI_MAX_SG_SEGMENTS)
+};
+#undef SP
 
 struct kmem_cache *scsi_sdb_cache;
 
@@ -518,6 +553,66 @@ void scsi_run_host_queues(struct Scsi_Host *shost)
 		scsi_run_queue(sdev->request_queue);
 }
 
+static inline unsigned int scsi_sgtable_index(unsigned short nents)
+{
+	unsigned int index;
+
+	BUG_ON(nents > SCSI_MAX_SG_SEGMENTS);
+
+	if (nents <= 8)
+		index = 0;
+	else
+		index = get_count_order(nents) - 3;
+
+	return index;
+}
+
+static void scsi_sg_free(struct scatterlist *sgl, unsigned int nents)
+{
+	struct scsi_host_sg_pool *sgp;
+
+	sgp = scsi_sg_pools + scsi_sgtable_index(nents);
+	mempool_free(sgl, sgp->pool);
+}
+
+static struct scatterlist *scsi_sg_alloc(unsigned int nents, gfp_t gfp_mask)
+{
+	struct scsi_host_sg_pool *sgp;
+
+	sgp = scsi_sg_pools + scsi_sgtable_index(nents);
+	return mempool_alloc(sgp->pool, gfp_mask);
+}
+
+static void scsi_free_sgtable(struct scsi_data_buffer *sdb, bool mq)
+{
+	if (mq && sdb->table.orig_nents <= SCSI_MAX_SG_SEGMENTS)
+		return;
+	__sg_free_table(&sdb->table, SCSI_MAX_SG_SEGMENTS, mq, scsi_sg_free);
+}
+
+static int scsi_alloc_sgtable(struct scsi_data_buffer *sdb, int nents, bool mq)
+{
+	struct scatterlist *first_chunk = NULL;
+	int ret;
+
+	BUG_ON(!nents);
+
+	if (mq) {
+		if (nents <= SCSI_MAX_SG_SEGMENTS) {
+			sdb->table.nents = sdb->table.orig_nents = nents;
+			sg_init_table(sdb->table.sgl, nents);
+			return 0;
+		}
+		first_chunk = sdb->table.sgl;
+	}
+
+	ret = __sg_alloc_table(&sdb->table, nents, SCSI_MAX_SG_SEGMENTS,
+			       first_chunk, GFP_ATOMIC, scsi_sg_alloc);
+	if (unlikely(ret))
+		scsi_free_sgtable(sdb, mq);
+	return ret;
+}
+
 static void scsi_uninit_cmd(struct scsi_cmnd *cmd)
 {
 	if (cmd->request->cmd_type == REQ_TYPE_FS) {
@@ -530,17 +625,12 @@ static void scsi_uninit_cmd(struct scsi_cmnd *cmd)
 
 static void scsi_mq_free_sgtables(struct scsi_cmnd *cmd)
 {
-	struct scsi_data_buffer *sdb;
-
 	if (cmd->sdb.table.nents)
-		sg_free_table_chained(&cmd->sdb.table, true);
-	if (cmd->request->next_rq) {
-		sdb = cmd->request->next_rq->special;
-		if (sdb)
-			sg_free_table_chained(&sdb->table, true);
-	}
+		scsi_free_sgtable(&cmd->sdb, true);
+	if (cmd->request->next_rq && cmd->request->next_rq->special)
+		scsi_free_sgtable(cmd->request->next_rq->special, true);
 	if (scsi_prot_sg_count(cmd))
-		sg_free_table_chained(&cmd->prot_sdb->table, true);
+		scsi_free_sgtable(cmd->prot_sdb, true);
 }
 
 static void scsi_mq_uninit_cmd(struct scsi_cmnd *cmd)
@@ -579,19 +669,19 @@ static void scsi_mq_uninit_cmd(struct scsi_cmnd *cmd)
 static void scsi_release_buffers(struct scsi_cmnd *cmd)
 {
 	if (cmd->sdb.table.nents)
-		sg_free_table_chained(&cmd->sdb.table, false);
+		scsi_free_sgtable(&cmd->sdb, false);
 
 	memset(&cmd->sdb, 0, sizeof(cmd->sdb));
 
 	if (scsi_prot_sg_count(cmd))
-		sg_free_table_chained(&cmd->prot_sdb->table, false);
+		scsi_free_sgtable(cmd->prot_sdb, false);
 }
 
 static void scsi_release_bidi_buffers(struct scsi_cmnd *cmd)
 {
 	struct scsi_data_buffer *bidi_sdb = cmd->request->next_rq->special;
 
-	sg_free_table_chained(&bidi_sdb->table, false);
+	scsi_free_sgtable(bidi_sdb, false);
 	kmem_cache_free(scsi_sdb_cache, bidi_sdb);
 	cmd->request->next_rq->special = NULL;
 }
@@ -821,12 +911,9 @@ void scsi_io_completion(struct scsi_cmnd *cmd, unsigned int good_bytes)
 	}
 
 	/*
-	 * special case: failed zero length commands always need to
-	 * drop down into the retry code. Otherwise, if we finished
-	 * all bytes in the request we are done now.
+	 * If we finished all bytes in the request we are done now.
 	 */
-	if (!(blk_rq_bytes(req) == 0 && error) &&
-	    !scsi_end_request(req, error, good_bytes, 0))
+	if (!scsi_end_request(req, error, good_bytes, 0))
 		return;
 
 	/*
@@ -998,8 +1085,8 @@ static int scsi_init_sgtable(struct request *req, struct scsi_data_buffer *sdb)
 	/*
 	 * If sg table allocation fails, requeue request later.
 	 */
-	if (unlikely(sg_alloc_table_chained(&sdb->table, req->nr_phys_segments,
-					sdb->table.sgl)))
+	if (unlikely(scsi_alloc_sgtable(sdb, req->nr_phys_segments,
+					req->mq_ctx != NULL)))
 		return BLKPREP_DEFER;
 
 	/* 
@@ -1071,8 +1158,7 @@ int scsi_init_io(struct scsi_cmnd *cmd)
 
 		ivecs = blk_rq_count_integrity_sg(rq->q, rq->bio);
 
-		if (sg_alloc_table_chained(&prot_sdb->table, ivecs,
-				prot_sdb->table.sgl)) {
+		if (scsi_alloc_sgtable(prot_sdb, ivecs, is_mq)) {
 			error = BLKPREP_DEFER;
 			goto err_exit;
 		}
@@ -1846,7 +1932,7 @@ static int scsi_mq_prep_fn(struct request *req)
 	if (scsi_host_get_prot(shost)) {
 		cmd->prot_sdb = (void *)sg +
 			min_t(unsigned int,
-			      shost->sg_tablesize, SG_CHUNK_SIZE) *
+			      shost->sg_tablesize, SCSI_MAX_SG_SEGMENTS) *
 			sizeof(struct scatterlist);
 		memset(cmd->prot_sdb, 0, sizeof(struct scsi_data_buffer));
 
@@ -2019,7 +2105,7 @@ static void __scsi_init_queue(struct Scsi_Host *shost, struct request_queue *q)
 	 * this limit is imposed by hardware restrictions
 	 */
 	blk_queue_max_segments(q, min_t(unsigned short, shost->sg_tablesize,
-					SG_MAX_SEGMENTS));
+					SCSI_MAX_SG_CHAIN_SEGMENTS));
 
 	if (scsi_host_prot_dma(shost)) {
 		shost->sg_prot_tablesize =
@@ -2101,8 +2187,8 @@ int scsi_mq_setup_tags(struct Scsi_Host *shost)
 	unsigned int cmd_size, sgl_size, tbl_size;
 
 	tbl_size = shost->sg_tablesize;
-	if (tbl_size > SG_CHUNK_SIZE)
-		tbl_size = SG_CHUNK_SIZE;
+	if (tbl_size > SCSI_MAX_SG_SEGMENTS)
+		tbl_size = SCSI_MAX_SG_SEGMENTS;
 	sgl_size = tbl_size * sizeof(struct scatterlist);
 	cmd_size = sizeof(struct scsi_cmnd) + shost->hostt->cmd_size + sgl_size;
 	if (scsi_host_get_prot(shost))
@@ -2178,6 +2264,8 @@ EXPORT_SYMBOL(scsi_unblock_requests);
 
 int __init scsi_init_queue(void)
 {
+	int i;
+
 	scsi_sdb_cache = kmem_cache_create("scsi_data_buffer",
 					   sizeof(struct scsi_data_buffer),
 					   0, 0, NULL);
@@ -2186,12 +2274,53 @@ int __init scsi_init_queue(void)
 		return -ENOMEM;
 	}
 
+	for (i = 0; i < SG_MEMPOOL_NR; i++) {
+		struct scsi_host_sg_pool *sgp = scsi_sg_pools + i;
+		int size = sgp->size * sizeof(struct scatterlist);
+
+		sgp->slab = kmem_cache_create(sgp->name, size, 0,
+				SLAB_HWCACHE_ALIGN, NULL);
+		if (!sgp->slab) {
+			printk(KERN_ERR "SCSI: can't init sg slab %s\n",
+					sgp->name);
+			goto cleanup_sdb;
+		}
+
+		sgp->pool = mempool_create_slab_pool(SG_MEMPOOL_SIZE,
+						     sgp->slab);
+		if (!sgp->pool) {
+			printk(KERN_ERR "SCSI: can't init sg mempool %s\n",
+					sgp->name);
+			goto cleanup_sdb;
+		}
+	}
+
 	return 0;
+
+cleanup_sdb:
+	for (i = 0; i < SG_MEMPOOL_NR; i++) {
+		struct scsi_host_sg_pool *sgp = scsi_sg_pools + i;
+		if (sgp->pool)
+			mempool_destroy(sgp->pool);
+		if (sgp->slab)
+			kmem_cache_destroy(sgp->slab);
+	}
+	kmem_cache_destroy(scsi_sdb_cache);
+
+	return -ENOMEM;
 }
 
 void scsi_exit_queue(void)
 {
+	int i;
+
 	kmem_cache_destroy(scsi_sdb_cache);
+
+	for (i = 0; i < SG_MEMPOOL_NR; i++) {
+		struct scsi_host_sg_pool *sgp = scsi_sg_pools + i;
+		mempool_destroy(sgp->pool);
+		kmem_cache_destroy(sgp->slab);
+	}
 }
 
 /**
@@ -2571,7 +2700,6 @@ static void scsi_evt_emit(struct scsi_device *sdev, struct scsi_event *evt)
 		envp[idx++] = "SDEV_MEDIA_CHANGE=1";
 		break;
 	case SDEV_EVT_INQUIRY_CHANGE_REPORTED:
-		scsi_rescan_device(&sdev->sdev_gendev);
 		envp[idx++] = "SDEV_UA=INQUIRY_DATA_HAS_CHANGED";
 		break;
 	case SDEV_EVT_CAPACITY_CHANGE_REPORTED:
@@ -3067,7 +3195,6 @@ int scsi_vpd_lun_id(struct scsi_device *sdev, char *id, size_t id_len)
 	 * - EUI-64 based 12-byte
 	 * - NAA IEEE Registered
 	 * - NAA IEEE Extended
-	 * - T10 Vendor ID
 	 * as longer descriptors reduce the likelyhood
 	 * of identification clashes.
 	 */
@@ -3086,21 +3213,6 @@ int scsi_vpd_lun_id(struct scsi_device *sdev, char *id, size_t id_len)
 			goto next_desig;
 
 		switch (d[1] & 0xf) {
-		case 0x1:
-			/* T10 Vendor ID */
-			if (cur_id_size > d[3])
-				break;
-			/* Prefer anything */
-			if (cur_id_type > 0x01 && cur_id_type != 0xff)
-				break;
-			cur_id_size = d[3];
-			if (cur_id_size + 4 > id_len)
-				cur_id_size = id_len - 4;
-			cur_id_str = d + 4;
-			cur_id_type = d[1] & 0xf;
-			id_size = snprintf(id, id_len, "t10.%*pE",
-					   cur_id_size, cur_id_str);
-			break;
 		case 0x2:
 			/* EUI-64 */
 			if (cur_id_size > d[3])

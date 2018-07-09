@@ -34,6 +34,10 @@
 #define IWL1000_UCODE_API_MAX 5
 #define IWL100_UCODE_API_MAX 5
 
+/* Oldest version we won't warn about */
+#define IWL1000_UCODE_API_OK 5
+#define IWL100_UCODE_API_OK 5
+
 /* Lowest firmware API version supported */
 #define IWL1000_UCODE_API_MIN 1
 #define IWL100_UCODE_API_MIN 5
@@ -52,7 +56,7 @@
 static const struct iwl_base_params iwl1000_base_params = {
 	.num_of_queues = IWLAGN_NUM_QUEUES,
 	.eeprom_size = OTP_LOW_IMAGE_SIZE,
-	.pll_cfg = true,
+	.pll_cfg_val = CSR50_ANA_PLL_CFG_VAL,
 	.max_ll_items = OTP_MAX_LL_ITEMS_1000,
 	.shadow_ram_support = false,
 	.led_compensation = 51,
@@ -64,7 +68,7 @@ static const struct iwl_base_params iwl1000_base_params = {
 static const struct iwl_ht_params iwl1000_ht_params = {
 	.ht_greenfield_support = true,
 	.use_rts_for_aggregation = true, /* use rts/cts protection */
-	.ht40_bands = BIT(NL80211_BAND_2GHZ),
+	.ht40_bands = BIT(IEEE80211_BAND_2GHZ),
 };
 
 static const struct iwl_eeprom_params iwl1000_eeprom_params = {
@@ -82,6 +86,7 @@ static const struct iwl_eeprom_params iwl1000_eeprom_params = {
 #define IWL_DEVICE_1000						\
 	.fw_name_pre = IWL1000_FW_PRE,				\
 	.ucode_api_max = IWL1000_UCODE_API_MAX,			\
+	.ucode_api_ok = IWL1000_UCODE_API_OK,			\
 	.ucode_api_min = IWL1000_UCODE_API_MIN,			\
 	.device_family = IWL_DEVICE_FAMILY_1000,		\
 	.max_inst_size = IWLAGN_RTC_INST_SIZE,			\
@@ -107,6 +112,7 @@ const struct iwl_cfg iwl1000_bg_cfg = {
 #define IWL_DEVICE_100						\
 	.fw_name_pre = IWL100_FW_PRE,				\
 	.ucode_api_max = IWL100_UCODE_API_MAX,			\
+	.ucode_api_ok = IWL100_UCODE_API_OK,			\
 	.ucode_api_min = IWL100_UCODE_API_MIN,			\
 	.device_family = IWL_DEVICE_FAMILY_100,			\
 	.max_inst_size = IWLAGN_RTC_INST_SIZE,			\
@@ -130,5 +136,5 @@ const struct iwl_cfg iwl100_bg_cfg = {
 	IWL_DEVICE_100,
 };
 
-MODULE_FIRMWARE(IWL1000_MODULE_FIRMWARE(IWL1000_UCODE_API_MAX));
-MODULE_FIRMWARE(IWL100_MODULE_FIRMWARE(IWL100_UCODE_API_MAX));
+MODULE_FIRMWARE(IWL1000_MODULE_FIRMWARE(IWL1000_UCODE_API_OK));
+MODULE_FIRMWARE(IWL100_MODULE_FIRMWARE(IWL100_UCODE_API_OK));

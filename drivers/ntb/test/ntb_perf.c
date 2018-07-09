@@ -425,7 +425,6 @@ static int perf_set_mw(struct perf_ctx *perf, resource_size_t size)
 {
 	struct perf_mw *mw = &perf->mw;
 	size_t xlat_size, buf_size;
-	int rc;
 
 	if (!size)
 		return -EINVAL;
@@ -447,13 +446,6 @@ static int perf_set_mw(struct perf_ctx *perf, resource_size_t size)
 	if (!mw->virt_addr) {
 		mw->xlat_size = 0;
 		mw->buf_size = 0;
-	}
-
-	rc = ntb_mw_set_trans(perf->ntb, 0, mw->dma_addr, mw->xlat_size);
-	if (rc) {
-		dev_err(&perf->ntb->dev, "Unable to set mw0 translation\n");
-		perf_free_mw(perf);
-		return -EIO;
 	}
 
 	return 0;
@@ -550,28 +542,11 @@ static ssize_t debugfs_run_read(struct file *filp, char __user *ubuf,
 		return 0;
 
 	buf = kmalloc(64, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
 	out_offset = snprintf(buf, 64, "%d\n", perf->run);
 	ret = simple_read_from_buffer(ubuf, count, offp, buf, out_offset);
 	kfree(buf);
 
 	return ret;
-}
-
-static void threads_cleanup(struct perf_ctx *perf)
-{
-	struct pthr_ctx *pctx;
-	int i;
-
-	perf->run = false;
-	for (i = 0; i < MAX_THREADS; i++) {
-		pctx = &perf->pthr_ctx[i];
-		if (pctx->thread) {
-			kthread_stop(pctx->thread);
-			pctx->thread = NULL;
-		}
-	}
 }
 
 static ssize_t debugfs_run_write(struct file *filp, const char __user *ubuf,
@@ -589,9 +564,17 @@ static ssize_t debugfs_run_write(struct file *filp, const char __user *ubuf,
 	if (atomic_read(&perf->tsync) == 0)
 		perf->run = false;
 
-	if (perf->run)
-		threads_cleanup(perf);
-	else {
+	if (perf->run) {
+		/* lets stop the threads */
+		perf->run = false;
+		for (i = 0; i < MAX_THREADS; i++) {
+			if (perf->pthr_ctx[i].thread) {
+				kthread_stop(perf->pthr_ctx[i].thread);
+				perf->pthr_ctx[i].thread = NULL;
+			} else
+				break;
+		}
+	} else {
 		perf->run = true;
 
 		if (perf->perf_threads > MAX_THREADS) {
@@ -622,11 +605,17 @@ static ssize_t debugfs_run_write(struct file *filp, const char __user *ubuf,
 				kthread_create_on_node(ntb_perf_thread,
 						       (void *)pctx,
 						       node, "ntb_perf %d", i);
-			if (IS_ERR(pctx->thread)) {
-				pctx->thread = NULL;
-				goto err;
-			} else
+			if (pctx->thread)
 				wake_up_process(pctx->thread);
+			else {
+				perf->run = false;
+				for (i = 0; i < MAX_THREADS; i++) {
+					if (pctx->thread) {
+						kthread_stop(pctx->thread);
+						pctx->thread = NULL;
+					}
+				}
+			}
 
 			if (perf->run == false)
 				return -ENXIO;
@@ -635,10 +624,6 @@ static ssize_t debugfs_run_write(struct file *filp, const char __user *ubuf,
 	}
 
 	return count;
-
-err:
-	threads_cleanup(perf);
-	return -ENXIO;
 }
 
 static const struct file_operations ntb_perf_debugfs_run = {

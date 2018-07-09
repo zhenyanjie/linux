@@ -258,8 +258,6 @@ static int davinci_gpio_probe(struct platform_device *pdev)
 		spin_lock_init(&chips[i].lock);
 
 		regs = gpio2regs(base);
-		if (!regs)
-			return -ENXIO;
 		chips[i].regs = regs;
 		chips[i].set_data = &regs->set_data;
 		chips[i].clr_data = &regs->clr_data;
@@ -435,7 +433,8 @@ static struct irq_chip *davinci_gpio_get_irq_chip(unsigned int irq)
 {
 	static struct irq_chip_type gpio_unbanked;
 
-	gpio_unbanked = *irq_data_get_chip_type(irq_get_irq_data(irq));
+	gpio_unbanked = *container_of(irq_get_chip(irq),
+				      struct irq_chip_type, chip);
 
 	return &gpio_unbanked.chip;
 };

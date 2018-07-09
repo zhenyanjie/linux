@@ -362,7 +362,7 @@ static int send_wqe_overhead(enum mlx4_ib_qp_type type, u32 flags)
 			sizeof (struct mlx4_wqe_raddr_seg);
 	case MLX4_IB_QPT_RC:
 		return sizeof (struct mlx4_wqe_ctrl_seg) +
-			sizeof (struct mlx4_wqe_masked_atomic_seg) +
+			sizeof (struct mlx4_wqe_atomic_seg) +
 			sizeof (struct mlx4_wqe_raddr_seg);
 	case MLX4_IB_QPT_SMI:
 	case MLX4_IB_QPT_GSI:
@@ -419,8 +419,7 @@ static int set_rq_size(struct mlx4_ib_dev *dev, struct ib_qp_cap *cap,
 }
 
 static int set_kernel_sq_size(struct mlx4_ib_dev *dev, struct ib_qp_cap *cap,
-			      enum mlx4_ib_qp_type type, struct mlx4_ib_qp *qp,
-			      bool shrink_wqe)
+			      enum mlx4_ib_qp_type type, struct mlx4_ib_qp *qp)
 {
 	int s;
 
@@ -478,7 +477,7 @@ static int set_kernel_sq_size(struct mlx4_ib_dev *dev, struct ib_qp_cap *cap,
 	 * We set WQE size to at least 64 bytes, this way stamping
 	 * invalidates each WQE.
 	 */
-	if (shrink_wqe && dev->dev->caps.fw_ver >= MLX4_FW_VER_WQE_CTRL_NEC &&
+	if (dev->dev->caps.fw_ver >= MLX4_FW_VER_WQE_CTRL_NEC &&
 	    qp->sq_signal_bits && BITS_PER_LONG == 64 &&
 	    type != MLX4_IB_QPT_SMI && type != MLX4_IB_QPT_GSI &&
 	    !(type & (MLX4_IB_QPT_PROXY_SMI_OWNER | MLX4_IB_QPT_PROXY_SMI |
@@ -643,7 +642,6 @@ static int create_qp_common(struct mlx4_ib_dev *dev, struct ib_pd *pd,
 {
 	int qpn;
 	int err;
-	struct ib_qp_cap backup_cap;
 	struct mlx4_ib_sqp *sqp;
 	struct mlx4_ib_qp *qp;
 	enum mlx4_ib_qp_type qp_type = (enum mlx4_ib_qp_type) init_attr->qp_type;
@@ -777,9 +775,7 @@ static int create_qp_common(struct mlx4_ib_dev *dev, struct ib_pd *pd,
 				goto err;
 		}
 
-		memcpy(&backup_cap, &init_attr->cap, sizeof(backup_cap));
-		err = set_kernel_sq_size(dev, &init_attr->cap,
-					 qp_type, qp, true);
+		err = set_kernel_sq_size(dev, &init_attr->cap, qp_type, qp);
 		if (err)
 			goto err;
 
@@ -791,20 +787,9 @@ static int create_qp_common(struct mlx4_ib_dev *dev, struct ib_pd *pd,
 			*qp->db.db = 0;
 		}
 
-		if (mlx4_buf_alloc(dev->dev, qp->buf_size, qp->buf_size,
-				   &qp->buf, gfp)) {
-			memcpy(&init_attr->cap, &backup_cap,
-			       sizeof(backup_cap));
-			err = set_kernel_sq_size(dev, &init_attr->cap, qp_type,
-						 qp, false);
-			if (err)
-				goto err_db;
-
-			if (mlx4_buf_alloc(dev->dev, qp->buf_size,
-					   PAGE_SIZE * 2, &qp->buf, gfp)) {
-				err = -ENOMEM;
-				goto err_db;
-			}
+		if (mlx4_buf_alloc(dev->dev, qp->buf_size, PAGE_SIZE * 2, &qp->buf, gfp)) {
+			err = -ENOMEM;
+			goto err_db;
 		}
 
 		err = mlx4_mtt_init(dev->dev, qp->buf.npages, qp->buf.page_shift,
@@ -1191,10 +1176,8 @@ static struct ib_qp *_mlx4_ib_create_qp(struct ib_pd *pd,
 	{
 		err = create_qp_common(to_mdev(pd->device), pd, init_attr,
 				       udata, 0, &qp, gfp);
-		if (err) {
-			kfree(qp);
+		if (err)
 			return ERR_PTR(err);
-		}
 
 		qp->ibqp.qp_num = qp->mqp.qpn;
 		qp->xrcdn = xrcdn;
@@ -2492,27 +2475,24 @@ static int build_mlx_header(struct mlx4_ib_sqp *sqp, struct ib_ud_wr *wr,
 		sqp->ud_header.grh.flow_label    =
 			ah->av.ib.sl_tclass_flowlabel & cpu_to_be32(0xfffff);
 		sqp->ud_header.grh.hop_limit     = ah->av.ib.hop_limit;
-		if (is_eth) {
+		if (is_eth)
 			memcpy(sqp->ud_header.grh.source_gid.raw, sgid.raw, 16);
-		} else {
-			if (mlx4_is_mfunc(to_mdev(ib_dev)->dev)) {
-				/* When multi-function is enabled, the ib_core gid
-				 * indexes don't necessarily match the hw ones, so
-				 * we must use our own cache
-				 */
-				sqp->ud_header.grh.source_gid.global.subnet_prefix =
-					cpu_to_be64(atomic64_read(&(to_mdev(ib_dev)->sriov.
-								    demux[sqp->qp.port - 1].
-								    subnet_prefix)));
-				sqp->ud_header.grh.source_gid.global.interface_id =
-					to_mdev(ib_dev)->sriov.demux[sqp->qp.port - 1].
-						       guid_cache[ah->av.ib.gid_index];
-			} else {
-				ib_get_cached_gid(ib_dev,
-						  be32_to_cpu(ah->av.ib.port_pd) >> 24,
-						  ah->av.ib.gid_index,
-						  &sqp->ud_header.grh.source_gid, NULL);
-			}
+		else {
+		if (mlx4_is_mfunc(to_mdev(ib_dev)->dev)) {
+			/* When multi-function is enabled, the ib_core gid
+			 * indexes don't necessarily match the hw ones, so
+			 * we must use our own cache */
+			sqp->ud_header.grh.source_gid.global.subnet_prefix =
+				to_mdev(ib_dev)->sriov.demux[sqp->qp.port - 1].
+						       subnet_prefix;
+			sqp->ud_header.grh.source_gid.global.interface_id =
+				to_mdev(ib_dev)->sriov.demux[sqp->qp.port - 1].
+					       guid_cache[ah->av.ib.gid_index];
+		} else
+			ib_get_cached_gid(ib_dev,
+					  be32_to_cpu(ah->av.ib.port_pd) >> 24,
+					  ah->av.ib.gid_index,
+					  &sqp->ud_header.grh.source_gid, NULL);
 		}
 		memcpy(sqp->ud_header.grh.destination_gid.raw,
 		       ah->av.ib.dgid, 16);

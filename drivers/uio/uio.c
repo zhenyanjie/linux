@@ -271,16 +271,12 @@ static int uio_dev_add_attributes(struct uio_device *idev)
 			map_found = 1;
 			idev->map_dir = kobject_create_and_add("maps",
 							&idev->dev->kobj);
-			if (!idev->map_dir) {
-				ret = -ENOMEM;
+			if (!idev->map_dir)
 				goto err_map;
-			}
 		}
 		map = kzalloc(sizeof(*map), GFP_KERNEL);
-		if (!map) {
-			ret = -ENOMEM;
+		if (!map)
 			goto err_map_kobj;
-		}
 		kobject_init(&map->kobj, &map_attr_type);
 		map->mem = mem;
 		mem->map = map;
@@ -300,16 +296,12 @@ static int uio_dev_add_attributes(struct uio_device *idev)
 			portio_found = 1;
 			idev->portio_dir = kobject_create_and_add("portio",
 							&idev->dev->kobj);
-			if (!idev->portio_dir) {
-				ret = -ENOMEM;
+			if (!idev->portio_dir)
 				goto err_portio;
-			}
 		}
 		portio = kzalloc(sizeof(*portio), GFP_KERNEL);
-		if (!portio) {
-			ret = -ENOMEM;
+		if (!portio)
 			goto err_portio_kobj;
-		}
 		kobject_init(&portio->kobj, &portio_attr_type);
 		portio->port = port;
 		port->portio = portio;

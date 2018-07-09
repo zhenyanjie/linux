@@ -985,7 +985,6 @@ static struct pinmux_ops st_pmxops = {
 	.get_function_groups	= st_pmx_get_groups,
 	.set_mux		= st_pmx_set_mux,
 	.gpio_set_direction	= st_pmx_set_gpio_direction,
-	.strict			= true,
 };
 
 /* Pinconf  */
@@ -1724,7 +1723,7 @@ static int st_pctl_probe(struct platform_device *pdev)
 	pctl_desc->confops	= &st_confops;
 	pctl_desc->name		= dev_name(&pdev->dev);
 
-	info->pctl = devm_pinctrl_register(&pdev->dev, pctl_desc, info);
+	info->pctl = pinctrl_register(pctl_desc, &pdev->dev, info);
 	if (IS_ERR(info->pctl)) {
 		dev_err(&pdev->dev, "Failed pinctrl registration\n");
 		return PTR_ERR(info->pctl);

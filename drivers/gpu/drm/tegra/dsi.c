@@ -745,17 +745,13 @@ static void tegra_dsi_soft_reset(struct tegra_dsi *dsi)
 
 static void tegra_dsi_connector_reset(struct drm_connector *connector)
 {
-	struct tegra_dsi_state *state = kzalloc(sizeof(*state), GFP_KERNEL);
+	struct tegra_dsi_state *state =
+		kzalloc(sizeof(*state), GFP_KERNEL);
 
-	if (!state)
-		return;
-
-	if (connector->state) {
-		__drm_atomic_helper_connector_destroy_state(connector->state);
+	if (state) {
 		kfree(connector->state);
+		__drm_atomic_helper_connector_reset(connector, &state->base);
 	}
-
-	__drm_atomic_helper_connector_reset(connector, &state->base);
 }
 
 static struct drm_connector_state *
@@ -767,9 +763,6 @@ tegra_dsi_connector_duplicate_state(struct drm_connector *connector)
 	copy = kmemdup(state, sizeof(*state), GFP_KERNEL);
 	if (!copy)
 		return NULL;
-
-	__drm_atomic_helper_connector_duplicate_state(connector,
-						      &copy->base);
 
 	return &copy->base;
 }

@@ -13,7 +13,11 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- * Written by Ryusuke Konishi.
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
+ *
+ * Written by Ryusuke Konishi <ryusuke@osrg.net>
  */
 
 #include <linux/buffer_head.h>
@@ -43,10 +47,8 @@ enum {
 
 /* work structure for recovery */
 struct nilfs_recovery_block {
-	ino_t ino;		/*
-				 * Inode number of the file that this block
-				 * belongs to
-				 */
+	ino_t ino;		/* Inode number of the file that this block
+				   belongs to */
 	sector_t blocknr;	/* block number */
 	__u64 vblocknr;		/* virtual block number */
 	unsigned long blkoff;	/* File offset of the data block (per block) */
@@ -154,7 +156,7 @@ int nilfs_read_super_root_block(struct the_nilfs *nilfs, sector_t sr_block,
 
 	sr = (struct nilfs_super_root *)bh_sr->b_data;
 	if (check) {
-		unsigned int bytes = le16_to_cpu(sr->sr_bytes);
+		unsigned bytes = le16_to_cpu(sr->sr_bytes);
 
 		if (bytes == 0 || bytes > nilfs->ns_blocksize) {
 			ret = NILFS_SEG_FAIL_CHECKSUM_SUPER_ROOT;
@@ -506,7 +508,7 @@ static int nilfs_recover_dsync_blocks(struct the_nilfs *nilfs,
 {
 	struct inode *inode;
 	struct nilfs_recovery_block *rb, *n;
-	unsigned int blocksize = nilfs->ns_blocksize;
+	unsigned blocksize = nilfs->ns_blocksize;
 	struct page *page;
 	loff_t pos;
 	int err = 0, err2 = 0;
@@ -524,7 +526,6 @@ static int nilfs_recover_dsync_blocks(struct the_nilfs *nilfs,
 					0, &page, nilfs_get_block);
 		if (unlikely(err)) {
 			loff_t isize = inode->i_size;
-
 			if (pos + blocksize > isize)
 				nilfs_write_failed(inode->i_mapping,
 							pos + blocksize);
@@ -543,14 +544,14 @@ static int nilfs_recover_dsync_blocks(struct the_nilfs *nilfs,
 				blocksize, page, NULL);
 
 		unlock_page(page);
-		put_page(page);
+		page_cache_release(page);
 
 		(*nr_salvaged_blocks)++;
 		goto next;
 
  failed_page:
 		unlock_page(page);
-		put_page(page);
+		page_cache_release(page);
 
  failed_inode:
 		printk(KERN_WARNING
@@ -871,11 +872,9 @@ int nilfs_search_super_root(struct the_nilfs *nilfs,
 
 		flags = le16_to_cpu(sum->ss_flags);
 		if (!(flags & NILFS_SS_SR) && !scan_newer) {
-			/*
-			 * This will never happen because a superblock
-			 * (last_segment) always points to a pseg with
-			 * a super root.
-			 */
+			/* This will never happen because a superblock
+			   (last_segment) always points to a pseg
+			   having a super root. */
 			ret = NILFS_SEG_FAIL_CONSISTENCY;
 			goto failed;
 		}

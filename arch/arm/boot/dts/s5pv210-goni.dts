@@ -239,7 +239,7 @@
 			linux,code = <KEY_POWER>;
 			label = "power";
 			debounce-interval = <1>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 	};
 };
@@ -250,7 +250,7 @@
 
 &keypad {
 	linux,input-no-autorepeat;
-	wakeup-source;
+	linux,input-wakeup;
 	samsung,keypad-num-rows = <3>;
 	samsung,keypad-num-columns = <3>;
 	pinctrl-names = "default";

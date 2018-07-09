@@ -97,7 +97,6 @@ struct rrpc {
 	struct nvm_dev *dev;
 	struct gendisk *disk;
 
-	sector_t soffset; /* logical sector offset */
 	u64 poffset; /* physical page offset */
 	int lun_offset;
 
@@ -105,7 +104,7 @@ struct rrpc {
 	struct rrpc_lun *luns;
 
 	/* calculated values */
-	unsigned long long nr_sects;
+	unsigned long long nr_pages;
 	unsigned long total_blocks;
 
 	/* Write strategy variables. Move these into each for structure for each
@@ -157,15 +156,6 @@ struct rrpc_rev_addr {
 	u64 addr;
 };
 
-static inline struct rrpc_block *rrpc_get_rblk(struct rrpc_lun *rlun,
-								int blk_id)
-{
-	struct rrpc *rrpc = rlun->rrpc;
-	int lun_blk = blk_id % rrpc->dev->blks_per_lun;
-
-	return &rlun->blocks[lun_blk];
-}
-
 static inline sector_t rrpc_get_laddr(struct bio *bio)
 {
 	return bio->bi_iter.bi_sector / NR_PHY_IN_LOG;
@@ -216,7 +206,7 @@ static inline int rrpc_lock_laddr(struct rrpc *rrpc, sector_t laddr,
 				 unsigned pages,
 				 struct rrpc_inflight_rq *r)
 {
-	BUG_ON((laddr + pages) > rrpc->nr_sects);
+	BUG_ON((laddr + pages) > rrpc->nr_pages);
 
 	return __rrpc_lock_laddr(rrpc, laddr, pages, r);
 }
@@ -251,9 +241,9 @@ static inline void rrpc_unlock_laddr(struct rrpc *rrpc,
 static inline void rrpc_unlock_rq(struct rrpc *rrpc, struct nvm_rq *rqd)
 {
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
-	uint8_t pages = rqd->nr_ppas;
+	uint8_t pages = rqd->nr_pages;
 
-	BUG_ON((r->l_start + pages) > rrpc->nr_sects);
+	BUG_ON((r->l_start + pages) > rrpc->nr_pages);
 
 	rrpc_unlock_laddr(rrpc, r);
 }

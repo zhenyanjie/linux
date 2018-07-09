@@ -271,14 +271,8 @@ next:
 		}
 		file->private_data = rd;
 		rd->file = file;
-		spin_lock(&HFSPLUS_I(inode)->open_dir_lock);
 		list_add(&rd->list, &HFSPLUS_I(inode)->open_dir_list);
-		spin_unlock(&HFSPLUS_I(inode)->open_dir_lock);
 	}
-	/*
-	 * Can be done after the list insertion; exclusion with
-	 * hfsplus_delete_cat() is provided by directory lock.
-	 */
 	memcpy(&rd->key, fd.key, sizeof(struct hfsplus_cat_key));
 out:
 	kfree(strbuf);
@@ -290,9 +284,9 @@ static int hfsplus_dir_release(struct inode *inode, struct file *file)
 {
 	struct hfsplus_readdir_data *rd = file->private_data;
 	if (rd) {
-		spin_lock(&HFSPLUS_I(inode)->open_dir_lock);
+		inode_lock(inode);
 		list_del(&rd->list);
-		spin_unlock(&HFSPLUS_I(inode)->open_dir_lock);
+		inode_unlock(inode);
 		kfree(rd);
 	}
 	return 0;
@@ -575,7 +569,7 @@ const struct inode_operations hfsplus_dir_inode_operations = {
 const struct file_operations hfsplus_dir_operations = {
 	.fsync		= hfsplus_file_fsync,
 	.read		= generic_read_dir,
-	.iterate_shared	= hfsplus_readdir,
+	.iterate	= hfsplus_readdir,
 	.unlocked_ioctl = hfsplus_ioctl,
 	.llseek		= generic_file_llseek,
 	.release	= hfsplus_dir_release,

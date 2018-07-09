@@ -80,6 +80,15 @@ err:
 	return ret;
 }
 
+static int smsc_i2c_remove(struct i2c_client *i2c)
+{
+	struct smsc *smsc = i2c_get_clientdata(i2c);
+
+	mfd_remove_devices(smsc->dev);
+
+	return 0;
+}
+
 static const struct i2c_device_id smsc_i2c_id[] = {
 	{ "smscece1099", 0},
 	{},
@@ -91,6 +100,7 @@ static struct i2c_driver smsc_i2c_driver = {
 		   .name = "smsc",
 	},
 	.probe = smsc_i2c_probe,
+	.remove = smsc_i2c_remove,
 	.id_table = smsc_i2c_id,
 };
 

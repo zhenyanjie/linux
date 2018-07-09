@@ -211,11 +211,14 @@ static unsigned long ramfs_nommu_get_unmapped_area(struct file *file,
 	struct page **pages = NULL, **ptr, *page;
 	loff_t isize;
 
+	if (!(flags & MAP_SHARED))
+		return addr;
+
 	/* the mapping mustn't extend beyond the EOF */
 	lpages = (len + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	isize = i_size_read(inode);
 
-	ret = -ENOSYS;
+	ret = -EINVAL;
 	maxpages = (isize + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	if (pgoff >= maxpages)
 		goto out;
@@ -224,6 +227,7 @@ static unsigned long ramfs_nommu_get_unmapped_area(struct file *file,
 		goto out;
 
 	/* gang-find the pages */
+	ret = -ENOMEM;
 	pages = kcalloc(lpages, sizeof(struct page *), GFP_KERNEL);
 	if (!pages)
 		goto out_free;
@@ -259,7 +263,7 @@ out:
  */
 static int ramfs_nommu_mmap(struct file *file, struct vm_area_struct *vma)
 {
-	if (!(vma->vm_flags & (VM_SHARED | VM_MAYSHARE)))
+	if (!(vma->vm_flags & VM_SHARED))
 		return -ENOSYS;
 
 	file_accessed(file);

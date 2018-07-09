@@ -95,7 +95,6 @@ struct usbtv {
 	int width, height;
 	int n_chunks;
 	int iso_size;
-	int last_odd;
 	unsigned int sequence;
 	struct urb *isoc_urbs[USBTV_ISOC_TRANSFERS];
 

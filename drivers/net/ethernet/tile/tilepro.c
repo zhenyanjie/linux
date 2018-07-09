@@ -1883,7 +1883,7 @@ static int tile_net_tx(struct sk_buff *skb, struct net_device *dev)
 
 
 	/* Save the timestamp. */
-	netif_trans_update(dev);
+	dev->trans_start = jiffies;
 
 
 #ifdef TILE_NET_PARANOIA
@@ -2026,7 +2026,7 @@ static void tile_net_tx_timeout(struct net_device *dev)
 {
 	PDEBUG("tile_net_tx_timeout()\n");
 	PDEBUG("Transmit timeout at %ld, latency %ld\n", jiffies,
-	       jiffies - dev_trans_start(dev));
+	       jiffies - dev->trans_start);
 
 	/* XXX: ISSUE: This doesn't seem useful for us. */
 	netif_wake_queue(dev);

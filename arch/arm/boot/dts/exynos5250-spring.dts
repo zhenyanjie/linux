@@ -37,7 +37,7 @@
 			label = "Power";
 			gpios = <&gpx1 3 GPIO_ACTIVE_LOW>;
 			linux,code = <KEY_POWER>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 
 		lid-switch {
@@ -46,7 +46,7 @@
 			linux,input-type = <5>; /* EV_SW */
 			linux,code = <0>; /* SW_LID */
 			debounce-interval = <1>;
-			wakeup-source;
+			gpio-key,wakeup;
 		};
 	};
 
@@ -74,10 +74,12 @@
 	pinctrl-names = "default";
 	pinctrl-0 = <&dp_hpd_gpio>;
 	samsung,color-space = <0>;
+	samsung,dynamic-range = <0>;
+	samsung,ycbcr-coeff = <0>;
 	samsung,color-depth = <1>;
 	samsung,link-rate = <0x0a>;
 	samsung,lane-count = <1>;
-	hpd-gpios = <&gpc3 0 GPIO_ACTIVE_HIGH>;
+	samsung,hpd-gpio = <&gpc3 0 GPIO_ACTIVE_HIGH>;
 };
 
 &ehci {
@@ -381,7 +383,7 @@
 	samsung,i2c-sda-delay = <100>;
 	samsung,i2c-max-bus-freq = <66000>;
 
-	cros_ec: embedded-controller@1e {
+	cros_ec: embedded-controller {
 		compatible = "google,cros-ec-i2c";
 		reg = <0x1e>;
 		interrupts = <6 IRQ_TYPE_NONE>;

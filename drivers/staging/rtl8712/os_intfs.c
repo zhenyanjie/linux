@@ -269,6 +269,7 @@ void r8712_stop_drv_timers(struct _adapter *padapter)
 
 static u8 init_default_value(struct _adapter *padapter)
 {
+	u8 ret  = _SUCCESS;
 	struct registry_priv *pregistrypriv = &padapter->registrypriv;
 	struct xmit_priv *pxmitpriv = &padapter->xmitpriv;
 	struct mlme_priv *pmlmepriv = &padapter->mlmepriv;
@@ -301,7 +302,7 @@ static u8 init_default_value(struct _adapter *padapter)
 	r8712_init_registrypriv_dev_network(padapter);
 	r8712_update_registrypriv_dev_network(padapter);
 	/*misc.*/
-	return _SUCCESS;
+	return ret;
 }
 
 u8 r8712_init_drv_sw(struct _adapter *padapter)
@@ -389,7 +390,7 @@ static int netdev_open(struct net_device *pnetdev)
 		padapter->bup = true;
 		if (rtl871x_hal_init(padapter) != _SUCCESS)
 			goto netdev_open_error;
-		if (!r8712_initmac)
+		if (r8712_initmac == NULL)
 			/* Use the mac address stored in the Efuse */
 			memcpy(pnetdev->dev_addr,
 				padapter->eeprompriv.mac_addr, ETH_ALEN);
@@ -413,7 +414,7 @@ static int netdev_open(struct net_device *pnetdev)
 		}
 		if (start_drv_threads(padapter) != _SUCCESS)
 			goto netdev_open_error;
-		if (!padapter->dvobjpriv.inirp_init)
+		if (padapter->dvobjpriv.inirp_init == NULL)
 			goto netdev_open_error;
 		else
 			padapter->dvobjpriv.inirp_init(padapter);

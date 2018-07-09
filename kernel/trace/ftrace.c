@@ -1030,7 +1030,8 @@ static __init void ftrace_profile_tracefs(struct dentry *d_tracer)
 	for_each_possible_cpu(cpu) {
 		stat = &per_cpu(ftrace_profile_stats, cpu);
 
-		name = kasprintf(GFP_KERNEL, "function%d", cpu);
+		/* allocate enough for function name + cpu number */
+		name = kmalloc(32, GFP_KERNEL);
 		if (!name) {
 			/*
 			 * The files created are permanent, if something happens
@@ -1042,6 +1043,7 @@ static __init void ftrace_profile_tracefs(struct dentry *d_tracer)
 			return;
 		}
 		stat->stat = function_stats;
+		snprintf(name, 32, "function%d", cpu);
 		stat->stat.name = name;
 		ret = register_stat_tracer(&stat->stat);
 		if (ret) {
@@ -1056,7 +1058,8 @@ static __init void ftrace_profile_tracefs(struct dentry *d_tracer)
 	entry = tracefs_create_file("function_profile_enabled", 0644,
 				    d_tracer, NULL, &ftrace_profile_fops);
 	if (!entry)
-		pr_warn("Could not create tracefs 'function_profile_enabled' entry\n");
+		pr_warning("Could not create tracefs "
+			   "'function_profile_enabled' entry\n");
 }
 
 #else /* CONFIG_FUNCTION_PROFILER */
@@ -1530,19 +1533,7 @@ static int ftrace_cmp_recs(const void *a, const void *b)
 	return 0;
 }
 
-/**
- * ftrace_location_range - return the first address of a traced location
- *	if it touches the given ip range
- * @start: start of range to search.
- * @end: end of range to search (inclusive). @end points to the last byte
- *	to check.
- *
- * Returns rec->ip if the related ftrace location is a least partly within
- * the given address range. That is, the first address of the instruction
- * that is either a NOP or call to the function tracer. It checks the ftrace
- * internal tables to determine if the address belongs or not.
- */
-unsigned long ftrace_location_range(unsigned long start, unsigned long end)
+static unsigned long ftrace_location_range(unsigned long start, unsigned long end)
 {
 	struct ftrace_page *pg;
 	struct dyn_ftrace *rec;
@@ -1619,7 +1610,7 @@ static bool test_rec_ops_needs_regs(struct dyn_ftrace *rec)
 	return  keep_regs;
 }
 
-static bool __ftrace_hash_rec_update(struct ftrace_ops *ops,
+static void __ftrace_hash_rec_update(struct ftrace_ops *ops,
 				     int filter_hash,
 				     bool inc)
 {
@@ -1627,13 +1618,12 @@ static bool __ftrace_hash_rec_update(struct ftrace_ops *ops,
 	struct ftrace_hash *other_hash;
 	struct ftrace_page *pg;
 	struct dyn_ftrace *rec;
-	bool update = false;
 	int count = 0;
 	int all = 0;
 
 	/* Only update if the ops has been registered */
 	if (!(ops->flags & FTRACE_OPS_FL_ENABLED))
-		return false;
+		return;
 
 	/*
 	 * In the filter_hash case:
@@ -1660,7 +1650,7 @@ static bool __ftrace_hash_rec_update(struct ftrace_ops *ops,
 		 * then there's nothing to do.
 		 */
 		if (ftrace_hash_empty(hash))
-			return false;
+			return;
 	}
 
 	do_for_each_ftrace_rec(pg, rec) {
@@ -1704,7 +1694,7 @@ static bool __ftrace_hash_rec_update(struct ftrace_ops *ops,
 		if (inc) {
 			rec->flags++;
 			if (FTRACE_WARN_ON(ftrace_rec_count(rec) == FTRACE_REF_MAX))
-				return false;
+				return;
 
 			/*
 			 * If there's only a single callback registered to a
@@ -1730,7 +1720,7 @@ static bool __ftrace_hash_rec_update(struct ftrace_ops *ops,
 				rec->flags |= FTRACE_FL_REGS;
 		} else {
 			if (FTRACE_WARN_ON(ftrace_rec_count(rec) == 0))
-				return false;
+				return;
 			rec->flags--;
 
 			/*
@@ -1763,28 +1753,22 @@ static bool __ftrace_hash_rec_update(struct ftrace_ops *ops,
 			 */
 		}
 		count++;
-
-		/* Must match FTRACE_UPDATE_CALLS in ftrace_modify_all_code() */
-		update |= ftrace_test_record(rec, 1) != FTRACE_UPDATE_IGNORE;
-
 		/* Shortcut, if we handled all records, we are done. */
 		if (!all && count == hash->count)
-			return update;
+			return;
 	} while_for_each_ftrace_rec();
-
-	return update;
 }
 
-static bool ftrace_hash_rec_disable(struct ftrace_ops *ops,
+static void ftrace_hash_rec_disable(struct ftrace_ops *ops,
 				    int filter_hash)
 {
-	return __ftrace_hash_rec_update(ops, filter_hash, 0);
+	__ftrace_hash_rec_update(ops, filter_hash, 0);
 }
 
-static bool ftrace_hash_rec_enable(struct ftrace_ops *ops,
+static void ftrace_hash_rec_enable(struct ftrace_ops *ops,
 				   int filter_hash)
 {
-	return __ftrace_hash_rec_update(ops, filter_hash, 1);
+	__ftrace_hash_rec_update(ops, filter_hash, 1);
 }
 
 static void ftrace_hash_rec_update_modify(struct ftrace_ops *ops,
@@ -2330,8 +2314,8 @@ unsigned long ftrace_get_addr_curr(struct dyn_ftrace *rec)
 	if (rec->flags & FTRACE_FL_TRAMP_EN) {
 		ops = ftrace_find_tramp_ops_curr(rec);
 		if (FTRACE_WARN_ON(!ops)) {
-			pr_warn("Bad trampoline accounting at: %p (%pS)\n",
-				(void *)rec->ip, (void *)rec->ip);
+			pr_warning("Bad trampoline accounting at: %p (%pS)\n",
+				    (void *)rec->ip, (void *)rec->ip);
 			/* Ftrace is shutting down, return anything */
 			return (unsigned long)FTRACE_ADDR;
 		}
@@ -2660,6 +2644,7 @@ static int ftrace_startup(struct ftrace_ops *ops, int command)
 		return ret;
 
 	ftrace_start_up++;
+	command |= FTRACE_UPDATE_CALLS;
 
 	/*
 	 * Note that ftrace probes uses this to start up
@@ -2680,8 +2665,7 @@ static int ftrace_startup(struct ftrace_ops *ops, int command)
 		return ret;
 	}
 
-	if (ftrace_hash_rec_enable(ops, 1))
-		command |= FTRACE_UPDATE_CALLS;
+	ftrace_hash_rec_enable(ops, 1);
 
 	ftrace_startup_enable(command);
 
@@ -2711,11 +2695,11 @@ static int ftrace_shutdown(struct ftrace_ops *ops, int command)
 
 	/* Disabling ipmodify never fails */
 	ftrace_hash_ipmodify_disable(ops);
-
-	if (ftrace_hash_rec_disable(ops, 1))
-		command |= FTRACE_UPDATE_CALLS;
+	ftrace_hash_rec_disable(ops, 1);
 
 	ops->flags &= ~FTRACE_OPS_FL_ENABLED;
+
+	command |= FTRACE_UPDATE_CALLS;
 
 	if (saved_ftrace_func != ftrace_trace_function) {
 		saved_ftrace_func = ftrace_trace_function;
@@ -3456,22 +3440,10 @@ struct ftrace_glob {
 	int type;
 };
 
-/*
- * If symbols in an architecture don't correspond exactly to the user-visible
- * name of what they represent, it is possible to define this function to
- * perform the necessary adjustments.
-*/
-char * __weak arch_ftrace_match_adjust(char *str, const char *search)
-{
-	return str;
-}
-
 static int ftrace_match(char *str, struct ftrace_glob *g)
 {
 	int matched = 0;
 	int slen;
-
-	str = arch_ftrace_match_adjust(str, g->search);
 
 	switch (g->type) {
 	case MATCH_FULL:
@@ -5737,6 +5709,7 @@ static int alloc_retstack_tasklist(struct ftrace_ret_stack **ret_stack_list)
 {
 	int i;
 	int ret = 0;
+	unsigned long flags;
 	int start = 0, end = FTRACE_RETSTACK_ALLOC_SIZE;
 	struct task_struct *g, *t;
 
@@ -5752,7 +5725,7 @@ static int alloc_retstack_tasklist(struct ftrace_ret_stack **ret_stack_list)
 		}
 	}
 
-	read_lock(&tasklist_lock);
+	read_lock_irqsave(&tasklist_lock, flags);
 	do_each_thread(g, t) {
 		if (start == end) {
 			ret = -EAGAIN;
@@ -5770,7 +5743,7 @@ static int alloc_retstack_tasklist(struct ftrace_ret_stack **ret_stack_list)
 	} while_each_thread(g, t);
 
 unlock:
-	read_unlock(&tasklist_lock);
+	read_unlock_irqrestore(&tasklist_lock, flags);
 free:
 	for (i = start; i < end; i++)
 		kfree(ret_stack_list[i]);

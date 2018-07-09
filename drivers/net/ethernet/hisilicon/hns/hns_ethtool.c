@@ -46,6 +46,7 @@ static u32 hns_nic_get_link(struct net_device *net_dev)
 	u32 link_stat = priv->link;
 	struct hnae_handle *h;
 
+	assert(priv && priv->ae_handle);
 	h = priv->ae_handle;
 
 	if (priv->phy) {
@@ -645,6 +646,8 @@ static void hns_nic_get_drvinfo(struct net_device *net_dev,
 {
 	struct hns_nic_priv *priv = netdev_priv(net_dev);
 
+	assert(priv);
+
 	strncpy(drvinfo->version, HNAE_DRIVER_VERSION,
 		sizeof(drvinfo->version));
 	drvinfo->version[sizeof(drvinfo->version) - 1] = '\0';
@@ -717,6 +720,8 @@ static int hns_set_pauseparam(struct net_device *net_dev,
 	struct hnae_handle *h;
 	struct hnae_ae_ops *ops;
 
+	assert(priv || priv->ae_handle);
+
 	h = priv->ae_handle;
 	ops = h->dev->ops;
 
@@ -775,6 +780,8 @@ static int hns_set_coalesce(struct net_device *net_dev,
 	struct hnae_ae_ops *ops;
 	int ret;
 
+	assert(priv || priv->ae_handle);
+
 	ops = priv->ae_handle->dev->ops;
 
 	if (ec->tx_coalesce_usecs != ec->rx_coalesce_usecs)
@@ -787,10 +794,8 @@ static int hns_set_coalesce(struct net_device *net_dev,
 	    (!ops->set_coalesce_frames))
 		return -ESRCH;
 
-	ret = ops->set_coalesce_usecs(priv->ae_handle,
-				      ec->rx_coalesce_usecs);
-	if (ret)
-		return ret;
+	ops->set_coalesce_usecs(priv->ae_handle,
+					ec->rx_coalesce_usecs);
 
 	ret = ops->set_coalesce_frames(
 		priv->ae_handle,
@@ -1008,8 +1013,8 @@ int hns_phy_led_set(struct net_device *netdev, int value)
 	struct phy_device *phy_dev = priv->phy;
 
 	retval = phy_write(phy_dev, HNS_PHY_PAGE_REG, HNS_PHY_PAGE_LED);
-	retval |= phy_write(phy_dev, HNS_LED_FC_REG, value);
-	retval |= phy_write(phy_dev, HNS_PHY_PAGE_REG, HNS_PHY_PAGE_COPPER);
+	retval = phy_write(phy_dev, HNS_LED_FC_REG, value);
+	retval = phy_write(phy_dev, HNS_PHY_PAGE_REG, HNS_PHY_PAGE_COPPER);
 	if (retval) {
 		netdev_err(netdev, "mdiobus_write fail !\n");
 		return retval;
@@ -1104,6 +1109,8 @@ void hns_get_regs(struct net_device *net_dev, struct ethtool_regs *cmd,
 	struct hns_nic_priv *priv = netdev_priv(net_dev);
 	struct hnae_ae_ops *ops;
 
+	assert(priv || priv->ae_handle);
+
 	ops = priv->ae_handle->dev->ops;
 
 	cmd->version = HNS_CHIP_VERSION;
@@ -1125,6 +1132,8 @@ static int hns_get_regs_len(struct net_device *net_dev)
 	u32 reg_num;
 	struct hns_nic_priv *priv = netdev_priv(net_dev);
 	struct hnae_ae_ops *ops;
+
+	assert(priv || priv->ae_handle);
 
 	ops = priv->ae_handle->dev->ops;
 	if (!ops->get_regs_len) {
@@ -1164,15 +1173,18 @@ hns_get_rss_key_size(struct net_device *netdev)
 {
 	struct hns_nic_priv *priv = netdev_priv(netdev);
 	struct hnae_ae_ops *ops;
+	u32 ret;
 
 	if (AE_IS_VER1(priv->enet_ver)) {
 		netdev_err(netdev,
 			   "RSS feature is not supported on this hardware\n");
-		return 0;
+		return -EOPNOTSUPP;
 	}
 
 	ops = priv->ae_handle->dev->ops;
-	return ops->get_rss_key_size(priv->ae_handle);
+	ret = ops->get_rss_key_size(priv->ae_handle);
+
+	return ret;
 }
 
 static u32
@@ -1180,15 +1192,18 @@ hns_get_rss_indir_size(struct net_device *netdev)
 {
 	struct hns_nic_priv *priv = netdev_priv(netdev);
 	struct hnae_ae_ops *ops;
+	u32 ret;
 
 	if (AE_IS_VER1(priv->enet_ver)) {
 		netdev_err(netdev,
 			   "RSS feature is not supported on this hardware\n");
-		return 0;
+		return -EOPNOTSUPP;
 	}
 
 	ops = priv->ae_handle->dev->ops;
-	return ops->get_rss_indir_size(priv->ae_handle);
+	ret = ops->get_rss_indir_size(priv->ae_handle);
+
+	return ret;
 }
 
 static int
@@ -1196,6 +1211,7 @@ hns_get_rss(struct net_device *netdev, u32 *indir, u8 *key, u8 *hfunc)
 {
 	struct hns_nic_priv *priv = netdev_priv(netdev);
 	struct hnae_ae_ops *ops;
+	int ret;
 
 	if (AE_IS_VER1(priv->enet_ver)) {
 		netdev_err(netdev,
@@ -1208,7 +1224,9 @@ hns_get_rss(struct net_device *netdev, u32 *indir, u8 *key, u8 *hfunc)
 	if (!indir)
 		return 0;
 
-	return ops->get_rss(priv->ae_handle, indir, key, hfunc);
+	ret = ops->get_rss(priv->ae_handle, indir, key, hfunc);
+
+	return 0;
 }
 
 static int
@@ -1217,6 +1235,7 @@ hns_set_rss(struct net_device *netdev, const u32 *indir, const u8 *key,
 {
 	struct hns_nic_priv *priv = netdev_priv(netdev);
 	struct hnae_ae_ops *ops;
+	int ret;
 
 	if (AE_IS_VER1(priv->enet_ver)) {
 		netdev_err(netdev,
@@ -1233,22 +1252,7 @@ hns_set_rss(struct net_device *netdev, const u32 *indir, const u8 *key,
 	if (!indir)
 		return 0;
 
-	return ops->set_rss(priv->ae_handle, indir, key, hfunc);
-}
-
-static int hns_get_rxnfc(struct net_device *netdev,
-			 struct ethtool_rxnfc *cmd,
-			 u32 *rule_locs)
-{
-	struct hns_nic_priv *priv = netdev_priv(netdev);
-
-	switch (cmd->cmd) {
-	case ETHTOOL_GRXRINGS:
-		cmd->data = priv->ae_handle->q_num;
-		break;
-	default:
-		return -EOPNOTSUPP;
-	}
+	ret = ops->set_rss(priv->ae_handle, indir, key, hfunc);
 
 	return 0;
 }
@@ -1276,7 +1280,6 @@ static struct ethtool_ops hns_ethtool_ops = {
 	.get_rxfh_indir_size = hns_get_rss_indir_size,
 	.get_rxfh = hns_get_rss,
 	.set_rxfh = hns_set_rss,
-	.get_rxnfc = hns_get_rxnfc,
 };
 
 void hns_ethtool_set_ops(struct net_device *ndev)

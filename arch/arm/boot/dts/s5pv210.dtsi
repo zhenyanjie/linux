@@ -130,7 +130,7 @@
 		amba {
 			#address-cells = <1>;
 			#size-cells = <1>;
-			compatible = "simple-bus";
+			compatible = "arm,amba-bus";
 			ranges;
 
 			pdma0: dma@e0900000 {

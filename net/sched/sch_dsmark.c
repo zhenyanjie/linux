@@ -276,7 +276,7 @@ static struct sk_buff *dsmark_dequeue(struct Qdisc *sch)
 
 	pr_debug("%s(sch %p,[qdisc %p])\n", __func__, sch, p);
 
-	skb = qdisc_dequeue_peeked(p->q);
+	skb = p->q->ops->dequeue(p->q);
 	if (skb == NULL)
 		return NULL;
 

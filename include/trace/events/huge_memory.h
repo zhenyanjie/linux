@@ -6,6 +6,8 @@
 
 #include  <linux/tracepoint.h>
 
+#include <trace/events/gfpflags.h>
+
 #define SCAN_STATUS							\
 	EM( SCAN_FAIL,			"failed")			\
 	EM( SCAN_SUCCEED,		"succeeded")			\

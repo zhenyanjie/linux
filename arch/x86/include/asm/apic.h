@@ -6,6 +6,7 @@
 
 #include <asm/alternative.h>
 #include <asm/cpufeature.h>
+#include <asm/processor.h>
 #include <asm/apicdef.h>
 #include <linux/atomic.h>
 #include <asm/fixmap.h>
@@ -239,10 +240,10 @@ extern void __init check_x2apic(void);
 extern void x2apic_setup(void);
 static inline int x2apic_enabled(void)
 {
-	return boot_cpu_has(X86_FEATURE_X2APIC) && apic_is_x2apic_enabled();
+	return cpu_has_x2apic && apic_is_x2apic_enabled();
 }
 
-#define x2apic_supported()	(boot_cpu_has(X86_FEATURE_X2APIC))
+#define x2apic_supported()	(cpu_has_x2apic)
 #else /* !CONFIG_X86_X2APIC */
 static inline void check_x2apic(void) { }
 static inline void x2apic_setup(void) { }

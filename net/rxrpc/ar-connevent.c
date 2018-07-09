@@ -40,13 +40,11 @@ static void rxrpc_abort_calls(struct rxrpc_connection *conn, int state,
 		write_lock(&call->state_lock);
 		if (call->state <= RXRPC_CALL_COMPLETE) {
 			call->state = state;
-			if (state == RXRPC_CALL_LOCALLY_ABORTED) {
-				call->local_abort = conn->local_abort;
-				set_bit(RXRPC_CALL_EV_CONN_ABORT, &call->events);
-			} else {
-				call->remote_abort = conn->remote_abort;
-				set_bit(RXRPC_CALL_EV_RCVD_ABORT, &call->events);
-			}
+			call->abort_code = abort_code;
+			if (state == RXRPC_CALL_LOCALLY_ABORTED)
+				set_bit(RXRPC_CALL_CONN_ABORT, &call->events);
+			else
+				set_bit(RXRPC_CALL_RCVD_ABORT, &call->events);
 			rxrpc_queue_call(call);
 		}
 		write_unlock(&call->state_lock);
@@ -62,12 +60,11 @@ static void rxrpc_abort_calls(struct rxrpc_connection *conn, int state,
 static int rxrpc_abort_connection(struct rxrpc_connection *conn,
 				  u32 error, u32 abort_code)
 {
-	struct rxrpc_wire_header whdr;
+	struct rxrpc_header hdr;
 	struct msghdr msg;
 	struct kvec iov[2];
 	__be32 word;
 	size_t len;
-	u32 serial;
 	int ret;
 
 	_enter("%d,,%u,%u", conn->debug_id, error, abort_code);
@@ -86,35 +83,34 @@ static int rxrpc_abort_connection(struct rxrpc_connection *conn,
 
 	rxrpc_abort_calls(conn, RXRPC_CALL_LOCALLY_ABORTED, abort_code);
 
-	msg.msg_name	= &conn->trans->peer->srx.transport;
-	msg.msg_namelen	= conn->trans->peer->srx.transport_len;
+	msg.msg_name	= &conn->trans->peer->srx.transport.sin;
+	msg.msg_namelen	= sizeof(conn->trans->peer->srx.transport.sin);
 	msg.msg_control	= NULL;
 	msg.msg_controllen = 0;
 	msg.msg_flags	= 0;
 
-	whdr.epoch	= htonl(conn->epoch);
-	whdr.cid	= htonl(conn->cid);
-	whdr.callNumber	= 0;
-	whdr.seq	= 0;
-	whdr.type	= RXRPC_PACKET_TYPE_ABORT;
-	whdr.flags	= conn->out_clientflag;
-	whdr.userStatus	= 0;
-	whdr.securityIndex = conn->security_ix;
-	whdr._rsvd	= 0;
-	whdr.serviceId	= htons(conn->service_id);
+	hdr.epoch	= conn->epoch;
+	hdr.cid		= conn->cid;
+	hdr.callNumber	= 0;
+	hdr.seq		= 0;
+	hdr.type	= RXRPC_PACKET_TYPE_ABORT;
+	hdr.flags	= conn->out_clientflag;
+	hdr.userStatus	= 0;
+	hdr.securityIndex = conn->security_ix;
+	hdr._rsvd	= 0;
+	hdr.serviceId	= conn->service_id;
 
-	word		= htonl(conn->local_abort);
+	word = htonl(abort_code);
 
-	iov[0].iov_base	= &whdr;
-	iov[0].iov_len	= sizeof(whdr);
+	iov[0].iov_base	= &hdr;
+	iov[0].iov_len	= sizeof(hdr);
 	iov[1].iov_base	= &word;
 	iov[1].iov_len	= sizeof(word);
 
 	len = iov[0].iov_len + iov[1].iov_len;
 
-	serial = atomic_inc_return(&conn->serial);
-	whdr.serial = htonl(serial);
-	_proto("Tx CONN ABORT %%%u { %d }", serial, conn->local_abort);
+	hdr.serial = htonl(atomic_inc_return(&conn->serial));
+	_proto("Tx CONN ABORT %%%u { %d }", ntohl(hdr.serial), abort_code);
 
 	ret = kernel_sendmsg(conn->trans->local->socket, &msg, iov, 2, len);
 	if (ret < 0) {
@@ -136,7 +132,7 @@ static void rxrpc_call_is_secure(struct rxrpc_call *call)
 	if (call) {
 		read_lock(&call->state_lock);
 		if (call->state < RXRPC_CALL_COMPLETE &&
-		    !test_and_set_bit(RXRPC_CALL_EV_SECURED, &call->events))
+		    !test_and_set_bit(RXRPC_CALL_SECURED, &call->events))
 			rxrpc_queue_call(call);
 		read_unlock(&call->state_lock);
 	}
@@ -150,8 +146,8 @@ static int rxrpc_process_event(struct rxrpc_connection *conn,
 			       u32 *_abort_code)
 {
 	struct rxrpc_skb_priv *sp = rxrpc_skb(skb);
-	__be32 wtmp;
-	u32 abort_code;
+	__be32 tmp;
+	u32 serial;
 	int loop, ret;
 
 	if (conn->state >= RXRPC_CONN_REMOTELY_ABORTED) {
@@ -159,25 +155,31 @@ static int rxrpc_process_event(struct rxrpc_connection *conn,
 		return -ECONNABORTED;
 	}
 
-	_enter("{%d},{%u,%%%u},", conn->debug_id, sp->hdr.type, sp->hdr.serial);
+	serial = ntohl(sp->hdr.serial);
+
+	_enter("{%d},{%u,%%%u},", conn->debug_id, sp->hdr.type, serial);
 
 	switch (sp->hdr.type) {
 	case RXRPC_PACKET_TYPE_ABORT:
-		if (skb_copy_bits(skb, 0, &wtmp, sizeof(wtmp)) < 0)
+		if (skb_copy_bits(skb, 0, &tmp, sizeof(tmp)) < 0)
 			return -EPROTO;
-		abort_code = ntohl(wtmp);
-		_proto("Rx ABORT %%%u { ac=%d }", sp->hdr.serial, abort_code);
+		_proto("Rx ABORT %%%u { ac=%d }", serial, ntohl(tmp));
 
 		conn->state = RXRPC_CONN_REMOTELY_ABORTED;
 		rxrpc_abort_calls(conn, RXRPC_CALL_REMOTELY_ABORTED,
-				  abort_code);
+				  ntohl(tmp));
 		return -ECONNABORTED;
 
 	case RXRPC_PACKET_TYPE_CHALLENGE:
-		return conn->security->respond_to_challenge(conn, skb,
-							    _abort_code);
+		if (conn->security)
+			return conn->security->respond_to_challenge(
+				conn, skb, _abort_code);
+		return -EPROTO;
 
 	case RXRPC_PACKET_TYPE_RESPONSE:
+		if (!conn->security)
+			return -EPROTO;
+
 		ret = conn->security->verify_response(conn, skb, _abort_code);
 		if (ret < 0)
 			return ret;
@@ -232,6 +234,8 @@ static void rxrpc_secure_connection(struct rxrpc_connection *conn)
 			goto abort;
 		}
 	}
+
+	ASSERT(conn->security != NULL);
 
 	if (conn->security->issue_challenge(conn) < 0) {
 		abort_code = RX_CALL_DEAD;
@@ -331,7 +335,7 @@ void rxrpc_reject_packets(struct work_struct *work)
 		struct sockaddr_in sin;
 	} sa;
 	struct rxrpc_skb_priv *sp;
-	struct rxrpc_wire_header whdr;
+	struct rxrpc_header hdr;
 	struct rxrpc_local *local;
 	struct sk_buff *skb;
 	struct msghdr msg;
@@ -344,11 +348,11 @@ void rxrpc_reject_packets(struct work_struct *work)
 
 	_enter("%d", local->debug_id);
 
-	iov[0].iov_base = &whdr;
-	iov[0].iov_len = sizeof(whdr);
+	iov[0].iov_base = &hdr;
+	iov[0].iov_len = sizeof(hdr);
 	iov[1].iov_base = &code;
 	iov[1].iov_len = sizeof(code);
-	size = sizeof(whdr) + sizeof(code);
+	size = sizeof(hdr) + sizeof(code);
 
 	msg.msg_name = &sa;
 	msg.msg_control = NULL;
@@ -366,8 +370,8 @@ void rxrpc_reject_packets(struct work_struct *work)
 		break;
 	}
 
-	memset(&whdr, 0, sizeof(whdr));
-	whdr.type = RXRPC_PACKET_TYPE_ABORT;
+	memset(&hdr, 0, sizeof(hdr));
+	hdr.type = RXRPC_PACKET_TYPE_ABORT;
 
 	while ((skb = skb_dequeue(&local->reject_queue))) {
 		sp = rxrpc_skb(skb);
@@ -377,13 +381,13 @@ void rxrpc_reject_packets(struct work_struct *work)
 			sa.sin.sin_addr.s_addr = ip_hdr(skb)->saddr;
 			code = htonl(skb->priority);
 
-			whdr.epoch	= htonl(sp->hdr.epoch);
-			whdr.cid	= htonl(sp->hdr.cid);
-			whdr.callNumber	= htonl(sp->hdr.callNumber);
-			whdr.serviceId	= htons(sp->hdr.serviceId);
-			whdr.flags	= sp->hdr.flags;
-			whdr.flags	^= RXRPC_CLIENT_INITIATED;
-			whdr.flags	&= RXRPC_CLIENT_INITIATED;
+			hdr.epoch = sp->hdr.epoch;
+			hdr.cid = sp->hdr.cid;
+			hdr.callNumber = sp->hdr.callNumber;
+			hdr.serviceId = sp->hdr.serviceId;
+			hdr.flags = sp->hdr.flags;
+			hdr.flags ^= RXRPC_CLIENT_INITIATED;
+			hdr.flags &= RXRPC_CLIENT_INITIATED;
 
 			kernel_sendmsg(local->socket, &msg, iov, 2, size);
 			break;

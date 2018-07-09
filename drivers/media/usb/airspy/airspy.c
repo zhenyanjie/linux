@@ -104,8 +104,9 @@ struct airspy_frame_buf {
 };
 
 struct airspy {
-#define POWER_ON	   1
-#define USB_STATE_URB_BUF  2
+#define POWER_ON           (1 << 1)
+#define URB_BUF            (1 << 2)
+#define USB_STATE_URB_BUF  (1 << 3)
 	unsigned long flags;
 
 	struct device *dev;
@@ -358,7 +359,7 @@ static int airspy_submit_urbs(struct airspy *s)
 
 static int airspy_free_stream_bufs(struct airspy *s)
 {
-	if (test_bit(USB_STATE_URB_BUF, &s->flags)) {
+	if (s->flags & USB_STATE_URB_BUF) {
 		while (s->buf_num) {
 			s->buf_num--;
 			dev_dbg(s->dev, "free buf=%d\n", s->buf_num);
@@ -367,7 +368,7 @@ static int airspy_free_stream_bufs(struct airspy *s)
 					  s->dma_addr[s->buf_num]);
 		}
 	}
-	clear_bit(USB_STATE_URB_BUF, &s->flags);
+	s->flags &= ~USB_STATE_URB_BUF;
 
 	return 0;
 }
@@ -393,7 +394,7 @@ static int airspy_alloc_stream_bufs(struct airspy *s)
 		dev_dbg(s->dev, "alloc buf=%d %p (dma %llu)\n", s->buf_num,
 				s->buf_list[s->buf_num],
 				(long long)s->dma_addr[s->buf_num]);
-		set_bit(USB_STATE_URB_BUF, &s->flags);
+		s->flags |= USB_STATE_URB_BUF;
 	}
 
 	return 0;
@@ -1072,7 +1073,7 @@ static int airspy_probe(struct usb_interface *intf,
 	if (ret) {
 		dev_err(s->dev, "Failed to register as video device (%d)\n",
 				ret);
-		goto err_free_controls;
+		goto err_unregister_v4l2_dev;
 	}
 	dev_info(s->dev, "Registered as %s\n",
 			video_device_node_name(&s->vdev));
@@ -1081,6 +1082,7 @@ static int airspy_probe(struct usb_interface *intf,
 
 err_free_controls:
 	v4l2_ctrl_handler_free(&s->hdl);
+err_unregister_v4l2_dev:
 	v4l2_device_unregister(&s->v4l2_dev);
 err_free_mem:
 	kfree(s);

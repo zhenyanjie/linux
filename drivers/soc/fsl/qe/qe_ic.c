@@ -259,11 +259,6 @@ static int qe_ic_host_map(struct irq_domain *h, unsigned int virq,
 	struct qe_ic *qe_ic = h->host_data;
 	struct irq_chip *chip;
 
-	if (hw >= ARRAY_SIZE(qe_ic_info)) {
-		pr_err("%s: Invalid hw irq number for QEIC\n", __func__);
-		return -EINVAL;
-	}
-
 	if (qe_ic_info[hw].mask == 0) {
 		printk(KERN_ERR "Can't map reserved IRQ\n");
 		return -EINVAL;
@@ -412,8 +407,7 @@ int qe_ic_set_priority(unsigned int virq, unsigned int priority)
 
 	if (priority > 8 || priority == 0)
 		return -EINVAL;
-	if (WARN_ONCE(src >= ARRAY_SIZE(qe_ic_info),
-		      "%s: Invalid hw irq number for QEIC\n", __func__))
+	if (src > 127)
 		return -EINVAL;
 	if (qe_ic_info[src].pri_reg == 0)
 		return -EINVAL;
@@ -441,9 +435,6 @@ int qe_ic_set_high_priority(unsigned int virq, unsigned int priority, int high)
 	u32 temp, control_reg = QEIC_CICNR, shift = 0;
 
 	if (priority > 2 || priority == 0)
-		return -EINVAL;
-	if (WARN_ONCE(src >= ARRAY_SIZE(qe_ic_info),
-		      "%s: Invalid hw irq number for QEIC\n", __func__))
 		return -EINVAL;
 
 	switch (qe_ic_info[src].pri_reg) {

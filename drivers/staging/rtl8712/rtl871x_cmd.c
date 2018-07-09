@@ -136,12 +136,15 @@ static struct cmd_obj *_dequeue_cmd(struct  __queue *queue)
 	unsigned long irqL;
 	struct cmd_obj *obj;
 
-	spin_lock_irqsave(&queue->lock, irqL);
-	obj = list_first_entry_or_null(&queue->queue,
-				       struct cmd_obj, list);
-	if (obj)
+	spin_lock_irqsave(&(queue->lock), irqL);
+	if (list_empty(&(queue->queue))) {
+		obj = NULL;
+	} else {
+		obj = LIST_CONTAINOR(queue->queue.next,
+				     struct cmd_obj, list);
 		list_del_init(&obj->list);
-	spin_unlock_irqrestore(&queue->lock, irqL);
+	}
+	spin_unlock_irqrestore(&(queue->lock), irqL);
 	return obj;
 }
 
@@ -225,10 +228,10 @@ u8 r8712_sitesurvey_cmd(struct _adapter *padapter,
 	struct mlme_priv *pmlmepriv = &padapter->mlmepriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	psurveyPara = kmalloc(sizeof(*psurveyPara), GFP_ATOMIC);
-	if (!psurveyPara) {
+	if (psurveyPara == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
@@ -258,10 +261,10 @@ u8 r8712_setdatarate_cmd(struct _adapter *padapter, u8 *rateset)
 	struct cmd_priv		*pcmdpriv = &padapter->cmdpriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	pbsetdataratepara = kmalloc(sizeof(*pbsetdataratepara), GFP_ATOMIC);
-	if (!pbsetdataratepara) {
+	if (pbsetdataratepara == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
@@ -280,10 +283,10 @@ u8 r8712_set_chplan_cmd(struct _adapter *padapter, int chplan)
 	struct cmd_priv *pcmdpriv = &padapter->cmdpriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	psetchplanpara = kmalloc(sizeof(*psetchplanpara), GFP_ATOMIC);
-	if (!psetchplanpara) {
+	if (psetchplanpara == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
@@ -301,16 +304,37 @@ u8 r8712_setbasicrate_cmd(struct _adapter *padapter, u8 *rateset)
 	struct cmd_priv *pcmdpriv = &padapter->cmdpriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	pssetbasicratepara = kmalloc(sizeof(*pssetbasicratepara), GFP_ATOMIC);
-	if (!pssetbasicratepara) {
+	if (pssetbasicratepara == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
 	init_h2fwcmd_w_parm_no_rsp(ph2c, pssetbasicratepara,
 		_SetBasicRate_CMD_);
 	memcpy(pssetbasicratepara->basicrates, rateset, NumRates);
+	r8712_enqueue_cmd(pcmdpriv, ph2c);
+	return _SUCCESS;
+}
+
+/* power tracking mechanism setting */
+u8 r8712_setptm_cmd(struct _adapter *padapter, u8 type)
+{
+	struct cmd_obj		*ph2c;
+	struct writePTM_parm	*pwriteptmparm;
+	struct cmd_priv		*pcmdpriv = &padapter->cmdpriv;
+
+	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
+	if (ph2c == NULL)
+		return _FAIL;
+	pwriteptmparm = kmalloc(sizeof(*pwriteptmparm), GFP_ATOMIC);
+	if (pwriteptmparm == NULL) {
+		kfree(ph2c);
+		return _FAIL;
+	}
+	init_h2fwcmd_w_parm_no_rsp(ph2c, pwriteptmparm, GEN_CMD_CODE(_SetPT));
+	pwriteptmparm->type = type;
 	r8712_enqueue_cmd(pcmdpriv, ph2c);
 	return _SUCCESS;
 }
@@ -322,10 +346,10 @@ u8 r8712_setfwdig_cmd(struct _adapter *padapter, u8 type)
 	struct cmd_priv *pcmdpriv = &padapter->cmdpriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	pwriteptmparm = kmalloc(sizeof(*pwriteptmparm), GFP_ATOMIC);
-	if (!pwriteptmparm) {
+	if (pwriteptmparm == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
@@ -342,10 +366,10 @@ u8 r8712_setfwra_cmd(struct _adapter *padapter, u8 type)
 	struct cmd_priv *pcmdpriv = &padapter->cmdpriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	pwriteptmparm = kmalloc(sizeof(*pwriteptmparm), GFP_ATOMIC);
-	if (!pwriteptmparm) {
+	if (pwriteptmparm == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
@@ -362,10 +386,10 @@ u8 r8712_setrfreg_cmd(struct _adapter  *padapter, u8 offset, u32 val)
 	struct cmd_priv	*pcmdpriv = &padapter->cmdpriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	pwriterfparm = kmalloc(sizeof(*pwriterfparm), GFP_ATOMIC);
-	if (!pwriterfparm) {
+	if (pwriterfparm == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
@@ -383,10 +407,10 @@ u8 r8712_getrfreg_cmd(struct _adapter *padapter, u8 offset, u8 *pval)
 	struct cmd_priv *pcmdpriv = &padapter->cmdpriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	prdrfparm = kmalloc(sizeof(*prdrfparm), GFP_ATOMIC);
-	if (!prdrfparm) {
+	if (prdrfparm == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
@@ -427,7 +451,7 @@ u8 r8712_createbss_cmd(struct _adapter *padapter)
 
 	padapter->ledpriv.LedControlHandler(padapter, LED_CTL_START_TO_LINK);
 	pcmd = kmalloc(sizeof(*pcmd), GFP_ATOMIC);
-	if (!pcmd)
+	if (pcmd == NULL)
 		return _FAIL;
 	INIT_LIST_HEAD(&pcmd->list);
 	pcmd->cmdcode = _CreateBss_CMD_;
@@ -457,7 +481,7 @@ u8 r8712_joinbss_cmd(struct _adapter  *padapter, struct wlan_network *pnetwork)
 
 	padapter->ledpriv.LedControlHandler(padapter, LED_CTL_START_TO_LINK);
 	pcmd = kmalloc(sizeof(*pcmd), GFP_ATOMIC);
-	if (!pcmd)
+	if (pcmd == NULL)
 		return _FAIL;
 
 	/* for hidden ap to set fw_state here */
@@ -587,10 +611,10 @@ u8 r8712_disassoc_cmd(struct _adapter *padapter) /* for sta_mode */
 	struct cmd_priv *pcmdpriv = &padapter->cmdpriv;
 
 	pdisconnect_cmd = kmalloc(sizeof(*pdisconnect_cmd), GFP_ATOMIC);
-	if (!pdisconnect_cmd)
+	if (pdisconnect_cmd == NULL)
 		return _FAIL;
 	pdisconnect = kmalloc(sizeof(*pdisconnect), GFP_ATOMIC);
-	if (!pdisconnect) {
+	if (pdisconnect == NULL) {
 		kfree(pdisconnect_cmd);
 		return _FAIL;
 	}
@@ -609,10 +633,10 @@ u8 r8712_setopmode_cmd(struct _adapter *padapter,
 	struct cmd_priv *pcmdpriv = &padapter->cmdpriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	psetop = kmalloc(sizeof(*psetop), GFP_ATOMIC);
-	if (!psetop) {
+	if (psetop == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
@@ -633,15 +657,15 @@ u8 r8712_setstakey_cmd(struct _adapter *padapter, u8 *psta, u8 unicast_key)
 	struct sta_info *sta = (struct sta_info *)psta;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	psetstakey_para = kmalloc(sizeof(*psetstakey_para), GFP_ATOMIC);
-	if (!psetstakey_para) {
+	if (psetstakey_para == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
 	psetstakey_rsp = kmalloc(sizeof(*psetstakey_rsp), GFP_ATOMIC);
-	if (!psetstakey_rsp) {
+	if (psetstakey_rsp == NULL) {
 		kfree(ph2c);
 		kfree(psetstakey_para);
 		return _FAIL;
@@ -673,10 +697,10 @@ u8 r8712_setrfintfs_cmd(struct _adapter *padapter, u8 mode)
 	struct cmd_priv *pcmdpriv = &padapter->cmdpriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	psetrfintfsparm = kmalloc(sizeof(*psetrfintfsparm), GFP_ATOMIC);
-	if (!psetrfintfsparm) {
+	if (psetrfintfsparm == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
@@ -695,16 +719,42 @@ u8 r8712_setrttbl_cmd(struct _adapter *padapter,
 	struct cmd_priv	*pcmdpriv = &padapter->cmdpriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	psetrttblparm = kmalloc(sizeof(*psetrttblparm), GFP_ATOMIC);
-	if (!psetrttblparm) {
+	if (psetrttblparm == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
 	init_h2fwcmd_w_parm_no_rsp(ph2c, psetrttblparm,
 				   GEN_CMD_CODE(_SetRaTable));
 	memcpy(psetrttblparm, prate_table, sizeof(struct setratable_parm));
+	r8712_enqueue_cmd(pcmdpriv, ph2c);
+	return _SUCCESS;
+}
+
+u8 r8712_gettssi_cmd(struct _adapter *padapter, u8 offset, u8 *pval)
+{
+	struct cmd_priv *pcmdpriv = &padapter->cmdpriv;
+	struct cmd_obj *ph2c;
+	struct readTSSI_parm *prdtssiparm;
+
+	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
+	if (ph2c == NULL)
+		return _FAIL;
+	prdtssiparm = kmalloc(sizeof(*prdtssiparm), GFP_ATOMIC);
+	if (prdtssiparm == NULL) {
+		kfree(ph2c);
+		return _FAIL;
+	}
+	INIT_LIST_HEAD(&ph2c->list);
+	ph2c->cmdcode = GEN_CMD_CODE(_ReadTSSI);
+	ph2c->parmbuf = (unsigned char *)prdtssiparm;
+	ph2c->cmdsz = sizeof(struct readTSSI_parm);
+	ph2c->rsp = pval;
+	ph2c->rspsz = sizeof(struct readTSSI_rsp);
+
+	prdtssiparm->offset = offset;
 	r8712_enqueue_cmd(pcmdpriv, ph2c);
 	return _SUCCESS;
 }
@@ -716,10 +766,10 @@ u8 r8712_setMacAddr_cmd(struct _adapter *padapter, u8 *mac_addr)
 	struct SetMacAddr_param	*psetMacAddr_para;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	psetMacAddr_para = kmalloc(sizeof(*psetMacAddr_para), GFP_ATOMIC);
-	if (!psetMacAddr_para) {
+	if (psetMacAddr_para == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
@@ -738,15 +788,15 @@ u8 r8712_setassocsta_cmd(struct _adapter *padapter, u8 *mac_addr)
 	struct set_assocsta_rsp		*psetassocsta_rsp = NULL;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	psetassocsta_para = kmalloc(sizeof(*psetassocsta_para), GFP_ATOMIC);
-	if (!psetassocsta_para) {
+	if (psetassocsta_para == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
 	psetassocsta_rsp = kmalloc(sizeof(*psetassocsta_rsp), GFP_ATOMIC);
-	if (!psetassocsta_rsp) {
+	if (psetassocsta_rsp == NULL) {
 		kfree(ph2c);
 		kfree(psetassocsta_para);
 		return _FAIL;
@@ -766,10 +816,10 @@ u8 r8712_addbareq_cmd(struct _adapter *padapter, u8 tid)
 	struct addBaReq_parm	*paddbareq_parm;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	paddbareq_parm = kmalloc(sizeof(*paddbareq_parm), GFP_ATOMIC);
-	if (!paddbareq_parm) {
+	if (paddbareq_parm == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
@@ -787,10 +837,10 @@ u8 r8712_wdg_wk_cmd(struct _adapter *padapter)
 	struct cmd_priv	*pcmdpriv = &padapter->cmdpriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	pdrvintcmd_param = kmalloc(sizeof(*pdrvintcmd_param), GFP_ATOMIC);
-	if (!pdrvintcmd_param) {
+	if (pdrvintcmd_param == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}
@@ -961,10 +1011,10 @@ u8 r8712_disconnectCtrlEx_cmd(struct _adapter *adapter, u32 enableDrvCtrl,
 	struct cmd_priv *pcmdpriv = &adapter->cmdpriv;
 
 	ph2c = kmalloc(sizeof(*ph2c), GFP_ATOMIC);
-	if (!ph2c)
+	if (ph2c == NULL)
 		return _FAIL;
 	param = kzalloc(sizeof(*param), GFP_ATOMIC);
-	if (!param) {
+	if (param == NULL) {
 		kfree(ph2c);
 		return _FAIL;
 	}

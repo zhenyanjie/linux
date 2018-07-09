@@ -417,7 +417,6 @@ struct acpi_resource_gpio {
 	u8                                      type; \
 	u8                                      producer_consumer;   /* For values, see Producer/Consumer above */\
 	u8                                      slave_mode; \
-	u8                                      connection_sharing; \
 	u8                                      type_revision_id; \
 	u16                                     type_data_length; \
 	u16                                     vendor_length; \
